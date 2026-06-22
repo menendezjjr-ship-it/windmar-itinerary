@@ -327,7 +327,7 @@ const S={
   wx:{ cityIdx:0, current:null, days:[], live:false, loading:false },
   zoho:{ syncing:false, lastSync:new Date(), showCode:false },
   sc:{ q:"", project:null, cat:"inverter", queue:[], uploading:false, done:false,
-       nf:{ code:"DL", project:"", crew:"crew-morales", date:todayISO, address:"", window:"8:00 AM – 12:00 PM" }, created:null, scState:"sample", results:[], templates:[], showNew:false, creating:false, createMsg:"", detail:null, err:"" },
+       nf:{ code:"DL", project:"", crew:"crew-morales", date:todayISO, address:"", window:"8:00 AM – 12:00 PM" }, created:null, scState:"sample", results:[], templates:[], nfType:"System Completion - FL", showNew:false, creating:false, createMsg:"", detail:null, err:"" },
 };
 const t=k=>(I18N[S.lang][k] ?? I18N.en[k] ?? k);
 const esc=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -763,15 +763,26 @@ function siteCaptureHTML(){
     <span style="font-weight:800">${live?t("sc_connected"):t("sc_localMode")}</span>
     ${live?`<span class="pill" style="background:var(--jc-DL)">${S.sc.results.length}+ ${t("sc_projects")}</span>`:""}
     ${S.sc.scState==="error"?`<span class="pill" style="background:var(--warn)">API error</span>`:""}</div>`;
-  const tmplOpts=(S.sc.templates||[]).map(tp=>`<option value="${esc(tp.key)}">${esc(tp.name||tp.key)}</option>`).join("");
-  const newForm=S.sc.showNew?`<div class="card" style="padding:16px;margin-top:12px">
-    <div class="label" style="font-size:14px">➕ ${t("sc_newSC")}</div>
-    ${(S.sc.templates&&S.sc.templates.length)
-      ? `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-          <div style="flex:1;min-width:220px"><span class="label">${t("sc_template")}</span><select id="scTemplate" class="input">${tmplOpts}</select></div>
-          <button class="btn3d green" data-action="scCreate">${S.sc.creating?t("sc_creating"):"✚ "+t("sc_create")}</button></div>`
-      : `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end"><div style="flex:1;min-width:220px"><span class="label">${t("sc_template")} key</span><input id="scTemplateKey" class="input" placeholder="e.g. site_survey_fl"/></div><button class="btn3d green" data-action="scCreate">${S.sc.creating?t("sc_creating"):"\u2795 "+t("sc_create")}</button></div>`}
-    ${S.sc.createMsg?`<div style="margin-top:10px;font-weight:800;color:${S.sc.createMsg.indexOf("error")>=0||S.sc.createMsg.toLowerCase().indexOf("error")>=0?'var(--warn)':'var(--jc-DL)'}">${esc(S.sc.createMsg)}</div>`:""}</div>`:"";
+  const FL_TYPES=["System Completion - FL","Site Survey - FL","Service Repair","Job Closeout (JCO)"];
+  const TYPE_KW={"System Completion - FL":["completion","install","system","tesla"],"Site Survey - FL":["survey","assessment","site"],"Service Repair":["service","repair"],"Job Closeout (JCO)":["closeout","jco"]};
+  const curType=S.sc.nfType||FL_TYPES[0];
+  const prettyTpl=(k)=>(k||"").replace(/_?\d{6,}.*$/,"").replace(/[_-]+/g," ").replace(/\b\w/g,c=>c.toUpperCase()).trim()||k;
+  const allT=(S.sc.templates||[]); const kw=TYPE_KW[curType]||[];
+  let tlist=allT.filter(tp=>{const x=((tp.key||"")+" "+(tp.name||"")).toLowerCase(); return kw.some(k=>x.indexOf(k)>=0);});
+  if(!tlist.length) tlist=allT;
+  const typeOpts=FL_TYPES.map(ty=>`<option value="${esc(ty)}" ${ty===curType?"selected":""}>${esc(ty)}</option>`).join("");
+  const tmplOpts=tlist.length?tlist.map(tp=>`<option value="${esc(tp.key)}">${esc(prettyTpl(tp.name||tp.key))}</option>`).join(""):`<option value="">(no templates loaded \u2014 use manual key)</option>`;
+  const newForm=S.sc.showNew?`<div class="card" style="padding:18px;margin-top:12px;border:1px solid var(--wh-blue)">
+    <div style="font-weight:900;font-size:16px;margin-bottom:12px">\u2795 Create New Project <span class="pill" style="background:var(--wh-blue);font-size:10px">FL</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div><span class="label">Choose a Type</span><select id="scType" class="input">${typeOpts}</select></div>
+      <div><span class="label">Choose a Template</span><select id="scTemplate" class="input">${tmplOpts}</select></div>
+    </div>
+    <div style="margin-top:12px"><span class="label">Or enter a template key manually</span><input id="scTemplateKey" class="input" placeholder="e.g. site_assessment_form_..."/></div>
+    <div style="margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <button class="btn3d green" data-action="scCreate">${S.sc.creating?t("sc_creating"):"\u2795 Create Job"}</button>
+      ${S.sc.createMsg?`<span style="font-weight:800;color:${/error/i.test(S.sc.createMsg)?'var(--warn)':'var(--jc-DL)'}">${esc(S.sc.createMsg)}</span>`:""}
+    </div></div>`:"";
   let detail="";
   if(S.sc.detail){ const d=list.find(x=>x.id===S.sc.detail);
     if(d) detail=`<div class="card fade" style="padding:18px;margin-top:12px;border-left:8px solid ${scStatusStyle(d.status)}">
@@ -981,6 +992,7 @@ document.addEventListener("input",function(e){
 });
 document.addEventListener("change",function(e){
   if(e.target.id==="wxCity"){ S.wx.cityIdx=Number(e.target.value); S.wx.current=null; S.wx.days=[]; S.wx.live=false; loadWeather(); return; }
+  if(e.target.id==="scType"){ S.sc.nfType=e.target.value; render(); return; }
   if(e.target.id==="scFile"&&e.target.files.length){
     Array.from(e.target.files).forEach(function(f){S.sc.queue.push({name:f.name,size:(f.size/1024).toFixed(0)+" KB",cat:S.sc.cat});});
     S.sc.done=false; render();
