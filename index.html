@@ -960,6 +960,7 @@ document.addEventListener("click",e=>{
       fetch("/api/sitecapture",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({template_key:tk})})
         .then(r=>r.json()).then(j=>{ S.sc.creating=false;
           if(j&&j.ok&&j.id){ S.sc.createMsg=t("sc_createdId")+" #"+j.id; loadSiteCapture(""); }
+          else if(j&&j.needsAuth){ S.sc.createMsg="\u26A0 To create in SiteCapture, add SITECAPTURE_USER + SITECAPTURE_PASS in Vercel"; render(); }
           else { S.sc.createMsg="API error: "+((j&&j.error)||"unknown"); render(); } })
         .catch(e=>{ S.sc.creating=false; S.sc.createMsg="API error"; render(); });
       break;
