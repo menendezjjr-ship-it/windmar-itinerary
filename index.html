@@ -465,9 +465,16 @@ async function loadFleet(){
     const j=await r.json();
     if(j&&j.configured&&j.ok&&j.crews&&j.crews.length){
       const pal=["#3B82F6","#F89B24","#16A34A","#06B6D4","#A855F7","#EC4899","#DC2626","#10B981","#EAB308","#14B8A6"];
-      S.crews.fleet=j.crews.map((v,i)=>({id:"veh-"+v.id,name:v.name,type:null,lead:v.name,color:pal[i%pal.length],
+      const norm=x=>(x||"").toUpperCase().replace(/\s+/g," ").trim();
+      const ALLOW=["SITE SURVEY (CODY JONES)","ROOFING (PEDRO SANCHEZ RAMIREZ)","SERVICE (LUIS MORALES)","SERVICE (LUIS ORTIZ RODRIGUEZ)","SERVICE (DAVID RADKE)","IN HOUSE 2 (TAILOR HERRERA)","INSTALACION (CARLOS ACEVEDO)","IN HOUSE 3 (WILLIAM SIERRA)","ROOFING (ROBERT RUIZ)","SITE SURVEY (DANIEL LAIZ)","SERVICE (JOALISMAR WILLIM)","INSTALACION (LEONARDO TORRES)"].map(norm);
+      const mapped=j.crews.map((v,i)=>({id:"veh-"+v.id,name:v.name,type:null,lead:v.name,color:pal[i%pal.length],
         gps:v.gps,mph:v.mph||0,addr:v.addr||"—",precision:v.addr?"GEOCODED":"APPROX",
         ping:v.time?new Date(v.time).toLocaleTimeString():"—"}));
+      let filt=mapped.filter(c=>ALLOW.indexOf(norm(c.name))>=0);
+      if(!filt.length) filt=mapped.filter(c=>/^(SERVICE|ROOFING|SITE SURVEY|INSTALACION|IN HOUSE)\b/.test(norm(c.name)));
+      // keep the allowlist display order
+      filt.sort((a,b)=>ALLOW.indexOf(norm(a.name))-ALLOW.indexOf(norm(b.name)));
+      S.crews.fleet=filt;
       S.crews.fleetState="live";
     } else if(j&&j.configured){ S.crews.fleet=[]; S.crews.fleetState="error"; }
     else { S.crews.fleet=[]; S.crews.fleetState="sample"; }
