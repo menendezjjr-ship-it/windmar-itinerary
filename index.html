@@ -139,14 +139,14 @@ const I18N = {
   wx_loto:"LOTO — De-energize (key steps)", wx_rules:"Weather work rules", wx_phrases:"Site phrases EN/ES",
   // SiteCapture
   sc_title:"SiteCapture", sc_sub:"Search project history, create new jobs, and upload tagged field photos to Zoho.",
-  sc_search:"Search by Job ID, Customer, or Address", sc_results:"results", sc_noResults:"No projects match your search.",
+  sc_search:"Search projects by name, DL number, address…", sc_connected:"Connected to SiteCapture", sc_localMode:"Local sample mode", sc_projects:"projects", sc_newSC:"New SiteCapture", sc_template:"Template", sc_create:"Create", sc_creating:"Creating…", sc_noTemplates:"Run a search first to load your account templates.", sc_owner:"Owner", sc_updated:"Updated", sc_photosDetails:"Photos & Details", sc_close:"Close", sc_createdId:"Created SiteCapture project", sc_results:"results", sc_noResults:"No projects match your search.",
   sc_newJob:"Create New Job", sc_jobCode:"Job Code", sc_projectName:"Project / Customer", sc_jobType:"Job Type",
   sc_assignCrew:"Assign Crew", sc_schedDate:"Schedule Date", sc_siteAddr:"Site Address", sc_window:"Arrival Window",
   sc_create:"Create Job", sc_created:"Job created & queued to Zoho", sc_fillReq:"Fill in customer and address.",
   sc_upload:"Capture / Upload Photos", sc_dropHere:"Tap to select photos", sc_category:"Photo Category",
   sc_cat_inverter:"Inverter", sc_cat_roof:"Roof Flashing", sc_cat_msp:"MSP Internals", sc_cat_panel:"Panel Array", sc_cat_battery:"Battery", sc_cat_other:"Other",
   sc_uploadTo:"Upload to Zoho", sc_uploading:"Uploading…", sc_uploaded:"Uploaded & attached to project",
-  sc_photos:"photos", sc_selectProject:"Select a project to attach photos to.", sc_addDemo:"+ Add sample photo",
+  sc_photos:"photos", sc_selectProject:"Select a project to attach photos to.", sc_addDemo:"+ Add sample photo", sc_searchLive:"Search SiteCapture", sc_scLive:"live", sc_scSample:"local", sc_scErr:"API error",
   // Zoho
   zoho_title:"Zoho CRM Integration Engine", zoho_sub:"Bidirectional live sync between the field app and Zoho CRM.",
   zoho_connected:"Connected", zoho_lastSync:"Last sync", zoho_syncNow:"Sync Now", zoho_mapping:"Field Mapping",
@@ -185,14 +185,14 @@ const I18N = {
   wx_high:"Máx", wx_low:"Mín", wx_wind_l:"Viento", wx_precip:"Lluvia", wx_refresh:"Actualizar", wx_live:"en vivo", wx_mock:"ejemplo", wx_feels:"Sensación", wx_humidity:"Humedad", wx_uv:"Índice UV",
   wx_loto:"LOTO — Desenergizar (pasos clave)", wx_rules:"Reglas de trabajo por clima", wx_phrases:"Frases de sitio EN/ES",
   sc_title:"SiteCapture", sc_sub:"Busca historial, crea nuevos trabajos y sube fotos etiquetadas a Zoho.",
-  sc_search:"Buscar por ID, Cliente o Dirección", sc_results:"resultados", sc_noResults:"Ningún proyecto coincide.",
+  sc_search:"Buscar proyectos por nombre, DL, dirección…", sc_connected:"Conectado a SiteCapture", sc_localMode:"Modo local de ejemplo", sc_projects:"proyectos", sc_newSC:"Nuevo SiteCapture", sc_template:"Plantilla", sc_create:"Crear", sc_creating:"Creando…", sc_noTemplates:"Haz una búsqueda primero para cargar tus plantillas.", sc_owner:"Responsable", sc_updated:"Actualizado", sc_photosDetails:"Fotos y Detalles", sc_close:"Cerrar", sc_createdId:"Proyecto SiteCapture creado", sc_results:"resultados", sc_noResults:"Ningún proyecto coincide.",
   sc_newJob:"Crear Nuevo Trabajo", sc_jobCode:"Código", sc_projectName:"Proyecto / Cliente", sc_jobType:"Tipo de Trabajo",
   sc_assignCrew:"Asignar Cuadrilla", sc_schedDate:"Fecha", sc_siteAddr:"Dirección del Sitio", sc_window:"Ventana de Llegada",
   sc_create:"Crear Trabajo", sc_created:"Trabajo creado y enviado a Zoho", sc_fillReq:"Completa cliente y dirección.",
   sc_upload:"Capturar / Subir Fotos", sc_dropHere:"Toca para seleccionar fotos", sc_category:"Categoría de Foto",
   sc_cat_inverter:"Inversor", sc_cat_roof:"Tapajuntas", sc_cat_msp:"Interior del MSP", sc_cat_panel:"Paneles", sc_cat_battery:"Batería", sc_cat_other:"Otro",
   sc_uploadTo:"Subir a Zoho", sc_uploading:"Subiendo…", sc_uploaded:"Subido y adjuntado al proyecto",
-  sc_photos:"fotos", sc_selectProject:"Selecciona un proyecto para adjuntar fotos.", sc_addDemo:"+ Agregar foto de ejemplo",
+  sc_photos:"fotos", sc_selectProject:"Selecciona un proyecto para adjuntar fotos.", sc_addDemo:"+ Agregar foto de ejemplo", sc_searchLive:"Buscar en SiteCapture", sc_scLive:"en vivo", sc_scSample:"local", sc_scErr:"error API",
   zoho_title:"Motor de Integración Zoho CRM", zoho_sub:"Sincronización bidireccional en vivo entre la app y Zoho CRM.",
   zoho_connected:"Conectado", zoho_lastSync:"Última sincronización", zoho_syncNow:"Sincronizar", zoho_mapping:"Mapeo de Campos",
   zoho_appField:"Campo de la App", zoho_zohoField:"Campo de Zoho CRM", zoho_module:"Módulo", zoho_direction:"Sinc.",
@@ -322,7 +322,7 @@ const S={
   wx:{ cityIdx:0, current:null, days:[], live:false, loading:false },
   zoho:{ syncing:false, lastSync:new Date(), showCode:false },
   sc:{ q:"", project:null, cat:"inverter", queue:[], uploading:false, done:false,
-       nf:{ code:"DL", project:"", crew:"crew-morales", date:todayISO, address:"", window:"8:00 AM – 12:00 PM" }, created:null },
+       nf:{ code:"DL", project:"", crew:"crew-morales", date:todayISO, address:"", window:"8:00 AM – 12:00 PM" }, created:null, scState:"sample", results:[], templates:[], showNew:false, creating:false, createMsg:"", detail:null, err:"" },
 };
 const t=k=>(I18N[S.lang][k] ?? I18N.en[k] ?? k);
 const esc=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -597,65 +597,77 @@ function weatherHTML(){
     </div></div>`;
 }
 
-/* ---------- TAB: SITECAPTURE (search + CREATE JOB + upload) ---------- */
+/* ---------- TAB: SITECAPTURE (live SiteCapture: search + create + view) ---------- */
+async function loadSiteCapture(q){
+  S.sc.scState="loading"; render();
+  try{
+    const r=await fetch("/api/sitecapture?q="+encodeURIComponent(q||""),{cache:"no-store"});
+    const j=await r.json();
+    if(j&&j.configured&&j.ok){ S.sc.results=j.projects||[]; S.sc.templates=j.templates||[]; S.sc.scState="live"; }
+    else if(j&&j.configured){ S.sc.results=[]; S.sc.scState="error"; S.sc.err=j.error||("HTTP "+j.status); }
+    else { S.sc.results=[]; S.sc.scState="sample"; }
+  }catch(e){ S.sc.results=[]; S.sc.scState="sample"; }
+  render();
+}
+function scStatusStyle(st){ st=(st||"").toUpperCase();
+  if(st.indexOf("COMPLETE")>=0)return"var(--jc-DL)";
+  if(st.indexOf("ASSIGN")>=0)return"var(--wh-orange)";
+  if(st.indexOf("PROGRESS")>=0)return"#06B6D4";
+  if(st.indexOf("NEW")>=0)return"var(--wh-blue)";
+  return"var(--wh-grey)"; }
 function siteCaptureHTML(){
+  const live=S.sc.scState==="live";
   const q=S.sc.q.trim().toLowerCase();
-  const results=!q?PROJECT_HISTORY:PROJECT_HISTORY.filter(p=>p.id.toLowerCase().includes(q)||p.customer.toLowerCase().includes(q)||p.address.toLowerCase().includes(q));
-  const resHTML=results.length?results.map(p=>{const s=JOB_CODE[p.code]||JOB_CODE.S;const active=S.sc.project===p.id;
-    return `<div data-action="scSelectProject" data-id="${p.id}" style="padding:11px 12px;border-radius:12px;cursor:pointer;border:2px solid ${active?'var(--wh-orange)':'var(--line)'};background:${active?'var(--panel-2)':'transparent'};display:flex;align-items:center;gap:10px">
-      <span style="width:10px;height:34px;border-radius:4px;background:${s.color}"></span>
-      <div style="flex:1"><div style="font-weight:800">${esc(p.customer)}</div><div style="font-size:12px;color:var(--text-dim)">${esc(p.id)} · ${esc(p.address)}</div></div>
-      <span class="pill" style="background:${s.color}">${esc(p.code)}</span>
-      <span style="font-size:12px;color:var(--text-dim)">📷 ${p.photos}</span></div>`;
-  }).join(""):`<div style="color:var(--text-dim);padding:20px;text-align:center">${t("sc_noResults")}</div>`;
-  // create-job form
-  const nf=S.sc.nf;
-  const codeOpts=Object.keys(JOB_CODE).map(c=>`<option value="${c}" ${nf.code===c?"selected":""}>${c} · ${t(JOB_CODE[c].long)}</option>`).join("");
-  const crewOpts=CREWS.map(c=>`<option value="${c.id}" ${nf.crew===c.id?"selected":""}>${esc(crewName(c))}</option>`).join("");
-  const newJobForm=`<div class="card" style="padding:16px">
-    <div class="label" style="font-size:14px">➕ ${t("sc_newJob")}</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-      <div><span class="label">${t("sc_jobCode")}</span><select class="input" id="nfCode" data-nf="code">${codeOpts}</select></div>
-      <div><span class="label">${t("sc_assignCrew")}</span><select class="input" id="nfCrew" data-nf="crew">${crewOpts}</select></div>
-      <div style="grid-column:1/-1"><span class="label">${t("sc_projectName")}</span><input class="input" id="nfProject" data-nf="project" value="${esc(nf.project)}" placeholder="Delgado Residence"/></div>
-      <div style="grid-column:1/-1"><span class="label">${t("sc_siteAddr")}</span><input class="input" id="nfAddress" data-nf="address" value="${esc(nf.address)}" placeholder="412 Palmetto Ave, Lakeland, FL"/></div>
-      <div><span class="label">${t("sc_schedDate")}</span><input class="input" id="nfDate" data-nf="date" type="date" value="${esc(nf.date)}"/></div>
-      <div><span class="label">${t("sc_window")}</span><input class="input" id="nfWindow" data-nf="window" value="${esc(nf.window)}"/></div>
-    </div>
-    <div style="margin-top:12px"><button class="btn3d green" data-action="scCreateJob" style="opacity:${(nf.project.trim()&&nf.address.trim())?1:0.5}">✚ ${t("sc_create")}</button></div>
-    ${S.sc.created?`<div style="margin-top:10px;color:var(--jc-DL);font-weight:800">✓ ${t("sc_created")} — <b>${esc(S.sc.created)}</b></div>`:""}
-  </div>`;
-  // upload
-  const cats=SC_CATEGORIES.map(c=>`<button class="btn3d sm" data-action="scSetCat" data-id="${c.id}" style="background:${S.sc.cat===c.id?'var(--wh-blue)':'#2a3a5e'};font-size:11px;padding:7px 11px">${t(c.key)}</button>`).join("");
-  const queueHTML=S.sc.queue.length?`<div style="margin-top:12px"><div class="label">${S.sc.queue.length} ${t("sc_photos")}</div>
-    <div class="scroll" style="display:flex;flex-direction:column;gap:6px;max-height:140px;overflow:auto">
-    ${S.sc.queue.map((p,i)=>`<div style="display:flex;align-items:center;gap:8px;font-size:13px;background:var(--bg);border-radius:10px;padding:7px 10px">
-      <span>🖼️</span><span style="flex:1">${esc(p.name)}</span>
-      <span class="pill" style="background:var(--wh-blue)">${t(SC_CATEGORIES.find(c=>c.id===p.cat).key)}</span>
-      <span style="color:var(--text-dim);font-size:11px">${esc(p.size)}</span>
-      <button data-action="scRemove" data-id="${i}" style="background:none;border:none;color:var(--warn);cursor:pointer;font-weight:800">✕</button></div>`).join("")}</div></div>`:"";
-  const canUpload=S.sc.project&&S.sc.queue.length>0;
-  const uploadCard=`<div class="card" style="padding:16px">
-    <div class="label" style="font-size:14px">📸 ${t("sc_upload")}</div>
-    ${!S.sc.project?`<div style="color:var(--wh-orange);font-size:13px;font-weight:700;margin-bottom:8px">⚠ ${t("sc_selectProject")}</div>`:`<div style="font-size:13px;margin-bottom:8px">📁 <b>${esc(S.sc.project)}</b></div>`}
-    <div class="label" style="margin-top:6px">${t("sc_category")}</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">${cats}</div>
-    <label style="display:block;border:2px dashed var(--line);border-radius:14px;padding:20px 12px;text-align:center;cursor:pointer;color:var(--text-dim)">
-      <input id="scFile" type="file" accept="image/*" multiple style="display:none"/>📸 ${t("sc_dropHere")}</label>
-    <div style="text-align:center;margin-top:8px"><button class="btn3d ghost sm" data-action="scAddDemo">${t("sc_addDemo")}</button></div>
-    ${queueHTML}
-    <div style="margin-top:14px"><button class="btn3d" data-action="scUpload" style="opacity:${canUpload?1:0.5}">${S.sc.uploading?t("sc_uploading"):"⬆ "+t("sc_uploadTo")}</button></div>
-    ${S.sc.done?`<div style="margin-top:10px;color:var(--jc-DL);font-weight:800">✓ ${t("sc_uploaded")}</div>`:""}</div>`;
+  const localR=!q?PROJECT_HISTORY:PROJECT_HISTORY.filter(p=>p.id.toLowerCase().indexOf(q)>=0||p.customer.toLowerCase().indexOf(q)>=0||p.address.toLowerCase().indexOf(q)>=0);
+  const list=live? S.sc.results : localR.map(p=>({id:p.id,name:p.customer,status:"",address:p.address,owner:"",template:(JOB_CODE[p.code]?t(JOB_CODE[p.code].long):""),updated:""}));
+  const banner=`<div class="card" style="padding:12px 16px;border-left:6px solid ${live?'var(--jc-DL)':'var(--wh-grey)'};display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span style="width:11px;height:11px;border-radius:50%;background:${live?'var(--jc-DL)':'var(--wh-grey)'};box-shadow:${live?'0 0 8px var(--jc-DL)':'none'}"></span>
+    <span style="font-weight:800">${live?t("sc_connected"):t("sc_localMode")}</span>
+    ${live?`<span class="pill" style="background:var(--jc-DL)">${S.sc.results.length}+ ${t("sc_projects")}</span>`:""}
+    ${S.sc.scState==="error"?`<span class="pill" style="background:var(--warn)">API error</span>`:""}</div>`;
+  const tmplOpts=(S.sc.templates||[]).map(tp=>`<option value="${esc(tp.key)}">${esc(tp.name||tp.key)}</option>`).join("");
+  const newForm=S.sc.showNew?`<div class="card" style="padding:16px;margin-top:12px">
+    <div class="label" style="font-size:14px">➕ ${t("sc_newSC")}</div>
+    ${(S.sc.templates&&S.sc.templates.length)
+      ? `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1;min-width:220px"><span class="label">${t("sc_template")}</span><select id="scTemplate" class="input">${tmplOpts}</select></div>
+          <button class="btn3d green" data-action="scCreate">${S.sc.creating?t("sc_creating"):"✚ "+t("sc_create")}</button></div>`
+      : `<div style="color:var(--text-dim);font-size:13px">${t("sc_noTemplates")}</div>`}
+    ${S.sc.createMsg?`<div style="margin-top:10px;font-weight:800;color:${S.sc.createMsg.indexOf("error")>=0||S.sc.createMsg.toLowerCase().indexOf("error")>=0?'var(--warn)':'var(--jc-DL)'}">${esc(S.sc.createMsg)}</div>`:""}</div>`:"";
+  let detail="";
+  if(S.sc.detail){ const d=list.find(x=>x.id===S.sc.detail);
+    if(d) detail=`<div class="card fade" style="padding:18px;margin-top:12px;border-left:8px solid ${scStatusStyle(d.status)}">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+        <div><h3 style="margin:0 0 4px">${esc(d.name)}</h3><div style="color:var(--text-dim);font-size:13px">#${esc(d.id)}</div></div>
+        <button class="btn3d grey sm" data-action="scCloseDetail">✕ ${t("sc_close")}</button></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:12px;font-size:13px">
+        ${d.status?`<div><div class="label">${t("status")}</div><span class="pill" style="background:${scStatusStyle(d.status)}">${esc(d.status)}</span></div>`:""}
+        ${d.address?`<div><div class="label">📍 Address</div>${esc(d.address)}</div>`:""}
+        ${d.owner?`<div><div class="label">${t("sc_owner")}</div>${esc(d.owner)}</div>`:""}
+        ${d.template?`<div><div class="label">${t("sc_template")}</div>${esc(d.template)}</div>`:""}
+        ${d.updated?`<div><div class="label">${t("sc_updated")}</div>${esc(d.updated)}</div>`:""}
+      </div></div>`; }
+  const cards=list.length? list.map(p=>`<div class="card" style="padding:15px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <div style="font-weight:800;font-size:15px">${esc(p.name)}</div>
+        ${p.status?`<span class="pill" style="background:${scStatusStyle(p.status)}">${esc(p.status)}</span>`:""}</div>
+      ${p.address?`<div style="font-size:12.5px;color:var(--text-dim);margin-top:6px">📍 ${esc(p.address)}</div>`:""}
+      ${p.owner?`<div style="font-size:12.5px;color:var(--text-dim);margin-top:2px">${esc(p.owner)}</div>`:""}
+      <div style="font-size:12px;color:var(--text-dim);margin-top:6px">${[p.template,p.updated,("#"+p.id)].filter(Boolean).join(" · ")}</div>
+      <div style="margin-top:10px"><button class="btn3d blue sm" data-action="scOpenDetail" data-id="${esc(p.id)}">👁 ${t("sc_photosDetails")}</button></div>
+    </div>`).join("") : `<div style="color:var(--text-dim);padding:24px;text-align:center;grid-column:1/-1">${t("sc_noResults")}</div>`;
   return `<div class="fade">
     <h2 style="margin:0 0 4px;font-size:24px">${t("sc_title")}</h2>
-    <div style="color:var(--text-dim);max-width:640px">${t("sc_sub")}</div>
-    <div style="margin-top:16px;max-width:680px"><span class="label">🔎 ${t("sc_search")}</span>
-      <input id="scSearch" class="input" value="${esc(S.sc.q)}" placeholder="DL1998 · Delgado · Lakeland…"/></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">
-      <div><div class="card" style="padding:14px"><div class="label">${results.length} ${t("sc_results")}</div>
-        <div style="display:flex;flex-direction:column;gap:8px">${resHTML}</div></div></div>
-      <div style="display:flex;flex-direction:column;gap:14px">${newJobForm}${uploadCard}</div>
-    </div></div>`;
+    <div style="color:var(--text-dim);max-width:660px">${t("sc_sub")}</div>
+    <div style="margin-top:14px">${banner}</div>
+    <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
+      <input id="scSearch" class="input" style="flex:1;min-width:240px" value="${esc(S.sc.q)}" placeholder="${t("sc_search")}"/>
+      <button class="btn3d sm" data-action="scLiveSearch">${S.sc.scState==="loading"?"…":"🔎"}</button>
+      <button class="btn3d green sm" data-action="scToggleNew">${S.sc.showNew?"✕ "+t("sc_close"):"➕ "+t("sc_newSC")}</button></div>
+    ${newForm}
+    ${detail}
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;margin-top:14px">${cards}</div>
+  </div>`;
 }
 
 /* ---------- TAB: ZOHO ---------- */
@@ -783,6 +795,21 @@ document.addEventListener("click",e=>{
     case "zohoToggleCode": S.zoho.showCode=!S.zoho.showCode; render(); break;
     case "wxRefresh": loadWeather(); break;
     case "scSelectProject": S.sc.project=id; S.sc.done=false; render(); break;
+    case "scLiveSearch": { const inp=document.getElementById("scSearch"); S.sc.q=inp?inp.value:""; loadSiteCapture(S.sc.q.trim()); break; }
+    case "scToggleNew": S.sc.showNew=!S.sc.showNew; S.sc.createMsg=""; render(); break;
+    case "scOpenDetail": S.sc.detail=id; render(); break;
+    case "scCloseDetail": S.sc.detail=null; render(); break;
+    case "scCreate": {
+      const sel=document.getElementById("scTemplate"); const tk=sel?sel.value:"";
+      if(!tk){ S.sc.createMsg="Pick a template"; render(); break; }
+      S.sc.creating=true; S.sc.createMsg=""; render();
+      fetch("/api/sitecapture",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({template_key:tk})})
+        .then(r=>r.json()).then(j=>{ S.sc.creating=false;
+          if(j&&j.ok&&j.id){ S.sc.createMsg=t("sc_createdId")+" #"+j.id; loadSiteCapture(""); }
+          else { S.sc.createMsg="API error: "+((j&&j.error)||"unknown"); render(); } })
+        .catch(e=>{ S.sc.creating=false; S.sc.createMsg="API error"; render(); });
+      break;
+    }
     case "scSetCat": S.sc.cat=id; render(); break;
     case "scAddDemo": S.sc.queue.push({name:"IMG_"+(1000+S.sc.queue.length)+".jpg",size:(1800+S.sc.queue.length*40)+" KB",cat:S.sc.cat}); S.sc.done=false; render(); break;
     case "scRemove": S.sc.queue.splice(Number(id),1); render(); break;
@@ -805,7 +832,7 @@ document.addEventListener("click",e=>{
   }
 });
 document.addEventListener("input",function(e){
-  if(e.target.id==="scSearch"){ S.sc.q=e.target.value; render(); }
+  if(e.target.id==="scSearch"){ S.sc.q=e.target.value; if(S.sc.scState==="live")S.sc.scState="sample"; render(); }
   else if(e.target.hasAttribute&&e.target.hasAttribute("data-nf")){ S.sc.nf[e.target.getAttribute("data-nf")]=e.target.value; S.sc.created=null; render(); }
 });
 document.addEventListener("change",function(e){
