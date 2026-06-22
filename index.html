@@ -7,6 +7,8 @@
 <title>WindMar Itinerary — Dispatch & Field Operations</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   /* ============================================================
      WINDMAR SOLAR + ROOFING — official brand (windmar-branding skill)
@@ -83,6 +85,10 @@
     background:linear-gradient(90deg,rgba(80,220,140,.9),transparent);animation:spin 4s linear infinite;}
   @keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
   .blip{position:absolute;border-radius:50%;background:rgba(80,220,140,.55);filter:blur(1px);}
+.leaflet-tooltip{background:#16223A;color:#cfe0ff;border:1px solid #2A3F7A;font-family:inherit;font-weight:700;font-size:11px;}
+  .leaflet-tooltip-top:before{border-top-color:#2A3F7A;}
+  #crewMap{background:#0a1a3a;}
+  .distlbl{background:#16223A!important;color:#A6C3E6!important;border-color:#2A3F7A!important;}
 </style>
 </head>
 <body>
@@ -116,7 +122,7 @@ const I18N = {
   cr_active:"Active crews", cr_contacts:"Contacts", cr_enterJob:"Pick a job to route to",
   cr_closest:"Closest available crew", cr_away:"away", cr_eta:"ETA", cr_min:"min",
   cr_lastPing:"last ping", cr_geocoded:"GEOCODED", cr_city:"CITY-LEVEL", cr_approx:"APPROX",
-  cr_onJob:"On job", cr_avail:"Available", cr_enroute:"En route",
+  cr_onJob:"On job", cr_avail:"Available", cr_enroute:"En route", cr_idle:"Idle", cr_target:"Target address or FL city…", cr_noGeo:"couldn’t geocode — try a Florida city name", cr_supervisors:"Supervisors",
   // Weather (mirrors live app "Weather & Safety")
   wx_title:"Weather & Safety", wx_sub:"Real-time conditions and safety protocols for Florida job sites",
   wx_radar:"Live Rain Radar — Florida", wx_radarNote:"RainViewer tiles render here in production (NEXRAD composite, 10-min loop).",
@@ -164,7 +170,7 @@ const I18N = {
   cr_active:"Cuadrillas activas", cr_contacts:"Contactos", cr_enterJob:"Elige un trabajo a rutear",
   cr_closest:"Cuadrilla disponible más cercana", cr_away:"de distancia", cr_eta:"Tiempo est.", cr_min:"min",
   cr_lastPing:"último ping", cr_geocoded:"GEOCODED", cr_city:"CITY-LEVEL", cr_approx:"APPROX",
-  cr_onJob:"En trabajo", cr_avail:"Disponible", cr_enroute:"En camino",
+  cr_onJob:"En trabajo", cr_avail:"Disponible", cr_enroute:"En camino", cr_idle:"Inactivo", cr_target:"Dirección o ciudad de FL…", cr_noGeo:"no se pudo geocodificar — prueba una ciudad de Florida", cr_supervisors:"Supervisores",
   wx_title:"Clima y Seguridad", wx_sub:"Condiciones en tiempo real y protocolos de seguridad para sitios en Florida",
   wx_radar:"Radar de Lluvia en Vivo — Florida", wx_radarNote:"Las capas de RainViewer se muestran aquí en producción (compuesto NEXRAD, ciclo de 10 min).",
   wx_7day:"Pronóstico de 7 Días", wx_safety:"Consejos de Seguridad", wx_alerts:"Alertas activas hoy",
@@ -211,24 +217,35 @@ const todayISO=iso(new Date());
 const dShift=n=>{const d=new Date();d.setDate(d.getDate()+n);return iso(d);};
 
 /* ---- crews (live GPS, like the service-app Crew Tracker) ---- */
+const HQ={name:"WindMar HQ",lat:28.4795,lon:-81.3730};
 const CREWS=[
-  {id:"crew-a",name:"Crew Álvarez",lead:"M. Álvarez",phone:"863-555-1101",color:"#F89B24",gps:{lat:28.0410,lon:-81.9501},precision:"GEOCODED",ping:"2 min",state:"enroute"},
-  {id:"crew-b",name:"Crew Rivera", lead:"J. Rivera", phone:"863-555-1102",color:"#16A34A",gps:{lat:28.0570,lon:-81.7350},precision:"GEOCODED",ping:"1 min",state:"onJob"},
-  {id:"crew-c",name:"Crew Santos", lead:"L. Santos", phone:"863-555-1103",color:"#1D429B",gps:{lat:28.0025,lon:-81.7305},precision:"CITY-LEVEL",ping:"4 min",state:"avail"},
-  {id:"crew-d",name:"Crew Méndez", lead:"R. Méndez", phone:"863-555-1104",color:"#DC2626",gps:{lat:28.0190,lon:-81.9330},precision:"APPROX",ping:"9 min",state:"avail"},
+  {id:"crew-morales",type:"SERVICE",lead:"Luis Morales",phone:"863-555-1101",color:"#3B82F6",gps:{lat:28.4626,lon:-81.3853},addr:"1100 Arrowsmith Ave, Pine Castle, FL 32809",precision:"GEOCODED",ping:"11:45:04 AM",mph:0,state:"avail"},
+  {id:"crew-radke",type:"SERVICE",lead:"David Radke",phone:"863-555-1102",color:"#F89B24",gps:{lat:27.7470,lon:-80.8900},addr:"Florida's Turnpike, Okeechobee County, FL",precision:"CITY-LEVEL",ping:"11:48:19 AM",mph:79,state:"enroute"},
+  {id:"crew-herrera",type:"IN HOUSE 2",lead:"Tailor Herrera",phone:"863-555-1103",color:"#16A34A",gps:{lat:28.4631,lon:-81.3848},addr:"1105 Arrowsmith Ave, Pine Castle, FL 32809",precision:"GEOCODED",ping:"11:45:25 AM",mph:0,state:"avail"},
+  {id:"crew-sierra",type:"IN HOUSE 3",lead:"William Sierra",phone:"863-555-1104",color:"#06B6D4",gps:{lat:28.3850,lon:-81.2700},addr:"Northlake Pkwy, Orlando, FL 32827",precision:"GEOCODED",ping:"11:48:21 AM",mph:25,state:"enroute"},
+  {id:"crew-torres",type:"INSTALACION",lead:"Leonardo Torres",phone:"863-555-1105",color:"#A855F7",gps:{lat:28.5700,lon:-81.2700},addr:"River's Edge Dr, Union Park, FL 32817",precision:"GEOCODED",ping:"11:48:15 AM",mph:0,state:"onJob"},
+  {id:"crew-holi",type:"HOLI SOLAR",lead:"Sub-Contractor",phone:"863-555-1106",color:"#EC4899",gps:{lat:28.3800,lon:-81.4200},addr:"S Orange Blossom Trl, Meadow Woods, FL 32837",precision:"CITY-LEVEL",ping:"11:48:23 AM",mph:0,state:"avail"},
 ];
+const SUPERVISORS=[
+  {name:"Jose Menendez",role:"Operations Supervisor",initials:"JM",color:"#F89B24",phone:"863-555-2001"},
+  {name:"Carlos Acevedo",role:"Field Supervisor",initials:"CA",color:"#D97706",phone:"863-555-2002"},
+  {name:"Luis G Ortiz",role:"Service Supervisor",initials:"LG",color:"#16A34A",phone:"863-555-2003"},
+  {name:"Jose Baldaguez",role:"Warehouse Manager",initials:"JB",color:"#06B6D4",phone:"863-555-2004"},
+  {name:"Joalismar Willim",role:"Safety Representative",initials:"JW",color:"#A855F7",phone:"863-555-2005"},
+];
+const FL_CITIES={"orlando":{lat:28.5383,lon:-81.3792},"kissimmee":{lat:28.2920,lon:-81.4076},"lakeland":{lat:28.0395,lon:-81.9498},"winter haven":{lat:28.0222,lon:-81.7329},"tampa":{lat:27.9506,lon:-82.4572},"okeechobee":{lat:27.2439,lon:-80.8298},"vero beach":{lat:27.6386,lon:-80.3973},"pine castle":{lat:28.4626,lon:-81.3853},"union park":{lat:28.5700,lon:-81.2700},"meadow woods":{lat:28.3800,lon:-81.4200},"lake nona":{lat:28.3700,lon:-81.2700},"sanford":{lat:28.8003,lon:-81.2731},"titusville":{lat:28.6122,lon:-80.8076},"melbourne":{lat:28.0836,lon:-80.6081},"sebring":{lat:27.4956,lon:-81.4409},"saint petersburg":{lat:27.7676,lon:-82.6403},"st petersburg":{lat:27.7676,lon:-82.6403},"ocala":{lat:29.1872,lon:-82.1401},"bartow":{lat:27.8964,lon:-81.8431}};
 
 /* ---- jobs use real WindMar codes (DL/RDL/RL/S/MSP) ---- */
 let JOBS=[
-  {id:"DL1998", project:"Delgado Residence",   code:"DL",  crew:"crew-a",date:todayISO,window:"7:30 AM – 12:00 PM",address:"412 Palmetto Ave, Lakeland, FL 33801",phone:"863-555-0142",geo:{lat:28.0395,lon:-81.9498},status:"enroute",  scope:"7.2kW Qcells + Powerwall 3"},
-  {id:"S2042",  project:"Ortiz Battery Service",code:"S",   crew:"crew-a",date:todayISO,window:"1:00 PM – 3:00 PM", address:"88 Lake Hollingsworth Dr, Lakeland, FL 33803",phone:"863-555-0188",geo:{lat:28.0211,lon:-81.9540},status:"scheduled",scope:"Inverter fault diagnostic"},
-  {id:"MSP2050",project:"Cruz Panel Upgrade",   code:"MSP", crew:"crew-b",date:todayISO,window:"8:00 AM – 2:00 PM", address:"1500 Havendale Blvd, Winter Haven, FL 33881",phone:"863-555-0210",geo:{lat:28.0586,lon:-81.7332},status:"onsite",   scope:"100A→200A panel + meter combo"},
-  {id:"DL2051", project:"Pérez Solar Install",  code:"DL",  crew:"crew-b",date:todayISO,window:"2:30 PM – 5:30 PM", address:"305 6th St NW, Winter Haven, FL 33881",phone:"863-555-0233",geo:{lat:28.0298,lon:-81.7340},status:"scheduled",scope:"5.4kW rooftop array"},
-  {id:"RDL2060",project:"Nguyen Re-roof + Solar",code:"RDL",crew:"crew-c",date:todayISO,window:"7:00 AM – 4:00 PM", address:"720 Cypress Gardens Blvd, Winter Haven, FL 33880",phone:"863-555-0291",geo:{lat:28.0010,lon:-81.7290},status:"scheduled",scope:"Re-roof + 9.6kW array"},
-  {id:"RL2065", project:"Torres Re-Roof",       code:"RL",  crew:"crew-d",date:todayISO,window:"7:00 AM – 3:00 PM", address:"930 Ariana St, Lakeland, FL 33803",phone:"863-555-0260",geo:{lat:28.0260,lon:-81.9610},status:"scheduled",scope:"Full tear-off + reshingle"},
-  {id:"S2061",  project:"Bauer Monitoring",     code:"S",   crew:"crew-c",date:todayISO,window:"4:30 PM – 6:00 PM", address:"210 Ave G NW, Winter Haven, FL 33880",phone:"863-555-0277",geo:{lat:28.0245,lon:-81.7415},status:"scheduled",scope:"Monitoring offline"},
-  {id:"DL2070", project:"Maldonado Install",    code:"DL",  crew:"crew-a",date:dShift(1),window:"7:30 AM – 1:00 PM",address:"55 Bartow Rd, Lakeland, FL 33801",phone:"863-555-0301",geo:{lat:28.0331,lon:-81.9420},status:"scheduled",scope:"8.1kW + Powerwall"},
-  {id:"MSP2071",project:"Vega Panel Relocation",code:"MSP", crew:"crew-c",date:dShift(1),window:"9:00 AM – 12:00 PM",address:"640 1st St S, Winter Haven, FL 33880",phone:"863-555-0319",geo:{lat:28.0192,lon:-81.7331},status:"scheduled",scope:"Service panel relocation"},
+  {id:"DL1998", project:"Delgado Residence",   code:"DL",  crew:"crew-herrera",date:todayISO,window:"7:30 AM – 12:00 PM",address:"412 Palmetto Ave, Lakeland, FL 33801",phone:"863-555-0142",geo:{lat:28.0395,lon:-81.9498},status:"enroute",  scope:"7.2kW Qcells + Powerwall 3"},
+  {id:"S2042",  project:"Ortiz Battery Service",code:"S",   crew:"crew-morales",date:todayISO,window:"1:00 PM – 3:00 PM", address:"88 Lake Hollingsworth Dr, Lakeland, FL 33803",phone:"863-555-0188",geo:{lat:28.0211,lon:-81.9540},status:"scheduled",scope:"Inverter fault diagnostic"},
+  {id:"MSP2050",project:"Cruz Panel Upgrade",   code:"MSP", crew:"crew-sierra",date:todayISO,window:"8:00 AM – 2:00 PM", address:"1500 Havendale Blvd, Winter Haven, FL 33881",phone:"863-555-0210",geo:{lat:28.0586,lon:-81.7332},status:"onsite",   scope:"100A→200A panel + meter combo"},
+  {id:"DL2051", project:"Pérez Solar Install",  code:"DL",  crew:"crew-torres",date:todayISO,window:"2:30 PM – 5:30 PM", address:"305 6th St NW, Winter Haven, FL 33881",phone:"863-555-0233",geo:{lat:28.0298,lon:-81.7340},status:"scheduled",scope:"5.4kW rooftop array"},
+  {id:"RDL2060",project:"Nguyen Re-roof + Solar",code:"RDL",crew:"crew-holi",date:todayISO,window:"7:00 AM – 4:00 PM", address:"720 Cypress Gardens Blvd, Winter Haven, FL 33880",phone:"863-555-0291",geo:{lat:28.0010,lon:-81.7290},status:"scheduled",scope:"Re-roof + 9.6kW array"},
+  {id:"RL2065", project:"Torres Re-Roof",       code:"RL",  crew:"crew-radke",date:todayISO,window:"7:00 AM – 3:00 PM", address:"930 Ariana St, Lakeland, FL 33803",phone:"863-555-0260",geo:{lat:28.0260,lon:-81.9610},status:"scheduled",scope:"Full tear-off + reshingle"},
+  {id:"S2061",  project:"Bauer Monitoring",     code:"S",   crew:"crew-morales",date:todayISO,window:"4:30 PM – 6:00 PM", address:"210 Ave G NW, Winter Haven, FL 33880",phone:"863-555-0277",geo:{lat:28.0245,lon:-81.7415},status:"scheduled",scope:"Monitoring offline"},
+  {id:"DL2070", project:"Maldonado Install",    code:"DL",  crew:"crew-torres",date:dShift(1),window:"7:30 AM – 1:00 PM",address:"55 Bartow Rd, Lakeland, FL 33801",phone:"863-555-0301",geo:{lat:28.0331,lon:-81.9420},status:"scheduled",scope:"8.1kW + Powerwall"},
+  {id:"MSP2071",project:"Vega Panel Relocation",code:"MSP", crew:"crew-sierra",date:dShift(1),window:"9:00 AM – 12:00 PM",address:"640 1st St S, Winter Haven, FL 33880",phone:"863-555-0319",geo:{lat:28.0192,lon:-81.7331},status:"scheduled",scope:"Service panel relocation"},
 ];
 let PROJECT_HISTORY=[
   {id:"DL1998",customer:"Delgado Residence",address:"412 Palmetto Ave, Lakeland, FL",code:"DL",photos:14},
@@ -298,11 +315,11 @@ export async function POST(req){
    ============================================================================ */
 const S={
   lang:"en", theme:"dark", tab:"itinerary", dayOffset:0, selectedJob:null,
-  crews:{ showDist:true, routeJobId:null },
+  crews:{ showDist:true, q:"", dispatchResult:null },
   wx:{ data:{}, live:false },
   zoho:{ syncing:false, lastSync:new Date(), showCode:false },
   sc:{ q:"", project:null, cat:"inverter", queue:[], uploading:false, done:false,
-       nf:{ code:"DL", project:"", crew:"crew-a", date:todayISO, address:"", window:"8:00 AM – 12:00 PM" }, created:null },
+       nf:{ code:"DL", project:"", crew:"crew-morales", date:todayISO, address:"", window:"8:00 AM – 12:00 PM" }, created:null },
 };
 const t=k=>(I18N[S.lang][k] ?? I18N.en[k] ?? k);
 const esc=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -384,7 +401,7 @@ function itineraryHTML(){
     return `<div class="card" style="padding:14px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)">
         <span style="width:12px;height:30px;border-radius:4px;background:${crew.color}"></span>
-        <div><div style="font-weight:900;font-size:16px">${crew.name}</div><div style="font-size:12px;color:var(--text-dim)">${t("crew")} • ${crew.lead}</div></div>
+        <div><div style="font-weight:900;font-size:16px">${crew.type}</div><div style="font-size:12px;color:var(--text-dim)">${t("crew")} • ${crew.lead}</div></div>
         <span style="margin-left:auto;font-size:12px;color:var(--text-dim);font-weight:700">${cj.length} ${t("jobs")}</span></div>
       <div style="display:flex;flex-direction:column;gap:10px">${chips}</div></div>`;
   }).join("");
@@ -420,75 +437,66 @@ function itineraryHTML(){
 }
 
 /* ---------- TAB: CREWS (mirrors live app Crew Tracker) ---------- */
+function crewName(c){ return c.type+" ("+c.lead+")"; }
+function nearestOther(c){ let best=null,bd=Infinity; CREWS.forEach(o=>{ if(o.id===c.id)return; const d=miles(c.gps,o.gps); if(d<bd){bd=d;best=o;} }); return {crew:best,d:bd}; }
 function crewsHTML(){
-  const activeCount=CREWS.filter(c=>c.state!=="avail").length;
-  const routeJob=S.crews.routeJobId?JOBS.find(j=>j.id===S.crews.routeJobId):null;
-  // crew rows
+  const hasMap=(typeof L!=="undefined");
+  const dr=S.crews.dispatchResult;
+  let dispatchCard="";
+  if(dr&&dr.target&&dr.crew){
+    dispatchCard=`<div class="card fade" style="padding:14px;margin-top:12px;border-left:8px solid var(--jc-DL)">
+      <div class="label" style="margin:0">${t("cr_closest")}</div>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap">
+        <span style="width:14px;height:34px;border-radius:4px;background:${dr.crew.color}"></span>
+        <div style="flex:1"><div style="font-weight:900;font-size:17px">${esc(crewName(dr.crew))}</div>
+          <div style="font-size:12.5px;color:var(--text-dim)">→ ${esc(dr.target.label)}</div></div>
+        <div style="text-align:right"><div style="font-weight:900;font-size:20px;color:var(--wh-orange)">${dr.d.toFixed(1)} mi</div>
+          <div style="font-size:12px;color:var(--text-dim)">${t("cr_eta")} ~${Math.round(dr.d/0.5)} ${t("cr_min")}</div></div>
+        <button class="btn3d green sm" data-action="callCrew" data-id="${dr.crew.id}">📞</button></div></div>`;
+  } else if(dr&&dr.error){
+    dispatchCard=`<div class="card" style="padding:12px;margin-top:12px;color:var(--warn)">⚠ "${esc(dr.q)}" — ${t("cr_noGeo")}</div>`;
+  }
   const rows=CREWS.map(c=>{
-    const stKey=c.state==="onJob"?"cr_onJob":c.state==="enroute"?"cr_enroute":"cr_avail";
-    const stColor=c.state==="onJob"?"var(--jc-DL)":c.state==="enroute"?"var(--wh-orange)":"var(--wh-grey)";
-    const precColor=c.precision==="GEOCODED"?"var(--jc-DL)":c.precision==="CITY-LEVEL"?"var(--wh-orange)":"var(--wh-grey)";
-    const dist=routeJob?miles(c.gps,routeJob.geo):null;
-    return `<div class="card" style="padding:14px;display:flex;align-items:center;gap:12px">
-      <span style="width:12px;height:46px;border-radius:4px;background:${c.color}"></span>
+    const n=nearestOther(c); const hq=miles(c.gps,HQ);
+    const speed=c.mph>0?`<span class="pill" style="background:var(--jc-DL)">${c.mph} mph</span>`:`<span class="pill" style="background:#3a4a6e">${t("cr_idle")}</span>`;
+    return `<div class="card" style="padding:13px;display:flex;align-items:center;gap:12px">
+      <span style="width:12px;height:52px;border-radius:4px;background:${c.color}"></span>
       <div style="flex:1;min-width:0">
-        <div style="font-weight:900;font-size:15px">${c.name}</div>
-        <div style="font-size:12px;color:var(--text-dim)">${c.lead} · ${c.gps.lat.toFixed(4)}, ${c.gps.lon.toFixed(4)}</div>
-        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
-          <span class="pill" style="background:${stColor}">● ${t(stKey)}</span>
-          <span class="pill" style="background:${precColor}">${c.precision}</span>
-          <span class="pill" style="background:transparent;color:var(--text-dim);border:1px solid var(--line)">${t("cr_lastPing")}: ${c.ping}</span>
-        </div></div>
-      ${S.crews.showDist&&dist!=null?`<div style="text-align:right"><div style="font-weight:900;font-size:18px;color:var(--wh-orange)">${dist.toFixed(1)} mi</div>
-        <div style="font-size:11px;color:var(--text-dim)">${t("cr_eta")} ~${Math.round(dist/0.5)} ${t("cr_min")}</div></div>`:""}
+        <div style="font-weight:900;font-size:14.5px">${esc(crewName(c))}</div>
+        <div style="font-size:12px;color:var(--text-dim)">${esc(c.addr)}</div>
+        <div style="font-size:12px;margin-top:5px;color:var(--text-dim)">${S.crews.showDist?`🧭 <b style="color:var(--jc-DL)">${n.d.toFixed(1)} mi</b> → ${esc(n.crew?crewName(n.crew):"—")} · 📍 HQ: <b style="color:var(--wh-orange)">${hq.toFixed(1)} mi</b> · `:""}${c.ping}</div>
+      </div>
+      ${speed}
       <button class="btn3d grey sm" data-action="callCrew" data-id="${c.id}">📞</button></div>`;
   }).join("");
-  // dispatch result
-  let dispatchResult="";
-  if(routeJob){
-    const ranked=CREWS.filter(c=>c.state!=="onJob").map(c=>({c,d:miles(c.gps,routeJob.geo)})).sort((a,b)=>a.d-b.d);
-    const best=ranked[0];
-    dispatchResult=`<div class="card fade" style="padding:16px;margin-top:12px;border-left:8px solid var(--jc-DL)">
-      <div style="font-size:12px;color:var(--text-dim);font-weight:700;text-transform:uppercase;letter-spacing:.6px">${t("cr_closest")}</div>
-      <div style="display:flex;align-items:center;gap:12px;margin-top:8px;flex-wrap:wrap">
-        <span style="width:14px;height:36px;border-radius:4px;background:${best.c.color}"></span>
-        <div style="flex:1"><div style="font-weight:900;font-size:18px">${best.c.name}</div>
-          <div style="font-size:12.5px;color:var(--text-dim)">→ ${esc(routeJob.id)} · ${esc(routeJob.project)}</div></div>
-        <div style="text-align:right"><div style="font-weight:900;font-size:22px;color:var(--wh-orange)">${best.d.toFixed(1)} mi ${t("cr_away")}</div>
-          <div style="font-size:12px;color:var(--text-dim)">${t("cr_eta")} ~${Math.round(best.d/0.5)} ${t("cr_min")}</div></div>
-        <button class="btn3d green sm" data-action="callCrew" data-id="${best.c.id}">📞 ${t("navigate")}</button></div></div>`;
-  }
-  // job picker options
-  const jobOpts=JOBS.filter(j=>j.date===todayISO).map(j=>`<option value="${j.id}" ${S.crews.routeJobId===j.id?"selected":""}>${esc(j.id)} · ${esc(j.project)}</option>`).join("");
-  // radar-style map blips for crews
-  const blips=CREWS.map((c,i)=>`<div class="blip" style="width:14px;height:14px;left:${20+i*20}%;top:${30+(i%3)*18}%;background:${c.color};opacity:.85"></div>`).join("");
-  const contacts=CREWS.map(c=>`<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line)">
-    <span style="width:10px;height:24px;border-radius:3px;background:${c.color}"></span>
-    <div style="flex:1"><div style="font-weight:700">${c.name}</div><div style="font-size:12px;color:var(--text-dim)">${c.lead}</div></div>
-    <a href="tel:${c.phone}" class="btn3d grey sm" style="text-decoration:none">📞 ${c.phone}</a></div>`).join("");
+  const mapBlock=hasMap
+    ?`<div id="crewMap" style="height:380px;border-radius:16px;overflow:hidden;border:1px solid var(--line)"></div>`
+    :`<div class="radar" style="height:380px"><div class="sweep"></div>${CREWS.map((c,i)=>`<div class="blip" style="width:13px;height:13px;left:${16+i*12}%;top:${26+(i%3)*18}%;background:${c.color}"></div>`).join("")}<div style="position:absolute;left:10px;bottom:10px;font-size:11px;color:var(--text-dim)">🛰 ${t("cr_sub")}</div></div>`;
+  const supers=SUPERVISORS.map(sp=>`<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line)">
+    <span style="width:34px;height:34px;border-radius:50%;background:${sp.color};display:grid;place-items:center;font-weight:800;font-size:12.5px;color:#fff">${sp.initials}</span>
+    <div style="flex:1"><div style="font-weight:700;font-size:13.5px">${esc(sp.name)}</div><div style="font-size:11.5px;color:var(--text-dim)">${esc(sp.role)}</div></div>
+    <a href="tel:${sp.phone}" class="btn3d grey sm" style="text-decoration:none">📞</a></div>`).join("");
   return `<div class="fade">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap">
       <div><h2 style="margin:0 0 4px;font-size:24px">${t("cr_title")}</h2><div style="color:var(--text-dim)">${t("cr_sub")}</div></div>
-      <div style="display:flex;gap:8px;align-items:center">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn3d ghost sm" data-action="crewFit">⛶ ${t("cr_fit")}</button>
         <button class="btn3d ghost sm" data-action="crewToggleDist">${S.crews.showDist?"🙈 "+t("cr_hideDist"):"📏 "+t("cr_showDist")}</button>
-        <span class="pill" style="background:var(--jc-DL)">${t("cr_active")}: ${activeCount}</span></div></div>
-    <div style="display:grid;grid-template-columns:1.3fr 1fr;gap:16px;margin-top:16px">
-      <div>
-        <div class="radar" style="height:220px"><div class="sweep"></div>${blips}
-          <div style="position:absolute;left:10px;bottom:10px;font-size:11px;color:var(--text-dim)">🛰 ${t("cr_sub")}</div></div>
-        <div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">${rows}</div>
-      </div>
-      <div>
-        <div class="card" style="padding:16px">
-          <div style="font-weight:900;font-size:16px">🚨 ${t("cr_dispatch")}</div>
-          <div style="font-size:11.5px;color:var(--text-dim);margin:6px 0 12px">${t("cr_precision")}</div>
-          <span class="label">${t("cr_enterJob")}</span>
-          <select class="input" id="routeJob" data-action="setRouteJob"><option value="">—</option>${jobOpts}</select>
-          ${dispatchResult||`<div style="color:var(--text-dim);font-size:13px;margin-top:12px">${t("cr_calc")} →</div>`}
-        </div>
-        <div class="card" style="padding:16px;margin-top:14px">
-          <div class="label">${t("cr_contacts")}</div>${contacts}</div>
-      </div></div></div>`;
+        <button class="btn3d sm" data-action="crewRefresh">⟳</button>
+        <span class="pill" style="background:var(--jc-DL)">${t("cr_active")}: ${CREWS.length}</span></div></div>
+    <div class="card" style="padding:16px;margin-top:16px">
+      <div style="font-weight:900;font-size:16px">🚨 ${t("cr_dispatch")}</div>
+      <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
+        <input id="dispatchTarget" class="input" style="flex:1;min-width:220px" value="${esc(S.crews.q||"")}" placeholder="${t("cr_target")}"/>
+        <button class="btn3d" data-action="crewCalc">${t("cr_calc")}</button></div>
+      <div style="font-size:11.5px;color:var(--text-dim);margin-top:8px">${t("cr_precision")}</div>
+      ${dispatchCard}</div>
+    <div style="margin-top:16px">${mapBlock}</div>
+    <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:16px">
+      <div><div class="label">${t("cr_active")} (${CREWS.length})</div>
+        <div style="display:flex;flex-direction:column;gap:10px">${rows}</div></div>
+      <div class="card" style="padding:16px"><div class="label">${t("cr_contacts")} · ${t("cr_supervisors")}</div>${supers}</div>
+    </div></div>`;
 }
 
 /* ---------- TAB: WEATHER (mirrors live app Weather & Safety) ---------- */
@@ -562,7 +570,7 @@ function siteCaptureHTML(){
   // create-job form
   const nf=S.sc.nf;
   const codeOpts=Object.keys(JOB_CODE).map(c=>`<option value="${c}" ${nf.code===c?"selected":""}>${c} · ${t(JOB_CODE[c].long)}</option>`).join("");
-  const crewOpts=CREWS.map(c=>`<option value="${c.id}" ${nf.crew===c.id?"selected":""}>${c.name}</option>`).join("");
+  const crewOpts=CREWS.map(c=>`<option value="${c.id}" ${nf.crew===c.id?"selected":""}>${esc(crewName(c))}</option>`).join("");
   const newJobForm=`<div class="card" style="padding:16px">
     <div class="label" style="font-size:14px">➕ ${t("sc_newJob")}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -653,6 +661,35 @@ const TABS=[
   {id:"sitecapture",key:"tab_sitecapture",fn:siteCaptureHTML},
   {id:"zoho",key:"tab_zoho",fn:zohoHTML},
 ];
+function initCrewMap(){
+  if(typeof L==="undefined") return;
+  const el=document.getElementById("crewMap"); if(!el) return;
+  if(window._cm){ try{window._cm.remove();}catch(e){} window._cm=null; }
+  const m=L.map(el).setView([28.45,-81.4],8); window._cm=m;
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{maxZoom:19,attribution:"© CARTO"}).addTo(m);
+  const pts=[];
+  L.circleMarker([HQ.lat,HQ.lon],{radius:6,color:"#fff",weight:2,fillColor:"#666",fillOpacity:1}).addTo(m).bindTooltip("🏢 "+HQ.name,{direction:"top"});
+  pts.push([HQ.lat,HQ.lon]);
+  CREWS.forEach(c=>{
+    L.circleMarker([c.gps.lat,c.gps.lon],{radius:9,color:"#0a0a0a",weight:2,fillColor:c.color,fillOpacity:1}).addTo(m)
+      .bindTooltip(c.type+" ("+c.lead+")"+(c.mph>0?" · "+c.mph+" mph":" · idle"),{direction:"top"});
+    pts.push([c.gps.lat,c.gps.lon]);
+  });
+  if(S.crews.showDist){
+    CREWS.forEach(c=>{ const n=nearestOther(c); if(n.crew){
+      L.polyline([[c.gps.lat,c.gps.lon],[n.crew.gps.lat,n.crew.gps.lon]],{color:"#A6C3E6",weight:1,dashArray:"4 6",opacity:.45}).addTo(m)
+        .bindTooltip(n.d.toFixed(1)+" mi",{permanent:true,direction:"center",className:"distlbl"});
+    }});
+  }
+  const dr=S.crews.dispatchResult;
+  if(dr&&dr.target&&dr.crew){
+    L.circleMarker([dr.target.lat,dr.target.lon],{radius:8,color:"#fff",weight:2,fillColor:"#F89B24",fillOpacity:1}).addTo(m).bindTooltip("🎯 "+dr.target.label,{direction:"top"});
+    L.polyline([[dr.target.lat,dr.target.lon],[dr.crew.gps.lat,dr.crew.gps.lon]],{color:"#F89B24",weight:3,opacity:.9}).addTo(m);
+    pts.push([dr.target.lat,dr.target.lon]);
+  }
+  if(pts.length>1){ try{ m.fitBounds(pts,{padding:[40,40]}); }catch(e){} }
+  setTimeout(function(){ try{m.invalidateSize();}catch(e){} },140);
+}
 function render(){
   document.documentElement.setAttribute("data-theme",S.theme);
   const ae=document.activeElement, aeId=ae&&ae.id, caret=ae&&ae.selectionStart;
@@ -673,6 +710,7 @@ function render(){
       </div></nav>
     <main style="max-width:1180px;margin:0 auto;padding:22px 20px 70px">${active.fn()}</main>`;
   if(aeId){const el=document.getElementById(aeId);if(el){el.focus();if(caret!=null&&el.setSelectionRange){try{el.setSelectionRange(caret,caret);}catch(e){}}}}
+  if(S.tab==="crews") setTimeout(initCrewMap,0);
 }
 
 /* ---------- EVENTS ---------- */
@@ -696,6 +734,9 @@ document.addEventListener("click",e=>{
     case "callCrew": { const c=CREWS.find(x=>x.id===id); if(c) window.open("tel:"+c.phone); break; }
     case "viewProject": S.tab="sitecapture"; S.sc.q=id; render(); break;
     case "crewToggleDist": S.crews.showDist=!S.crews.showDist; render(); break;
+    case "crewFit": render(); break;
+    case "crewRefresh": { const now=new Date(); CREWS.forEach((c,i)=>{ c.ping=new Date(now.getTime()-i*15000).toLocaleTimeString(); if(c.mph>0){ c.gps={lat:c.gps.lat+(Math.random()-0.5)*0.02,lon:c.gps.lon+(Math.random()-0.5)*0.02}; c.mph=Math.max(15,Math.round(c.mph+(Math.random()-0.5)*10)); } }); render(); break; }
+    case "crewCalc": { const inp=document.getElementById("dispatchTarget"); const raw=(inp?inp.value:"").trim(); const q=raw.toLowerCase(); S.crews.q=raw; let target=null,label=""; if(q){ const job=JOBS.find(j=>j.id.toLowerCase()===q); if(job){ target={lat:job.geo.lat,lon:job.geo.lon}; label=job.id+" · "+job.project; } else { for(const k in FL_CITIES){ if(q.indexOf(k)>=0){ target=FL_CITIES[k]; label=raw; break; } } } } if(target){ let best=null,bd=Infinity; CREWS.forEach(c=>{const d=miles(c.gps,target); if(d<bd){bd=d;best=c;}}); S.crews.dispatchResult={target:{lat:target.lat,lon:target.lon,label:label||raw},crew:best,d:bd}; } else { S.crews.dispatchResult={error:true,q:raw}; } render(); break; }
     case "zohoSync": S.zoho.syncing=true; render(); setTimeout(function(){S.zoho.syncing=false;S.zoho.lastSync=new Date();render();},1300); break;
     case "zohoToggleCode": S.zoho.showCode=!S.zoho.showCode; render(); break;
     case "wxRefresh": S.wx.live=false; S.wx.data={}; loadWeather(); break;
@@ -716,7 +757,7 @@ document.addEventListener("click",e=>{
       JOBS.push(newJob);
       PROJECT_HISTORY.unshift({id:newId,customer:nf.project.trim(),address:nf.address.trim(),code:nf.code,photos:0});
       S.sc.created=newId; S.sc.project=newId;
-      S.sc.nf={code:"DL",project:"",crew:"crew-a",date:todayISO,address:"",window:"8:00 AM – 12:00 PM"};
+      S.sc.nf={code:"DL",project:"",crew:"crew-morales",date:todayISO,address:"",window:"8:00 AM – 12:00 PM"};
       render(); break;
     }
   }
@@ -729,7 +770,7 @@ document.addEventListener("change",function(e){
   if(e.target.id==="scFile"&&e.target.files.length){
     Array.from(e.target.files).forEach(function(f){S.sc.queue.push({name:f.name,size:(f.size/1024).toFixed(0)+" KB",cat:S.sc.cat});});
     S.sc.done=false; render();
-  } else if(e.target.id==="routeJob"){ S.crews.routeJobId=e.target.value||null; render(); }
+  }
   else if(e.target.hasAttribute&&e.target.hasAttribute("data-nf")){ S.sc.nf[e.target.getAttribute("data-nf")]=e.target.value; render(); }
 });
 render();
