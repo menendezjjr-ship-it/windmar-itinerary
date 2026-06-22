@@ -87,7 +87,10 @@
   .blip{position:absolute;border-radius:50%;background:rgba(80,220,140,.55);filter:blur(1px);}
 .leaflet-tooltip{background:#16223A;color:#cfe0ff;border:1px solid #2A3F7A;font-family:inherit;font-weight:700;font-size:11px;}
   .leaflet-tooltip-top:before{border-top-color:#2A3F7A;}
-  #crewMap{background:#0a1a3a;}
+  #crewMap{background:#aadaff;}
+  .leaflet-interactive{filter:drop-shadow(0 1px 3px rgba(0,0,0,.35));}
+  .leaflet-bar a{border-radius:6px!important;}
+  .leaflet-container{font-family:inherit;}
   .distlbl{background:#16223A!important;color:#A6C3E6!important;border-color:#2A3F7A!important;}
 </style>
 </head>
@@ -705,18 +708,18 @@ function initCrewMap(){
   if(window._cm){ try{window._cm.remove();}catch(e){} window._cm=null; }
   const src=activeSource();
   const m=L.map(el).setView([28.45,-81.4],8); window._cm=m;
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{maxZoom:19,attribution:"© CARTO"}).addTo(m);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19,attribution:"© CARTO"}).addTo(m);
   const pts=[];
-  L.circleMarker([HQ.lat,HQ.lon],{radius:6,color:"#fff",weight:2,fillColor:"#666",fillOpacity:1}).addTo(m).bindTooltip("🏢 "+HQ.name,{direction:"top"});
+  L.circleMarker([HQ.lat,HQ.lon],{radius:7,color:"#fff",weight:3,fillColor:"#1D429B",fillOpacity:1}).addTo(m).bindTooltip("🏢 "+HQ.name,{direction:"top"});
   pts.push([HQ.lat,HQ.lon]);
   src.forEach(c=>{ if(!c.gps)return;
-    L.circleMarker([c.gps.lat,c.gps.lon],{radius:9,color:"#0a0a0a",weight:2,fillColor:c.color,fillOpacity:1}).addTo(m)
+    L.circleMarker([c.gps.lat,c.gps.lon],{radius:10,color:"#ffffff",weight:3,fillColor:c.color,fillOpacity:1}).addTo(m)
       .bindTooltip(crewName(c)+(c.mph>0?" · "+c.mph+" mph":" · idle"),{direction:"top"});
     pts.push([c.gps.lat,c.gps.lon]);
   });
   if(S.crews.showDist){
     src.forEach(c=>{ const n=nearestOther(c); if(n.crew){
-      L.polyline([[c.gps.lat,c.gps.lon],[n.crew.gps.lat,n.crew.gps.lon]],{color:"#A6C3E6",weight:1,dashArray:"4 6",opacity:.45}).addTo(m)
+      L.polyline([[c.gps.lat,c.gps.lon],[n.crew.gps.lat,n.crew.gps.lon]],{color:"#1D429B",weight:2,dashArray:"3 7",opacity:.55}).addTo(m)
         .bindTooltip(n.d.toFixed(1)+" mi",{permanent:true,direction:"center",className:"distlbl"});
     }});
   }
