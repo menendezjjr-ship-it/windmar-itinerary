@@ -315,7 +315,7 @@ export async function POST(req){
    ============================================================================ */
 const S={
   lang:"en", theme:"dark", tab:"itinerary", dayOffset:0, selectedJob:null,
-  crews:{ showDist:true, q:"", dispatchResult:null },
+  crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
   wx:{ data:{}, live:false },
   zoho:{ syncing:false, lastSync:new Date(), showCode:false },
   sc:{ q:"", project:null, cat:"inverter", queue:[], uploading:false, done:false,
@@ -436,11 +436,30 @@ function itineraryHTML(){
     ${panel}</div>`;
 }
 
-/* ---------- TAB: CREWS (mirrors live app Crew Tracker) ---------- */
-function crewName(c){ return c.type+" ("+c.lead+")"; }
-function nearestOther(c){ let best=null,bd=Infinity; CREWS.forEach(o=>{ if(o.id===c.id)return; const d=miles(c.gps,o.gps); if(d<bd){bd=d;best=o;} }); return {crew:best,d:bd}; }
+/* ---------- TAB: CREWS (mirrors live app Crew Tracker; live Samsara GPS via /api/crews) ---------- */
+function activeSource(){ return (S.crews.fleet && S.crews.fleet.length) ? S.crews.fleet : CREWS; }
+function crewName(c){ return c.type ? (c.type+" ("+c.lead+")") : c.name; }
+function nearestOther(c){ const src=activeSource(); let best=null,bd=Infinity; src.forEach(o=>{ if(o.id===c.id||!o.gps)return; const d=miles(c.gps,o.gps); if(d<bd){bd=d;best=o;} }); return {crew:best,d:bd}; }
+async function loadFleet(){
+  try{
+    const r=await fetch("/api/crews",{cache:"no-store"});
+    const j=await r.json();
+    if(j&&j.configured&&j.ok&&j.crews&&j.crews.length){
+      const pal=["#3B82F6","#F89B24","#16A34A","#06B6D4","#A855F7","#EC4899","#DC2626","#10B981","#EAB308","#14B8A6"];
+      S.crews.fleet=j.crews.map((v,i)=>({id:"veh-"+v.id,name:v.name,type:null,lead:v.name,color:pal[i%pal.length],
+        gps:v.gps,mph:v.mph||0,addr:v.addr||"—",precision:v.addr?"GEOCODED":"APPROX",
+        ping:v.time?new Date(v.time).toLocaleTimeString():"—"}));
+      S.crews.fleetState="live";
+    } else if(j&&j.configured){ S.crews.fleet=[]; S.crews.fleetState="error"; }
+    else { S.crews.fleet=[]; S.crews.fleetState="sample"; }
+  }catch(e){ S.crews.fleet=[]; S.crews.fleetState="sample"; }
+  render();
+}
 function crewsHTML(){
+  const src=activeSource();
   const hasMap=(typeof L!=="undefined");
+  const live=S.crews.fleetState==="live";
+  const stBadge=`<span class="pill" style="background:${live?'var(--jc-DL)':'var(--wh-grey)'};font-size:10px;vertical-align:middle">${live?'● LIVE':(S.crews.fleetState==='error'?'API ERROR':'sample')}</span>`;
   const dr=S.crews.dispatchResult;
   let dispatchCard="";
   if(dr&&dr.target&&dr.crew){
@@ -456,7 +475,7 @@ function crewsHTML(){
   } else if(dr&&dr.error){
     dispatchCard=`<div class="card" style="padding:12px;margin-top:12px;color:var(--warn)">⚠ "${esc(dr.q)}" — ${t("cr_noGeo")}</div>`;
   }
-  const rows=CREWS.map(c=>{
+  const rows=src.map(c=>{
     const n=nearestOther(c); const hq=miles(c.gps,HQ);
     const speed=c.mph>0?`<span class="pill" style="background:var(--jc-DL)">${c.mph} mph</span>`:`<span class="pill" style="background:#3a4a6e">${t("cr_idle")}</span>`;
     return `<div class="card" style="padding:13px;display:flex;align-items:center;gap:12px">
@@ -471,19 +490,19 @@ function crewsHTML(){
   }).join("");
   const mapBlock=hasMap
     ?`<div id="crewMap" style="height:380px;border-radius:16px;overflow:hidden;border:1px solid var(--line)"></div>`
-    :`<div class="radar" style="height:380px"><div class="sweep"></div>${CREWS.map((c,i)=>`<div class="blip" style="width:13px;height:13px;left:${16+i*12}%;top:${26+(i%3)*18}%;background:${c.color}"></div>`).join("")}<div style="position:absolute;left:10px;bottom:10px;font-size:11px;color:var(--text-dim)">🛰 ${t("cr_sub")}</div></div>`;
+    :`<div class="radar" style="height:380px"><div class="sweep"></div>${src.map((c,i)=>`<div class="blip" style="width:13px;height:13px;left:${16+i*12}%;top:${26+(i%3)*18}%;background:${c.color}"></div>`).join("")}<div style="position:absolute;left:10px;bottom:10px;font-size:11px;color:var(--text-dim)">🛰 ${t("cr_sub")}</div></div>`;
   const supers=SUPERVISORS.map(sp=>`<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line)">
     <span style="width:34px;height:34px;border-radius:50%;background:${sp.color};display:grid;place-items:center;font-weight:800;font-size:12.5px;color:#fff">${sp.initials}</span>
     <div style="flex:1"><div style="font-weight:700;font-size:13.5px">${esc(sp.name)}</div><div style="font-size:11.5px;color:var(--text-dim)">${esc(sp.role)}</div></div>
     <a href="tel:${sp.phone}" class="btn3d grey sm" style="text-decoration:none">📞</a></div>`).join("");
   return `<div class="fade">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap">
-      <div><h2 style="margin:0 0 4px;font-size:24px">${t("cr_title")}</h2><div style="color:var(--text-dim)">${t("cr_sub")}</div></div>
+      <div><h2 style="margin:0 0 4px;font-size:24px">${t("cr_title")} ${stBadge}</h2><div style="color:var(--text-dim)">${t("cr_sub")}</div></div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button class="btn3d ghost sm" data-action="crewFit">⛶ ${t("cr_fit")}</button>
         <button class="btn3d ghost sm" data-action="crewToggleDist">${S.crews.showDist?"🙈 "+t("cr_hideDist"):"📏 "+t("cr_showDist")}</button>
         <button class="btn3d sm" data-action="crewRefresh">⟳</button>
-        <span class="pill" style="background:var(--jc-DL)">${t("cr_active")}: ${CREWS.length}</span></div></div>
+        <span class="pill" style="background:var(--jc-DL)">${t("cr_active")}: ${src.length}</span></div></div>
     <div class="card" style="padding:16px;margin-top:16px">
       <div style="font-weight:900;font-size:16px">🚨 ${t("cr_dispatch")}</div>
       <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
@@ -493,7 +512,7 @@ function crewsHTML(){
       ${dispatchCard}</div>
     <div style="margin-top:16px">${mapBlock}</div>
     <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:16px">
-      <div><div class="label">${t("cr_active")} (${CREWS.length})</div>
+      <div><div class="label">${t("cr_active")} (${src.length})</div>
         <div style="display:flex;flex-direction:column;gap:10px">${rows}</div></div>
       <div class="card" style="padding:16px"><div class="label">${t("cr_contacts")} · ${t("cr_supervisors")}</div>${supers}</div>
     </div></div>`;
@@ -665,18 +684,19 @@ function initCrewMap(){
   if(typeof L==="undefined") return;
   const el=document.getElementById("crewMap"); if(!el) return;
   if(window._cm){ try{window._cm.remove();}catch(e){} window._cm=null; }
+  const src=activeSource();
   const m=L.map(el).setView([28.45,-81.4],8); window._cm=m;
   L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",{maxZoom:19,attribution:"© CARTO"}).addTo(m);
   const pts=[];
   L.circleMarker([HQ.lat,HQ.lon],{radius:6,color:"#fff",weight:2,fillColor:"#666",fillOpacity:1}).addTo(m).bindTooltip("🏢 "+HQ.name,{direction:"top"});
   pts.push([HQ.lat,HQ.lon]);
-  CREWS.forEach(c=>{
+  src.forEach(c=>{ if(!c.gps)return;
     L.circleMarker([c.gps.lat,c.gps.lon],{radius:9,color:"#0a0a0a",weight:2,fillColor:c.color,fillOpacity:1}).addTo(m)
-      .bindTooltip(c.type+" ("+c.lead+")"+(c.mph>0?" · "+c.mph+" mph":" · idle"),{direction:"top"});
+      .bindTooltip(crewName(c)+(c.mph>0?" · "+c.mph+" mph":" · idle"),{direction:"top"});
     pts.push([c.gps.lat,c.gps.lon]);
   });
   if(S.crews.showDist){
-    CREWS.forEach(c=>{ const n=nearestOther(c); if(n.crew){
+    src.forEach(c=>{ const n=nearestOther(c); if(n.crew){
       L.polyline([[c.gps.lat,c.gps.lon],[n.crew.gps.lat,n.crew.gps.lon]],{color:"#A6C3E6",weight:1,dashArray:"4 6",opacity:.45}).addTo(m)
         .bindTooltip(n.d.toFixed(1)+" mi",{permanent:true,direction:"center",className:"distlbl"});
     }});
@@ -722,7 +742,7 @@ document.addEventListener("click",e=>{
   switch(a){
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
-    case "setTab": S.tab=id; if(id==="weather"&&!S.wx.live) loadWeather(); render(); break;
+    case "setTab": S.tab=id; if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); render(); break;
     case "dayPrev": S.dayOffset--; S.selectedJob=null; render(); break;
     case "dayToday": S.dayOffset=0; S.selectedJob=null; render(); break;
     case "dayNext": S.dayOffset++; S.selectedJob=null; render(); break;
@@ -735,8 +755,8 @@ document.addEventListener("click",e=>{
     case "viewProject": S.tab="sitecapture"; S.sc.q=id; render(); break;
     case "crewToggleDist": S.crews.showDist=!S.crews.showDist; render(); break;
     case "crewFit": render(); break;
-    case "crewRefresh": { const now=new Date(); CREWS.forEach((c,i)=>{ c.ping=new Date(now.getTime()-i*15000).toLocaleTimeString(); if(c.mph>0){ c.gps={lat:c.gps.lat+(Math.random()-0.5)*0.02,lon:c.gps.lon+(Math.random()-0.5)*0.02}; c.mph=Math.max(15,Math.round(c.mph+(Math.random()-0.5)*10)); } }); render(); break; }
-    case "crewCalc": { const inp=document.getElementById("dispatchTarget"); const raw=(inp?inp.value:"").trim(); const q=raw.toLowerCase(); S.crews.q=raw; let target=null,label=""; if(q){ const job=JOBS.find(j=>j.id.toLowerCase()===q); if(job){ target={lat:job.geo.lat,lon:job.geo.lon}; label=job.id+" · "+job.project; } else { for(const k in FL_CITIES){ if(q.indexOf(k)>=0){ target=FL_CITIES[k]; label=raw; break; } } } } if(target){ let best=null,bd=Infinity; CREWS.forEach(c=>{const d=miles(c.gps,target); if(d<bd){bd=d;best=c;}}); S.crews.dispatchResult={target:{lat:target.lat,lon:target.lon,label:label||raw},crew:best,d:bd}; } else { S.crews.dispatchResult={error:true,q:raw}; } render(); break; }
+    case "crewRefresh": { if(S.crews.fleetState==="live"){ loadFleet(); } else { const now=new Date(); CREWS.forEach((c,i)=>{ c.ping=new Date(now.getTime()-i*15000).toLocaleTimeString(); if(c.mph>0){ c.gps={lat:c.gps.lat+(Math.random()-0.5)*0.02,lon:c.gps.lon+(Math.random()-0.5)*0.02}; c.mph=Math.max(15,Math.round(c.mph+(Math.random()-0.5)*10)); } }); render(); } break; }
+    case "crewCalc": { const inp=document.getElementById("dispatchTarget"); const raw=(inp?inp.value:"").trim(); const q=raw.toLowerCase(); S.crews.q=raw; let target=null,label=""; if(q){ const job=JOBS.find(j=>j.id.toLowerCase()===q); if(job){ target={lat:job.geo.lat,lon:job.geo.lon}; label=job.id+" · "+job.project; } else { for(const k in FL_CITIES){ if(q.indexOf(k)>=0){ target=FL_CITIES[k]; label=raw; break; } } } } if(target){ let best=null,bd=Infinity; activeSource().forEach(c=>{const d=miles(c.gps,target); if(d<bd){bd=d;best=c;}}); S.crews.dispatchResult={target:{lat:target.lat,lon:target.lon,label:label||raw},crew:best,d:bd}; } else { S.crews.dispatchResult={error:true,q:raw}; } render(); break; }
     case "zohoSync": S.zoho.syncing=true; render(); setTimeout(function(){S.zoho.syncing=false;S.zoho.lastSync=new Date();render();},1300); break;
     case "zohoToggleCode": S.zoho.showCode=!S.zoho.showCode; render(); break;
     case "wxRefresh": S.wx.live=false; S.wx.data={}; loadWeather(); break;
