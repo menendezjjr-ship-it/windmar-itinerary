@@ -639,7 +639,7 @@ function siteCaptureHTML(){
       ? `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
           <div style="flex:1;min-width:220px"><span class="label">${t("sc_template")}</span><select id="scTemplate" class="input">${tmplOpts}</select></div>
           <button class="btn3d green" data-action="scCreate">${S.sc.creating?t("sc_creating"):"✚ "+t("sc_create")}</button></div>`
-      : `<div style="color:var(--text-dim);font-size:13px">${t("sc_noTemplates")}</div>`}
+      : `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end"><div style="flex:1;min-width:220px"><span class="label">${t("sc_template")} key</span><input id="scTemplateKey" class="input" placeholder="e.g. site_survey_fl"/></div><button class="btn3d green" data-action="scCreate">${S.sc.creating?t("sc_creating"):"\u2795 "+t("sc_create")}</button></div>`}
     ${S.sc.createMsg?`<div style="margin-top:10px;font-weight:800;color:${S.sc.createMsg.indexOf("error")>=0||S.sc.createMsg.toLowerCase().indexOf("error")>=0?'var(--warn)':'var(--jc-DL)'}">${esc(S.sc.createMsg)}</div>`:""}</div>`:"";
   let detail="";
   if(S.sc.detail){ const d=list.find(x=>x.id===S.sc.detail);
@@ -807,7 +807,7 @@ document.addEventListener("click",e=>{
     case "scOpenDetail": S.sc.detail=id; render(); break;
     case "scCloseDetail": S.sc.detail=null; render(); break;
     case "scCreate": {
-      const sel=document.getElementById("scTemplate"); const tk=sel?sel.value:"";
+      const sel=document.getElementById("scTemplate"); const txt=document.getElementById("scTemplateKey"); const tk=(sel&&sel.value)||(txt&&txt.value.trim())||"";
       if(!tk){ S.sc.createMsg="Pick a template"; render(); break; }
       S.sc.creating=true; S.sc.createMsg=""; render();
       fetch("/api/sitecapture",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({template_key:tk})})
