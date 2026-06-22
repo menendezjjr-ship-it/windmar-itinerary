@@ -417,6 +417,52 @@ async function loadCalendar(){
 }
 setInterval(function(){ if(((S.tab==="itinerary"&&S.itinView==="brigada")||S.tab==="calendar")&&S.cal.status!=="loading") loadCalendar(); }, 60000);
 function calendarTabHTML(){ return `<div class="fade">`+brigadaHTML()+`</div>`; }
+
+/* ---------- Captured Brigada snapshot (April 2026) — shows real data with no login ---------- */
+const CAL_SNAPSHOT={
+ month:"April 2026",
+ totals:{install:{total:66,inProgress:17,complete:48,pastDue:18},service:{total:87,inProgress:66,complete:20,pastDue:67}},
+ sections:[
+  {title:"Installation", rows:[
+    {name:"Doga Construction – Roofing", j:"!RL8423 !RL8304 !RL8405 !RL8349 !RL8327 !RL8406 !RL8278 !RL8468 !RL8353 !RL8464 !RL8404 !RL8440 !RL8310 !RL8440 !RL8435 !RL8485 !RL7992 !RL8503"},
+    {name:"Holis Solar", j:"✓DL8366 ✓DL8373 ✓DL8301 ✓DL8417 ✓DL8397 ✓RDL829 ✓DL8412 ✓DL8361 ✓DL8318 ✓RDL832 ✓DL8384 ✓RDL827 ✓DL8087 ✓DL8372 ✓DL8481 ✓DL8385 ✓DL5874 ✓DL6423 ✓DL8411 ✓DL8413 ✓DL8430"},
+    {name:"In House #2", j:"!DL8257 ✓DL8307 ✓DL3459 ✓DL7854 ✓DL7682 ✓DL8342 ✓DL8371 ✓DL8335 ✓DL8345 ✓DL8510 ✓DL8305 ✓RDL827 ✓DL8336 ✓DL8390 ✓DL8444"},
+    {name:"In House #3", j:"✓DL8328 ✓DL7643 ✓DL8409 ✓DL8389 ✓DL7822 ✓DL8356 ✓DL8334 ✓DL8330 ✓DL8374 ✓DL8351 ✓DL8387 ✓DL8425 ✓DL8381"},
+    {name:"In House #4", j:""},
+    {name:"Windmar Roofing", j:""}
+  ]},
+  {title:"Service Tickets", rows:[
+    {name:"Eagle Eye – Subcontractor", j:"!DL8095 !RDL765 !DL4632 !DL5229 !DL8322+1 ✓DL4201 !DL689"},
+    {name:"In-House #2", j:"✓DL7854 !DL7682 ✓DL8253 !DL8311+1 !DL2078 ✓DL8371 ✓DL8305"},
+    {name:"In-House #3", j:"!DL7643 ✓DL8409 ✓DL8321 ✓DL8330 ✓DL8351"},
+    {name:"T1 – Carlos Acevedo", j:"!DL8209"},
+    {name:"T1 – David Radke", j:"!DL7278+1 ✓DL8301 !DL7972 !DL4632 !DL7219 ✓DL6114 !DL8035 !DL1913 !DL7957 !RDL484 !DL7986 !DL2824 ✓DL8361 ✓DL8340 !DL7907 !DL888 !DL8004 !DL2720 ✓RDL829 !DL7927 ✓DL8396 ✓RDL827 ✓DL8417"},
+    {name:"T2 – Luis Morales", j:"!DL7532 !DL8044 ✓DL0001 !DL7688 !DL8090 !DL8038 !DL6760 !DL4377 !DL6232 !DL8161 !DL7981 !RDL484 !DL8005 !DL7750 !DL2904 !DL6964 !DL7462 !DL6443 !DL6358 !DL7960 !DL7411 !DL7153 !DL8149 !DL7592 !DL3118"},
+    {name:"T3 – Jose Menendez", j:"!RDL713 !DL8209"},
+    {name:"T3 – Luis G. Ortiz", j:"!DL8044 !DL4563 !DL3351 !DL8161 !DL7981 !RDL484 !DL6392 !DL3413 !DL4547 !DL8153 ✓DL0001 ✓DL8119 !DL7914 !DL8141 !DL7979"}
+  ]}
+ ]
+};
+function parseSnapTokens(str){ const out=[]; const M={"✓":"done","!":"pastdue","▶":"inprogress","●":"scheduled"}; const re=/([✓!▶●])?\s*((?:RDL|DL|RL|S)\d{2,})(\+\d+)?/g; let m; while((m=re.exec(str))){ out.push({code:m[2],status:M[m[1]]||"scheduled",more:m[3]||""}); } return out; }
+function snapshotHTML(){
+  const D=CAL_SNAPSHOT;
+  const head=`<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">
+    <div style="font-weight:900;font-size:18px">${D.month} <span class="pill" style="background:var(--wh-grey);font-size:10px;vertical-align:middle">📸 SNAPSHOT</span></div>
+    <button class="btn3d sm" data-action="calRefresh">⟳ Try live</button></div>`;
+  const kpi=(label,o,color)=>`<div class="card" style="padding:12px 14px;min-width:160px"><div class="label" style="margin:0">${label}</div><div style="font-size:24px;font-weight:900;color:${color}">${o.total}</div><div style="font-size:11px;color:var(--text-dim)">✓${o.complete} · ▶${o.inProgress} · !${o.pastDue}</div></div>`;
+  const totals=`<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">${kpi("Installation",D.totals.install,"var(--jc-DL)")}${kpi("Service",D.totals.service,"var(--wh-orange)")}</div>`;
+  const sections=D.sections.map(sec=>{
+    const isSvc=sec.title.indexOf("Service")>=0; const bar=isSvc?"var(--wh-orange)":"var(--jc-DL)";
+    const rows=sec.rows.map(r=>{
+      const jobs=parseSnapTokens(r.j);
+      const chips=jobs.length?jobs.map(j=>`<span title="${esc(j.code)}" style="font-size:10px;font-weight:800;color:#fff;background:${calStColor(j.status)};border-radius:5px;padding:2px 6px;white-space:nowrap">${calStIcon(j.status)}${esc(j.code)}${j.more?" "+esc(j.more):""}</span>`).join(""):`<span style="font-size:12px;color:var(--text-dim)">—</span>`;
+      return `<div class="card" style="padding:12px;display:flex;gap:12px;align-items:flex-start"><span style="width:8px;align-self:stretch;border-radius:4px;background:${bar}"></span><div style="flex:1;min-width:0"><div style="font-weight:800;font-size:13.5px;margin-bottom:6px">${esc(r.name)} <span style="color:var(--text-dim);font-weight:600">(${jobs.length})</span></div><div style="display:flex;gap:5px;flex-wrap:wrap">${chips}</div></div></div>`;
+    }).join("");
+    return `<div class="label" style="margin-top:14px">${sec.title}</div><div style="display:flex;flex-direction:column;gap:8px">${rows}</div>`;
+  }).join("");
+  const note=`<div style="font-size:12px;color:var(--text-dim);margin-top:16px;line-height:1.6">📸 This is a captured snapshot of the live Brigada Calendar (April 2026). To make it update by itself, add <b>WP_USER</b> + <b>WP_APP_PASSWORD</b> in Vercel and it switches to live auto-refresh.</div>`;
+  return head+totals+sections+note;
+}
 function brigadaHTML(){
   const c=S.cal, live=c.status==="live", d=c.data;
   const mObj=new Date(c.month+"T00:00:00");
@@ -435,11 +481,7 @@ function brigadaHTML(){
       ${d&&d.updated?`<span style="font-size:11px;color:var(--text-dim)">updated ${new Date(d.updated).toLocaleTimeString()}</span>`:""}
       <button class="btn3d sm" data-action="calRefresh">⟳</button>
     </div></div>`;
-  if(c.status==="unconfigured"||c.status==="idle"){
-    return head+`<div class="card" style="padding:20px">
-      <div style="font-weight:800;margin-bottom:6px">🔗 Connect the Brigada Calendar</div>
-      <div style="color:var(--text-dim);font-size:13.5px;line-height:1.7">In WordPress (fl.windmar.us): <b>Users → Profile → Application Passwords</b>, create one named “Itinerary App.” Then in Vercel → Settings → Environment Variables add <b>WP_USER</b> (your WP username) and <b>WP_APP_PASSWORD</b> (the generated password), and redeploy. This view then auto-refreshes every 60s.</div></div>`;
-  }
+  if(c.status==="unconfigured"||c.status==="idle"){ return snapshotHTML(); }
   if(c.status==="error") return head+`<div class="card" style="padding:18px;color:var(--warn)">Couldn’t load the calendar (${esc(c.err||'auth/login')}). Check WP_USER / WP_APP_PASSWORD.</div>`;
   if(!d) return head+`<div class="card" style="padding:18px;color:var(--text-dim)">Loading…</div>`;
   const tot=d.totals||{install:{},service:{}};
