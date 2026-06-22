@@ -783,7 +783,7 @@ document.addEventListener("click",e=>{
   switch(a){
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
-    case "setTab": S.tab=id; if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); render(); break;
+    case "setTab": S.tab=id; if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); render(); break;
     case "dayPrev": S.dayOffset--; S.selectedJob=null; render(); break;
     case "dayToday": S.dayOffset=0; S.selectedJob=null; render(); break;
     case "dayNext": S.dayOffset++; S.selectedJob=null; render(); break;
