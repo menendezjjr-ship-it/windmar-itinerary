@@ -763,22 +763,21 @@ function siteCaptureHTML(){
     <span style="font-weight:800">${live?t("sc_connected"):t("sc_localMode")}</span>
     ${live?`<span class="pill" style="background:var(--jc-DL)">${S.sc.results.length}+ ${t("sc_projects")}</span>`:""}
     ${S.sc.scState==="error"?`<span class="pill" style="background:var(--warn)">API error</span>`:""}</div>`;
-  const FL_TYPES=["System Completion - FL","Site Survey - FL","Service Repair","Job Closeout (JCO)"];
-  const TYPE_KW={"System Completion - FL":["completion","install","system","tesla"],"Site Survey - FL":["survey","assessment","site"],"Service Repair":["service","repair"],"Job Closeout (JCO)":["closeout","jco"]};
-  const curType=S.sc.nfType||FL_TYPES[0];
-  const prettyTpl=(k)=>(k||"").replace(/_?\d{6,}.*$/,"").replace(/[_-]+/g," ").replace(/\b\w/g,c=>c.toUpperCase()).trim()||k;
-  const allT=(S.sc.templates||[]); const kw=TYPE_KW[curType]||[];
-  let tlist=allT.filter(tp=>{const x=((tp.key||"")+" "+(tp.name||"")).toLowerCase(); return kw.some(k=>x.indexOf(k)>=0);});
-  if(!tlist.length) tlist=allT;
-  const typeOpts=FL_TYPES.map(ty=>`<option value="${esc(ty)}" ${ty===curType?"selected":""}>${esc(ty)}</option>`).join("");
-  const tmplOpts=tlist.length?tlist.map(tp=>`<option value="${esc(tp.key)}">${esc(prettyTpl(tp.name||tp.key))}</option>`).join(""):`<option value="">(no templates loaded \u2014 use manual key)</option>`;
+  const SC_TYPES=[
+    {type:"System Completion - FL", key:"install_completion_form", templates:["Core Delivery BOMs","INSTALL COMPLETION FL 3.0 (MICROINVERTERS)","INSTALL COMPLETION FL 3.0 (TESLA)","Install Completion 2.0","Installation Daily Report FL","Re-installs","Trailer Inspection Form","Warehouse Material Accountability","Wire Dispatch Report"]},
+    {type:"Site Survey - FL", key:"site_assessment_form_20160404082033", templates:["Site Survey - FL"]},
+    {type:"Service Repair", key:"service", templates:["SERVICE REPORT - FL","Service","Service / MSP / De-Rate"]}
+  ];
+  const curT=SC_TYPES.find(x=>x.type===S.sc.nfType)||SC_TYPES[0];
+  const typeOpts=SC_TYPES.map(x=>`<option value="${esc(x.type)}" ${x.type===curT.type?"selected":""}>${esc(x.type)}</option>`).join("");
+  const tmplOpts=curT.templates.map(nm=>`<option value="${esc(curT.key)}">${esc(nm)}</option>`).join("");
   const newForm=S.sc.showNew?`<div class="card" style="padding:18px;margin-top:12px;border:1px solid var(--wh-blue)">
     <div style="font-weight:900;font-size:16px;margin-bottom:12px">\u2795 Create New Project <span class="pill" style="background:var(--wh-blue);font-size:10px">FL</span></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
       <div><span class="label">Choose a Type</span><select id="scType" class="input">${typeOpts}</select></div>
       <div><span class="label">Choose a Template</span><select id="scTemplate" class="input">${tmplOpts}</select></div>
     </div>
-    <div style="margin-top:12px"><span class="label">Or enter a template key manually</span><input id="scTemplateKey" class="input" placeholder="e.g. site_assessment_form_..."/></div>
+    <div style="margin-top:12px"><span class="label">Template key (auto-filled \u2014 edit if needed)</span><input id="scTemplateKey" class="input" value="${esc(curT.key)}"/></div>
     <div style="margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
       <button class="btn3d green" data-action="scCreate">${S.sc.creating?t("sc_creating"):"\u2795 Create Job"}</button>
       ${S.sc.createMsg?`<span style="font-weight:800;color:${/error/i.test(S.sc.createMsg)?'var(--warn)':'var(--jc-DL)'}">${esc(S.sc.createMsg)}</span>`:""}
@@ -955,7 +954,7 @@ document.addEventListener("click",e=>{
     case "scOpenDetail": S.sc.detail=id; render(); break;
     case "scCloseDetail": S.sc.detail=null; render(); break;
     case "scCreate": {
-      const sel=document.getElementById("scTemplate"); const txt=document.getElementById("scTemplateKey"); const tk=(sel&&sel.value)||(txt&&txt.value.trim())||"";
+      const txt=document.getElementById("scTemplateKey"); const sel=document.getElementById("scTemplate"); const tk=(txt&&txt.value.trim())||(sel&&sel.value)||"";
       if(!tk){ S.sc.createMsg="Pick a template"; render(); break; }
       S.sc.creating=true; S.sc.createMsg=""; render();
       fetch("/api/sitecapture",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({template_key:tk})})
