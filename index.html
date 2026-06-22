@@ -92,6 +92,10 @@
   .leaflet-bar a{border-radius:6px!important;}
   .leaflet-container{font-family:inherit;}
   .distlbl{background:#16223A!important;color:#A6C3E6!important;border-color:#2A3F7A!important;}
+  .calchip{font-size:11px;font-weight:800;color:#fff;border-radius:7px;padding:3px 8px;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,.35);border-top:1px solid rgba(255,255,255,.28);letter-spacing:.2px;}
+  .calrow{transition:transform .1s ease, box-shadow .1s ease;}
+  .calrow:hover{transform:translateY(-2px);box-shadow:0 12px 26px rgba(0,0,0,.42);}
+  .statpill{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:999px;white-space:nowrap;}
 </style>
 </head>
 <body>
@@ -446,22 +450,44 @@ const CAL_SNAPSHOT={
 function parseSnapTokens(str){ const out=[]; const M={"✓":"done","!":"pastdue","▶":"inprogress","●":"scheduled"}; const re=/([✓!▶●])?\s*((?:RDL|DL|RL|S)\d{2,})(\+\d+)?/g; let m; while((m=re.exec(str))){ out.push({code:m[2],status:M[m[1]]||"scheduled",more:m[3]||""}); } return out; }
 function snapshotHTML(){
   const D=CAL_SNAPSHOT;
-  const head=`<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">
-    <div style="font-weight:900;font-size:18px">${D.month} <span class="pill" style="background:var(--wh-grey);font-size:10px;vertical-align:middle">📸 SNAPSHOT</span></div>
+  const HEX={done:"#16A34A",inprogress:"#06B6D4",pastdue:"#DC2626",scheduled:"#F89B24"};
+  const head=`<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:6px">
+    <div><div style="font-weight:900;font-size:22px;display:flex;align-items:center;gap:10px">📅 ${D.month}
+      <span class="pill" style="background:var(--wh-grey);font-size:10px">📸 SNAPSHOT</span></div>
+      <div style="color:var(--text-dim);font-size:13px;margin-top:2px">Brigada installation & service schedule</div></div>
     <button class="btn3d sm" data-action="calRefresh">⟳ Try live</button></div>`;
-  const kpi=(label,o,color)=>`<div class="card" style="padding:12px 14px;min-width:160px"><div class="label" style="margin:0">${label}</div><div style="font-size:24px;font-weight:900;color:${color}">${o.total}</div><div style="font-size:11px;color:var(--text-dim)">✓${o.complete} · ▶${o.inProgress} · !${o.pastDue}</div></div>`;
-  const totals=`<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">${kpi("Installation",D.totals.install,"var(--jc-DL)")}${kpi("Service",D.totals.service,"var(--wh-orange)")}</div>`;
+  const legend=`<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:12px 0 16px;font-size:12px;font-weight:700;color:var(--text-dim)">
+    ${[["done","Complete"],["inprogress","In Progress"],["pastdue","Past Due"],["scheduled","Scheduled"]].map(x=>`<span style="display:flex;align-items:center;gap:6px"><span style="width:13px;height:13px;border-radius:4px;background:${HEX[x[0]]};box-shadow:0 1px 2px rgba(0,0,0,.4)"></span>${x[1]}</span>`).join("")}</div>`;
+  const kpi=(label,o,accent,icon)=>{
+    const t=o.total||1; const seg=(v,c)=>v?`<span style="width:${(v/t*100)}%;background:${c}"></span>`:"";
+    return `<div class="card" style="padding:16px 18px;flex:1;min-width:240px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><div style="font-weight:800;font-size:13px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.6px">${icon} ${label}</div><div style="font-size:30px;font-weight:900;color:${accent}">${o.total}</div></div>
+      <div style="display:flex;height:9px;border-radius:6px;overflow:hidden;margin-top:10px;background:var(--line)">${seg(o.complete,HEX.done)}${seg(o.inProgress,HEX.inprogress)}${seg(o.pastDue,HEX.pastdue)}</div>
+      <div style="display:flex;gap:14px;margin-top:9px;font-size:12px;font-weight:800">
+        <span style="color:${HEX.done}">✓ ${o.complete}</span><span style="color:${HEX.inprogress}">▶ ${o.inProgress}</span><span style="color:${HEX.pastdue}">! ${o.pastDue}</span></div></div>`;
+  };
+  const totals=`<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:6px">${kpi("Installation",D.totals.install,"var(--jc-DL)","🔧")}${kpi("Service",D.totals.service,"var(--wh-orange)","🛠")}</div>`;
+  const order={pastdue:0,inprogress:1,scheduled:2,done:3};
   const sections=D.sections.map(sec=>{
     const isSvc=sec.title.indexOf("Service")>=0; const bar=isSvc?"var(--wh-orange)":"var(--jc-DL)";
     const rows=sec.rows.map(r=>{
       const jobs=parseSnapTokens(r.j);
-      const chips=jobs.length?jobs.map(j=>`<span title="${esc(j.code)}" style="font-size:10px;font-weight:800;color:#fff;background:${calStColor(j.status)};border-radius:5px;padding:2px 6px;white-space:nowrap">${calStIcon(j.status)}${esc(j.code)}${j.more?" "+esc(j.more):""}</span>`).join(""):`<span style="font-size:12px;color:var(--text-dim)">—</span>`;
-      return `<div class="card" style="padding:12px;display:flex;gap:12px;align-items:flex-start"><span style="width:8px;align-self:stretch;border-radius:4px;background:${bar}"></span><div style="flex:1;min-width:0"><div style="font-weight:800;font-size:13.5px;margin-bottom:6px">${esc(r.name)} <span style="color:var(--text-dim);font-weight:600">(${jobs.length})</span></div><div style="display:flex;gap:5px;flex-wrap:wrap">${chips}</div></div></div>`;
+      const counts={done:0,inprogress:0,pastdue:0,scheduled:0}; jobs.forEach(j=>counts[j.status]++);
+      const sorted=jobs.slice().sort((a,b)=>order[a.status]-order[b.status]);
+      const chips=sorted.length? sorted.map(j=>`<span class="calchip" style="background:${calStColor(j.status)}">${calStIcon(j.status)} ${esc(j.code)}${j.more?" "+esc(j.more):""}</span>`).join("") : `<span style="font-size:12px;color:var(--text-dim);opacity:.55">No jobs scheduled</span>`;
+      const pills=[["done"],["inprogress"],["pastdue"]].filter(x=>counts[x[0]]).map(x=>`<span class="statpill" style="background:${HEX[x[0]]}22;color:${HEX[x[0]]};border:1px solid ${HEX[x[0]]}">${calStIcon(x[0])} ${counts[x[0]]}</span>`).join("");
+      return `<div class="card calrow" style="padding:0;overflow:hidden;display:flex;opacity:${jobs.length?1:.6}">
+        <span style="width:6px;background:${bar}"></span>
+        <div style="flex:1;min-width:0;padding:13px 16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:${jobs.length?10:0}px;flex-wrap:wrap">
+            <div style="font-weight:800;font-size:14.5px">${esc(r.name)} <span style="color:var(--text-dim);font-weight:600;font-size:12px">· ${jobs.length} job${jobs.length===1?"":"s"}</span></div>
+            <div style="display:flex;gap:6px">${pills}</div></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">${chips}</div></div></div>`;
     }).join("");
-    return `<div class="label" style="margin-top:14px">${sec.title}</div><div style="display:flex;flex-direction:column;gap:8px">${rows}</div>`;
+    return `<div style="display:flex;align-items:center;gap:8px;margin:20px 0 10px"><span style="width:10px;height:10px;border-radius:3px;background:${bar}"></span><div style="font-weight:900;font-size:15px;text-transform:uppercase;letter-spacing:.5px">${sec.title}</div></div><div style="display:flex;flex-direction:column;gap:9px">${rows}</div>`;
   }).join("");
-  const note=`<div style="font-size:12px;color:var(--text-dim);margin-top:16px;line-height:1.6">📸 This is a captured snapshot of the live Brigada Calendar (April 2026). To make it update by itself, add <b>WP_USER</b> + <b>WP_APP_PASSWORD</b> in Vercel and it switches to live auto-refresh.</div>`;
-  return head+totals+sections+note;
+  const note=`<div style="font-size:12px;color:var(--text-dim);margin-top:18px;line-height:1.6;border-top:1px solid var(--line);padding-top:12px">📸 Captured snapshot of the live Brigada Calendar. Add <b>WP_USER</b> + <b>WP_APP_PASSWORD</b> in Vercel to switch to live auto-refresh.</div>`;
+  return head+legend+totals+sections+note;
 }
 function brigadaHTML(){
   const c=S.cal, live=c.status==="live", d=c.data;
