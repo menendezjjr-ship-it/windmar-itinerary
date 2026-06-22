@@ -132,7 +132,7 @@ const I18N = {
   wx_wind_detail:"Winds above 25 mph — pause rooftop work and secure panels.",
   wx_rain_detail:"Precipitation during install window — protect MSP openings & wiring.",
   wx_heat_detail:"Heat index high — schedule breaks, hydrate crews.",
-  wx_high:"High", wx_low:"Low", wx_wind_l:"Wind", wx_precip:"Precip", wx_refresh:"Refresh", wx_live:"live", wx_mock:"sample",
+  wx_high:"High", wx_low:"Low", wx_wind_l:"Wind", wx_precip:"Precip", wx_refresh:"Refresh", wx_live:"live", wx_mock:"sample", wx_feels:"Feels like", wx_humidity:"Humidity", wx_uv:"UV Index",
   wx_loto:"LOTO — De-energize (key steps)", wx_rules:"Weather work rules", wx_phrases:"Site phrases EN/ES",
   // SiteCapture
   sc_title:"SiteCapture", sc_sub:"Search project history, create new jobs, and upload tagged field photos to Zoho.",
@@ -179,7 +179,7 @@ const I18N = {
   wx_wind_detail:"Vientos sobre 40 km/h — pausar trabajo en techo y asegurar paneles.",
   wx_rain_detail:"Precipitación durante la instalación — proteger aberturas del MSP y cableado.",
   wx_heat_detail:"Índice de calor alto — programar descansos e hidratar a las cuadrillas.",
-  wx_high:"Máx", wx_low:"Mín", wx_wind_l:"Viento", wx_precip:"Lluvia", wx_refresh:"Actualizar", wx_live:"en vivo", wx_mock:"ejemplo",
+  wx_high:"Máx", wx_low:"Mín", wx_wind_l:"Viento", wx_precip:"Lluvia", wx_refresh:"Actualizar", wx_live:"en vivo", wx_mock:"ejemplo", wx_feels:"Sensación", wx_humidity:"Humedad", wx_uv:"Índice UV",
   wx_loto:"LOTO — Desenergizar (pasos clave)", wx_rules:"Reglas de trabajo por clima", wx_phrases:"Frases de sitio EN/ES",
   sc_title:"SiteCapture", sc_sub:"Busca historial, crea nuevos trabajos y sube fotos etiquetadas a Zoho.",
   sc_search:"Buscar por ID, Cliente o Dirección", sc_results:"resultados", sc_noResults:"Ningún proyecto coincide.",
@@ -316,7 +316,7 @@ export async function POST(req){
 const S={
   lang:"en", theme:"dark", tab:"itinerary", dayOffset:0, selectedJob:null,
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
-  wx:{ data:{}, live:false },
+  wx:{ cityIdx:0, current:null, days:[], live:false, loading:false },
   zoho:{ syncing:false, lastSync:new Date(), showCode:false },
   sc:{ q:"", project:null, cat:"inverter", queue:[], uploading:false, done:false,
        nf:{ code:"DL", project:"", crew:"crew-morales", date:todayISO, address:"", window:"8:00 AM – 12:00 PM" }, created:null },
@@ -332,39 +332,55 @@ function miles(a,b){
 }
 
 /* ============================================================================
-   WEATHER — real Open-Meteo (7-day, no key) + deterministic mock fallback
+   WEATHER — Open-Meteo (current + 7-day, no key) + mock fallback
    ============================================================================ */
-async function fetchForecast(lat,lon){
-  const url=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}`
-    +`&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max,weather_code`
-    +`&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=7`;
-  const r=await fetch(url); if(!r.ok) throw new Error("network");
-  const d=await r.json();
-  return d.daily.time.map((day,i)=>({date:day,high:Math.round(d.daily.temperature_2m_max[i]),low:Math.round(d.daily.temperature_2m_min[i]),
-    precip:d.daily.precipitation_probability_max[i],wind:Math.round(d.daily.wind_speed_10m_max[i]),code:d.daily.weather_code[i]}));
+const WX_CITIES=[
+  {label:"Orlando, FL",lat:28.5383,lon:-81.3792},
+  {label:"Lakeland, FL",lat:28.0395,lon:-81.9498},
+  {label:"Winter Haven, FL",lat:28.0222,lon:-81.7329},
+  {label:"Kissimmee, FL",lat:28.2920,lon:-81.4076},
+  {label:"Pine Castle, FL",lat:28.4626,lon:-81.3853},
+  {label:"Tampa, FL",lat:27.9506,lon:-82.4572},
+  {label:"Miami, FL",lat:25.7617,lon:-80.1918},
+  {label:"Jacksonville, FL",lat:30.3322,lon:-81.6557},
+  {label:"Tallahassee, FL",lat:30.4383,lon:-84.2807},
+  {label:"Okeechobee, FL",lat:27.2439,lon:-80.8298},
+  {label:"Vero Beach, FL",lat:27.6386,lon:-80.3973},
+  {label:"Daytona Beach, FL",lat:29.2108,lon:-81.0228},
+];
+const WMO={0:["Clear","☀️"],1:["Mostly clear","🌤️"],2:["Partly cloudy","⛅"],3:["Overcast","☁️"],
+  45:["Fog","🌫️"],48:["Rime fog","🌫️"],51:["Light drizzle","🌦️"],53:["Drizzle","🌦️"],55:["Heavy drizzle","🌧️"],
+  61:["Light rain","🌦️"],63:["Rain","🌧️"],65:["Heavy rain","🌧️"],66:["Freezing rain","🌧️"],67:["Freezing rain","🌧️"],
+  71:["Snow","🌨️"],73:["Snow","🌨️"],75:["Heavy snow","❄️"],77:["Snow grains","🌨️"],
+  80:["Showers","🌦️"],81:["Showers","🌧️"],82:["Violent showers","⛈️"],85:["Snow showers","🌨️"],86:["Snow showers","❄️"],
+  95:["Thunderstorm","⛈️"],96:["Storm + hail","⛈️"],99:["Severe storm","⛈️"]};
+function wxDesc(c){ return WMO[c]||["—","🌡️"]; }
+function uvBadge(uv){ uv=Math.round(uv||0);
+  if(uv<=2)return{t:"Low",c:"#16A34A"}; if(uv<=5)return{t:"Moderate",c:"#EAB308"};
+  if(uv<=8)return{t:"High",c:"#F87171"}; if(uv<=10)return{t:"Very High",c:"#DC2626"}; return{t:"Extreme",c:"#7C3AED"}; }
+function wxMock(city){
+  const seed=Math.abs(Math.round((city.lat+city.lon)*100))%100;
+  const days=[]; for(let i=0;i<7;i++){const x=(seed+i*11)%100; days.push({date:dShift(i),high:94+(x%8),low:72+(x%6),precip:(x*7)%80,wind:6+(x%22),code:[0,1,2,3,61,80,95][x%7]});}
+  return {current:{temp:days[0].high-3,feels:days[0].high+8,humidity:40+(seed%45),wind:1+(seed%14),uv:6+(seed%6),code:days[0].code},days};
 }
-function mockWeek(seed){
-  const arr=[];for(let i=0;i<7;i++){const s=(seed+i*13)%100;
-    arr.push({date:dShift(i),high:86+(s%9),low:71+(s%5),precip:(s*7)%95,wind:7+(s%24),code:s%3?1:61});}
-  return arr;
-}
-function wxIcon(c,precip,wind){ if(wind>=25)return"💨"; if(precip>=60||c>=61)return"🌧️"; if(c>=2)return"⛅"; return"☀️"; }
-function deriveAlerts(fc){const a=[];
-  if(fc.wind>=25)a.push({key:"wx_wind",detail:"wx_wind_detail",icon:"💨"});
-  if(fc.precip>=60)a.push({key:"wx_rain",detail:"wx_rain_detail",icon:"🌧️"});
-  if(fc.high>=95)a.push({key:"wx_heat",detail:"wx_heat_detail",icon:"🔥"});
-  return a;}
-function siteToday(job){ const w=S.wx.data[job.id]; return (w&&w[0]) || mockWeek(Math.abs(Math.round((job.geo.lat+job.geo.lon)*1000))%100)[0]; }
 async function loadWeather(){
-  const todays=JOBS.filter(j=>j.date===todayISO);
-  todays.forEach(j=>{ if(!S.wx.data[j.id]) S.wx.data[j.id]=mockWeek(Math.abs(Math.round((j.geo.lat+j.geo.lon)*1000))%100); });
-  render();
+  const city=WX_CITIES[S.wx.cityIdx]||WX_CITIES[0];
+  if(!S.wx.current){ const m=wxMock(city); S.wx.current=m.current; S.wx.days=m.days; }
+  S.wx.loading=true; render();
   try{
-    const res={};
-    await Promise.all(todays.map(async j=>{ try{res[j.id]=await fetchForecast(j.geo.lat,j.geo.lon);}catch(e){res[j.id]=S.wx.data[j.id];} }));
-    S.wx.data=res; S.wx.live=true;
-  }catch(e){ S.wx.live=false; }
-  render();
+    const url="https://api.open-meteo.com/v1/forecast?latitude="+city.lat+"&longitude="+city.lon
+      +"&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m"
+      +"&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max,uv_index_max"
+      +"&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=7";
+    const r=await fetch(url); if(!r.ok) throw 0; const d=await r.json();
+    S.wx.current={temp:Math.round(d.current.temperature_2m),feels:Math.round(d.current.apparent_temperature),
+      humidity:Math.round(d.current.relative_humidity_2m),wind:Math.round(d.current.wind_speed_10m),
+      uv:Math.round((d.daily.uv_index_max&&d.daily.uv_index_max[0])||0),code:d.current.weather_code};
+    S.wx.days=d.daily.time.map((tm,i)=>({date:tm,high:Math.round(d.daily.temperature_2m_max[i]),low:Math.round(d.daily.temperature_2m_min[i]),
+      precip:d.daily.precipitation_probability_max[i],wind:Math.round(d.daily.wind_speed_10m_max[i]),code:d.daily.weather_code[i]}));
+    S.wx.live=true;
+  }catch(e){ const m=wxMock(city); S.wx.current=m.current; S.wx.days=m.days; S.wx.live=false; }
+  S.wx.loading=false; render();
 }
 
 /* ============================================================================
@@ -523,55 +539,58 @@ const PHRASES=[["Power is off","La energía está apagada"],["Danger: High volta
   ["Do not touch","No tocar"],["De-energize","Desenergizar"],["Lock-Out/Tag-Out","Bloqueo/Etiqueta"],
   ["Call for help","Llamar a ayuda"],["Safety first","La seguridad es primero"]];
 const LOTO_EN=["Notify crew & customer","Identify all energy sources","Open the AC/PV disconnects","Open the main breaker",
-  "Apply lock + tag (one per worker)","Verify zero voltage with a meter","Discharge stored energy (caps/battery)","Test the meter on a known source again"];
+  "Apply lock + tag (one per worker)","Verify zero voltage with a meter","Discharge stored energy (caps/battery)","Re-test the meter on a known source"];
 const LOTO_ES=["Notificar a cuadrilla y cliente","Identificar todas las fuentes de energía","Abrir desconexión AC/PV","Abrir el interruptor principal",
-  "Aplicar candado + etiqueta (uno por trabajador)","Verificar voltaje cero con multímetro","Descargar energía almacenada (capacitores/batería)","Volver a probar el multímetro en fuente conocida"];
+  "Aplicar candado + etiqueta (uno por trabajador)","Verificar voltaje cero con multímetro","Descargar energía almacenada (capacitores/batería)","Reprobar el multímetro en fuente conocida"];
 const WX_RULES_EN=["Stop rooftop work at sustained winds ≥ 25 mph or gusts ≥ 35 mph.","No PV/roof work during active lightning — 30/30 rule (resume 30 min after last strike).",
   "Cover open MSP/roof penetrations before any rain.","Heat index ≥ 103°F: mandatory shade + water breaks every hour."];
 const WX_RULES_ES=["Detener trabajo en techo con vientos sostenidos ≥ 40 km/h o ráfagas ≥ 56 km/h.","Sin trabajo PV/techo durante rayos — regla 30/30 (reanudar 30 min tras el último rayo).",
   "Cubrir aberturas de MSP/techo antes de lluvia.","Índice de calor ≥ 39°C: sombra obligatoria + agua cada hora."];
+function windyURL(city){ return "https://embed.windy.com/embed2.html?lat="+city.lat+"&lon="+city.lon+"&detailLat="+city.lat+"&detailLon="+city.lon+"&zoom=6&level=surface&overlay=radar&product=radar&menu=&message=&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=mph&metricTemp=%C2%B0F&radarRange=-1"; }
 function weatherHTML(){
-  const todays=JOBS.filter(j=>j.date===todayISO);
-  const allAlerts=[]; todays.forEach(j=>deriveAlerts(siteToday(j)).forEach(a=>allAlerts.push({...a,job:j})));
-  const alertBlock=allAlerts.length===0
-    ?`<div class="card" style="padding:14px;border-left:8px solid var(--jc-DL)">☀️ ${t("wx_noAlerts")}</div>`
-    :allAlerts.map(a=>`<div class="weatherAlert" style="padding:13px"><div style="display:flex;align-items:center;gap:10px">
-        <span style="font-size:22px">${a.icon}</span><div><div style="font-weight:800">${t(a.key)} — <span style="color:var(--warn)">${t("wx_roofRisk")}</span></div>
-        <div style="font-size:13px;color:var(--text-dim)">${esc(a.job.id)} · ${esc(a.job.project)} · ${esc(a.job.window)}</div>
-        <div style="font-size:13px;margin-top:4px">${t(a.detail)}</div></div></div></div>`).join("");
-  // 7-day from first today's site (representative regional forecast)
-  const ref=todays[0]?(S.wx.data[todays[0].id]||mockWeek(20)):mockWeek(20);
-  const days7=ref.map((fc,i)=>{const dObj=new Date(fc.date+"T00:00:00");
-    return `<div class="card" style="padding:12px;text-align:center;min-width:96px">
-      <div style="font-weight:700;font-size:12px;color:var(--text-dim)">${i===0?t("today"):I18N[S.lang].weekdays[dObj.getDay()]}</div>
-      <div style="font-size:26px;margin:4px 0">${wxIcon(fc.code,fc.precip,fc.wind)}</div>
-      <div style="font-weight:800">${fc.high}°<span style="color:var(--text-dim);font-weight:600">/${fc.low}°</span></div>
-      <div style="font-size:11px;color:${fc.precip>=60?'var(--warn)':'var(--text-dim)'};margin-top:4px">💧${fc.precip}%</div>
-      <div style="font-size:11px;color:${fc.wind>=25?'var(--warn)':'var(--text-dim)'}">💨${fc.wind}</div></div>`;
+  const city=WX_CITIES[S.wx.cityIdx]||WX_CITIES[0];
+  const cur=S.wx.current||wxMock(city).current;
+  const days=(S.wx.days&&S.wx.days.length)?S.wx.days:wxMock(city).days;
+  const cd=wxDesc(cur.code); const uv=uvBadge(cur.uv);
+  const opts=WX_CITIES.map((c,i)=>`<option value="${i}" ${i===S.wx.cityIdx?"selected":""}>${esc(c.label)}</option>`).join("");
+  const days7=days.map((fc,i)=>{const dObj=new Date(fc.date+"T00:00:00");const ic=wxDesc(fc.code)[1];
+    return `<div class="card" style="padding:12px;text-align:center;min-width:110px;${i===0?'border:2px solid var(--wh-orange)':''}">
+      <div style="font-weight:800;font-size:12px;color:${i===0?'var(--wh-orange)':'var(--text-dim)'}">${i===0?t("today"):I18N[S.lang].weekdays[dObj.getDay()]}</div>
+      <div style="font-size:26px;margin:4px 0">${ic}</div>
+      <div style="font-weight:900;font-size:17px">${fc.high}°</div>
+      <div style="font-size:12px;color:var(--text-dim)">${fc.low}°</div>
+      <div style="font-size:11px;color:${fc.precip>=60?'var(--warn)':'var(--wh-blue-light)'};margin-top:5px">💧 ${fc.precip}%</div>
+      <div style="font-size:11px;color:${fc.wind>=25?'var(--warn)':'var(--text-dim)'}">💨 ${fc.wind} mph</div></div>`;
   }).join("");
-  const phrasesRows=PHRASES.map(p=>`<tr style="border-top:1px solid var(--line)"><td style="padding:7px 10px">${p[0]}</td><td style="padding:7px 10px;color:var(--wh-blue-light)">${p[1]}</td></tr>`).join("");
-  const loto=(S.lang==="en"?LOTO_EN:LOTO_ES).map((s,i)=>`<li style="margin:3px 0">${esc(s)}</li>`).join("");
-  const rules=(S.lang==="en"?WX_RULES_EN:WX_RULES_ES).map(s=>`<li style="margin:3px 0">${esc(s)}</li>`).join("");
+  const loto=(S.lang==="en"?LOTO_EN:LOTO_ES).map(x=>`<li style="margin:3px 0">${esc(x)}</li>`).join("");
+  const rules=(S.lang==="en"?WX_RULES_EN:WX_RULES_ES).map(x=>`<li style="margin:3px 0">${esc(x)}</li>`).join("");
+  const phrasesRows=PHRASES.map(pp=>`<tr style="border-top:1px solid var(--line)"><td style="padding:7px 10px">${pp[0]}</td><td style="padding:7px 10px;color:var(--wh-blue-light)">${pp[1]}</td></tr>`).join("");
   return `<div class="fade">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap">
       <div><h2 style="margin:0 0 4px;font-size:24px">${t("wx_title")} <span class="pill" style="background:${S.wx.live?'var(--jc-DL)':'var(--wh-grey)'};font-size:10px;vertical-align:middle">${S.wx.live?t("wx_live"):t("wx_mock")}</span></h2>
-      <div style="color:var(--text-dim);max-width:600px">${t("wx_sub")}</div></div>
-      <button class="btn3d sm" data-action="wxRefresh">⟳ ${t("wx_refresh")}</button></div>
+      <div style="color:var(--text-dim)">${t("wx_sub")}</div></div></div>
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <select id="wxCity" class="input" style="flex:1">${opts}</select>
+      <button class="btn3d sm" data-action="wxRefresh" style="min-width:54px">${S.wx.loading?"…":"⟳"}</button></div>
+    <div class="card" style="padding:20px;margin-top:14px;display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+      <div style="font-size:54px;line-height:1">${cd[1]}</div>
+      <div><div style="font-size:46px;font-weight:900;line-height:1">${cur.temp}°F</div>
+        <div style="color:var(--text-dim);font-weight:600;margin-top:4px">${cd[0]} · ${t("wx_feels")} ${cur.feels}°F</div></div>
+      <div style="margin-left:auto;display:flex;gap:26px;flex-wrap:wrap">
+        <div><div class="label" style="margin:0">${t("wx_humidity")}</div><div style="font-weight:800;font-size:18px">${cur.humidity}%</div></div>
+        <div><div class="label" style="margin:0">${t("wx_wind_l")}</div><div style="font-weight:800;font-size:18px">${cur.wind} mph</div></div>
+        <div><div class="label" style="margin:0">${t("wx_uv")}</div><div style="font-weight:800;font-size:18px">${cur.uv} <span class="pill" style="background:${uv.c};font-size:10px">${uv.t}</span></div></div>
+      </div></div>
     <div class="label" style="margin-top:18px">🌧 ${t("wx_radar")}</div>
-    <div class="radar"><div class="sweep"></div>
-      <div class="blip" style="width:60px;height:40px;left:30%;top:40%;background:rgba(80,180,255,.45)"></div>
-      <div class="blip" style="width:36px;height:28px;left:55%;top:55%;background:rgba(80,220,140,.5)"></div>
-      <div style="position:absolute;left:12px;bottom:10px;font-size:11px;color:var(--text-dim)">${t("wx_radarNote")}</div></div>
-    <div class="label" style="margin-top:18px">⚠ ${t("wx_alerts")}: ${allAlerts.length}</div>
-    <div style="display:flex;flex-direction:column;gap:10px">${alertBlock}</div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <iframe title="Windy radar" src="${windyURL(city)}" style="width:100%;height:430px;border:0;display:block" loading="lazy"></iframe></div>
     <div class="label" style="margin-top:18px">${t("wx_7day")}</div>
     <div class="scroll" style="display:flex;gap:10px;overflow-x:auto;padding-bottom:6px">${days7}</div>
     <div class="label" style="margin-top:18px">🦺 ${t("wx_safety")}</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px">
       <div class="card" style="padding:16px"><div style="font-weight:800;margin-bottom:6px">🔒 ${t("wx_loto")}</div><ol style="margin:0;padding-left:18px;font-size:13px">${loto}</ol></div>
       <div class="card" style="padding:16px"><div style="font-weight:800;margin-bottom:6px">🌪 ${t("wx_rules")}</div><ul style="margin:0;padding-left:18px;font-size:13px">${rules}</ul></div>
-      <div class="card" style="padding:16px"><div style="font-weight:800;margin-bottom:6px">🗣 ${t("wx_phrases")}</div>
-        <table style="width:100%;font-size:13px"><tbody>${phrasesRows}</tbody></table></div>
+      <div class="card" style="padding:16px"><div style="font-weight:800;margin-bottom:6px">🗣 ${t("wx_phrases")}</div><table style="width:100%;font-size:13px"><tbody>${phrasesRows}</tbody></table></div>
     </div></div>`;
 }
 
@@ -759,7 +778,7 @@ document.addEventListener("click",e=>{
     case "crewCalc": { const inp=document.getElementById("dispatchTarget"); const raw=(inp?inp.value:"").trim(); const q=raw.toLowerCase(); S.crews.q=raw; let target=null,label=""; if(q){ const job=JOBS.find(j=>j.id.toLowerCase()===q); if(job){ target={lat:job.geo.lat,lon:job.geo.lon}; label=job.id+" · "+job.project; } else { for(const k in FL_CITIES){ if(q.indexOf(k)>=0){ target=FL_CITIES[k]; label=raw; break; } } } } if(target){ let best=null,bd=Infinity; activeSource().forEach(c=>{const d=miles(c.gps,target); if(d<bd){bd=d;best=c;}}); S.crews.dispatchResult={target:{lat:target.lat,lon:target.lon,label:label||raw},crew:best,d:bd}; } else { S.crews.dispatchResult={error:true,q:raw}; } render(); break; }
     case "zohoSync": S.zoho.syncing=true; render(); setTimeout(function(){S.zoho.syncing=false;S.zoho.lastSync=new Date();render();},1300); break;
     case "zohoToggleCode": S.zoho.showCode=!S.zoho.showCode; render(); break;
-    case "wxRefresh": S.wx.live=false; S.wx.data={}; loadWeather(); break;
+    case "wxRefresh": loadWeather(); break;
     case "scSelectProject": S.sc.project=id; S.sc.done=false; render(); break;
     case "scSetCat": S.sc.cat=id; render(); break;
     case "scAddDemo": S.sc.queue.push({name:"IMG_"+(1000+S.sc.queue.length)+".jpg",size:(1800+S.sc.queue.length*40)+" KB",cat:S.sc.cat}); S.sc.done=false; render(); break;
@@ -787,6 +806,7 @@ document.addEventListener("input",function(e){
   else if(e.target.hasAttribute&&e.target.hasAttribute("data-nf")){ S.sc.nf[e.target.getAttribute("data-nf")]=e.target.value; S.sc.created=null; render(); }
 });
 document.addEventListener("change",function(e){
+  if(e.target.id==="wxCity"){ S.wx.cityIdx=Number(e.target.value); S.wx.current=null; S.wx.days=[]; S.wx.live=false; loadWeather(); return; }
   if(e.target.id==="scFile"&&e.target.files.length){
     Array.from(e.target.files).forEach(function(f){S.sc.queue.push({name:f.name,size:(f.size/1024).toFixed(0)+" KB",cat:S.sc.cat});});
     S.sc.done=false; render();
