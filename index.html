@@ -106,7 +106,7 @@ const LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAoAAAAGNCAYAAACBu8BgAADG8ElEQVR42uz9fX
 const I18N = {
  en:{
   appName:"Itinerary", appTagline:"Dispatch & Field Operations", lang:"Español",
-  tab_itinerary:"Itinerary", tab_crews:"Crews", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_zoho:"Zoho CRM Sync",
+  tab_itinerary:"Itinerary", tab_crews:"Crews", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar",
   // job codes
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Solar / Battery Install", jc_RDL_long:"Re-Roof + Solar", jc_RL_long:"Roofing", jc_S_long:"Service Call", jc_MSP_long:"Main Service Panel Upgrade",
@@ -156,7 +156,7 @@ const I18N = {
  },
  es:{
   appName:"Itinerario", appTagline:"Despacho y Operaciones de Campo", lang:"English",
-  tab_itinerary:"Itinerario", tab_crews:"Cuadrillas", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_zoho:"Sincronización Zoho",
+  tab_itinerary:"Itinerario", tab_crews:"Cuadrillas", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario",
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Instalación Solar / Batería", jc_RDL_long:"Re-Techado + Solar", jc_RL_long:"Techado", jc_S_long:"Llamada de Servicio", jc_MSP_long:"Mejora del Panel Principal",
   legend:"Leyenda de Códigos", crew:"Cuadrilla", today:"Hoy", prevDay:"Anterior", nextDay:"Siguiente",
@@ -415,7 +415,8 @@ async function loadCalendar(){
   }catch(e){ S.cal.status="error"; S.cal.err=String(e); }
   render();
 }
-setInterval(function(){ if(S.tab==="itinerary"&&S.itinView==="brigada"&&S.cal.status!=="loading") loadCalendar(); }, 60000);
+setInterval(function(){ if(((S.tab==="itinerary"&&S.itinView==="brigada")||S.tab==="calendar")&&S.cal.status!=="loading") loadCalendar(); }, 60000);
+function calendarTabHTML(){ return `<div class="fade">`+brigadaHTML()+`</div>`; }
 function brigadaHTML(){
   const c=S.cal, live=c.status==="live", d=c.data;
   const mObj=new Date(c.month+"T00:00:00");
@@ -778,6 +779,7 @@ function zohoHTML(){
    ============================================================================ */
 const TABS=[
   {id:"itinerary",key:"tab_itinerary",fn:itineraryHTML},
+  {id:"calendar",key:"tab_calendar",fn:calendarTabHTML},
   {id:"crews",key:"tab_crews",fn:crewsHTML},
   {id:"weather",key:"tab_weather",fn:weatherHTML},
   {id:"sitecapture",key:"tab_sitecapture",fn:siteCaptureHTML},
@@ -845,7 +847,7 @@ document.addEventListener("click",e=>{
   switch(a){
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
-    case "setTab": S.tab=id; if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); render(); break;
+    case "setTab": S.tab=id; if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status!=="live"&&S.cal.status!=="loading") loadCalendar(); render(); break;
     case "dayPrev": S.dayOffset--; S.selectedJob=null; render(); break;
     case "dayToday": S.dayOffset=0; S.selectedJob=null; render(); break;
     case "dayNext": S.dayOffset++; S.selectedJob=null; render(); break;
