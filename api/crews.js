@@ -3,7 +3,7 @@
 // Token scope required: "Read Vehicle Statistics".
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "s-maxage=20, stale-while-revalidate=40");
-  const token = process.env.SAMSARA_API_TOKEN;
+  const token = process.env.SAMSARA_API_TOKEN || process.env.Samsara_Coordinator_Key;
   if (!token) {
     return res.status(200).json({ configured: false, ok: false, crews: [] });
   }
