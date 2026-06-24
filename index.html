@@ -710,7 +710,7 @@ const INSP_ORDER=["missing","ready","pending","scheduled","approved"];
 function inspMeta(s){ return INSP_META[s]||{c:"var(--wh-grey)",en:s,es:s}; }
 function inspText(s){ const m=inspMeta(s); return S.lang==="es"?m.es:m.en; }
 function inspItems(){ return (S.proj.list||[]).filter(p=>p.insp&&p.insp.isItem); }
-const INSP_TYPE_META={ vip:{c:"#FACC15",en:"VIP Insp",es:"Insp. VIP"}, final:{c:"#0EA5E9",en:"Final Insp",es:"Insp. Final"}, roofing:{c:"#F97316",en:"Roofing Insp",es:"Insp. Techo"} };
+const INSP_TYPE_META={ vip:{c:"#FACC15",en:"VIP Insp",es:"Insp. VIP"}, final:{c:"#0EA5E9",en:"Install Insp",es:"Insp. Instalación"}, roofing:{c:"#F97316",en:"Roofing Insp",es:"Insp. Techo"} };
 function inspTypeMeta(t){ return INSP_TYPE_META[t]||{c:"var(--wh-grey)",en:t,es:t}; }
 function inspTypeText(t){ const m=inspTypeMeta(t); return S.lang==="es"?m.es:m.en; }
 function inspEntriesFrom(listArr){ const out=[]; (listArr||[]).forEach(p=>{ if(p.insp&&p.insp.items) p.insp.items.forEach(it=>out.push({p:p,it:it})); }); return out; }

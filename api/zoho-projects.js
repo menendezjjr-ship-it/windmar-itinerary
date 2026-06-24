@@ -96,7 +96,7 @@ function inspStatus(r) {
   // Roofing inspection
   if (code === "RL" || code === "RDL") {
     const rf = inspOne("", r.Roofing_Final_Inspection_Scheduled_Date, r.Roofing_Final_Inspection_Approved_Date, inWindow, false);
-    if (rf.status !== "none") items.push({ type: "roofing", vip: false, ...rf });
+    if (rf.status !== "none") items.push({ type: "roofing", vip: isVip, ...rf });
   }
   if (!items.length && isVip) items.push({ type: "vip", vip: true, status: "missing", label: "VIP — not scheduled", scheduled: null, approved: null });
   const rank = { missing: 0, ready: 1, pending: 2, scheduled: 3, approved: 4 };
