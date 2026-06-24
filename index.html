@@ -348,7 +348,8 @@ export async function POST(req){
 const S={
   lang:"en", theme:"dark", tab:"itinerary", dayOffset:0, selectedJob:null, itinView:"board", boardFilter:"all",
   live:{status:"idle",ok:false,jobs:[],updated:null,err:""},
-  proj:{status:"idle",ok:false,list:[],updated:null,err:"",selected:null,q:"",stageFilter:"all",alerts:[],notify:false},
+  proj:{status:"idle",ok:false,list:[],updated:null,err:"",selected:null,q:"",stageFilter:"all",alerts:[],notify:false,notes:{id:null,status:"idle",list:[]},noteFrom:null},
+  notif:{items:[],unread:0,open:false},
   cal:{status:"idle",records:[],y:new Date().getFullYear(),m:new Date().getMonth()+1,view:"month",typeFilter:"all",teamFilter:[],selected:null,dayPanel:null,weekStartISO:null,err:""},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
   wx:{ cityIdx:0, current:null, days:[], live:false, loading:false },
@@ -574,6 +575,7 @@ async function loadJobs(){
     const j=await r.json();
     if(j&&j.configured&&j.ok&&Array.isArray(j.jobs)){
       S.live={status:"live",ok:true,jobs:j.jobs,updated:j.updated,err:"",counts:j.counts||null};
+      notifyVisits(j.jobs);
     } else if(j&&j.configured){
       S.live={status:"error",ok:false,jobs:[],updated:null,err:j.error||("HTTP "+(j.status||"?"))};
     } else {
@@ -661,7 +663,7 @@ async function loadProjects(){
     const j=await r.json();
     if(j&&j.configured&&j.ok&&Array.isArray(j.projects)){
       S.proj.status="live"; S.proj.ok=true; S.proj.list=j.projects; S.proj.updated=j.updated;
-      checkEngineering(j.projects);
+      notifyProjects(j.projects);
     } else if(j&&j.configured){ S.proj.status="error"; S.proj.ok=false; S.proj.list=[]; S.proj.err=j.error||"error"; }
     else { S.proj.status="unconfigured"; S.proj.ok=false; S.proj.list=[]; }
   }catch(e){ S.proj.status="error"; S.proj.ok=false; S.proj.err=String(e); }
@@ -669,6 +671,45 @@ async function loadProjects(){
 }
 // Notify when a project ENTERS Engineering. Seeds silently on first load so the
 // current backlog doesn't all fire; persists across reloads via localStorage.
+/* ── Notification engine (in-app + desktop while dashboard is open) ── */
+function notifSeen(key){ let m={}; try{m=JSON.parse(localStorage.getItem("wm_notif_seen")||"{}");}catch(e){} if(m[key])return true; m[key]=Date.now(); try{ const ks=Object.keys(m); if(ks.length>500){ ks.slice(0,200).forEach(k=>delete m[k]); } localStorage.setItem("wm_notif_seen",JSON.stringify(m)); }catch(e){} return false; }
+function pushNotif(type,title,body,projId){
+  S.notif.items.unshift({type:type,title:title,body:body||"",projId:projId||null,ts:Date.now()});
+  if(S.notif.items.length>60) S.notif.items.length=60;
+  S.notif.unread++;
+  if(S.proj.notify&&("Notification"in window)&&Notification.permission==="granted"){ try{ new Notification(title,{body:body||"",tag:type+(projId||"")}); }catch(e){} }
+}
+const PIPE_DONE="Post-Installation";
+function notifyProjects(projects){
+  let snap=null; try{snap=JSON.parse(localStorage.getItem("wm_proj_snap")||"null");}catch(e){}
+  const first=!snap||typeof snap!=="object";
+  const fresh=[]; const DAY=86400000, today=new Date().toISOString().slice(0,10);
+  if(!first){
+    projects.forEach(p=>{
+      const prev=snap[p.id];
+      if(!prev){ if(!notifSeen("add:"+p.id)) pushNotif("added","🆕 "+(S.lang==="es"?"Nuevo proyecto":"New project")+": "+(p.num||p.name), (p.name||"")+" — "+stageLabel(p.stage), p.id); }
+      else if(prev.stage!==p.stage){
+        if(p.stage===PIPE_DONE){ if(!notifSeen("done:"+p.id)) pushNotif("completed","✅ "+(S.lang==="es"?"Completado":"Completed")+": "+(p.num||p.name), p.name||"", p.id); }
+        else if(!notifSeen("mv:"+p.id+":"+p.stage)) pushNotif("moved","➡ "+(p.num||p.name)+" → "+stageLabel(p.stage), (p.name||"")+(p.stage==="Engineering"?(" — "+ptr("engAlert")):""), p.id);
+        if(p.stage==="Engineering") fresh.push({id:p.id,num:p.num,name:p.name,phone:p.mobile||p.phone});
+      }
+    });
+    projects.forEach(p=>{ if(p.stage===PIPE_DONE) return; const ref=p.stageModified||p.modified; if(!ref) return; const days=(Date.now()-new Date(ref).getTime())/DAY; if(days>3 && !notifSeen("stale:"+p.id+":"+today)) pushNotif("stale","⏳ "+(S.lang==="es"?"Estancado":"Stuck")+" "+Math.floor(days)+"d: "+(p.num||p.name), (p.name||"")+" — "+stageLabel(p.stage)+" "+(S.lang==="es"?"sin avanzar":"not moving"), p.id); });
+  }
+  if(fresh.length) S.proj.alerts=fresh;
+  const ns={}; projects.forEach(p=>{ns[p.id]={stage:p.stage,mod:p.modified};}); try{localStorage.setItem("wm_proj_snap",JSON.stringify(ns));}catch(e){}
+  if(first){ try{ const eng=projects.filter(p=>p.stage==="Engineering").map(p=>p.id); localStorage.setItem("wm_eng_seen",JSON.stringify(eng)); }catch(e){} }
+}
+function notifyVisits(jobs){
+  const t=new Date(); t.setDate(t.getDate()+1); const tISO=t.toISOString().slice(0,10), today=new Date().toISOString().slice(0,10);
+  (jobs||[]).forEach(j=>{ if(j.date===tISO && !notifSeen("visit:"+j.id+":"+today)) pushNotif("visit","🔔 "+(S.lang==="es"?"Recordatorio: contactar al cliente para reconfirmar la visita":"Reminder: contact HO to re-confirm visit"), (j.project||"")+" — "+(j.crewLabel||"")+(j.window&&j.window!=="All day"?(" "+j.window):""), j.id); });
+}
+function notifPanelHTML(){
+  if(!S.notif.open) return "";
+  const ago=(ts)=>{ const s=(Date.now()-ts)/1000; return s<60?"now":s<3600?Math.floor(s/60)+"m":s<86400?Math.floor(s/3600)+"h":Math.floor(s/86400)+"d"; };
+  const items=S.notif.items.length?S.notif.items.map((n,i)=>`<div ${n.projId?`data-action="notifOpen" data-id="${esc(n.projId)}"`:""} style="padding:10px 12px;border-bottom:1px solid var(--line);cursor:${n.projId?"pointer":"default"}"><div style="display:flex;justify-content:space-between;gap:8px"><span style="font-weight:700;font-size:13px">${esc(n.title)}</span><span style="font-size:11px;color:var(--text-dim);flex-shrink:0">${ago(n.ts)}</span></div>${n.body?`<div style="font-size:12px;color:var(--text-dim);margin-top:2px">${esc(n.body)}</div>`:""}</div>`).join(""):`<div style="padding:24px;text-align:center;color:var(--text-dim);font-size:13px">${S.lang==="es"?"Sin notificaciones":"No notifications yet"}</div>`;
+  return `<div data-action="notifClose" style="position:fixed;inset:0;z-index:1100"><div data-action="noop" class="card rise" style="position:absolute;top:60px;right:16px;width:340px;max-width:92vw;max-height:70vh;overflow:auto;border-radius:14px"><div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)"><span style="font-weight:800">🔔 ${S.lang==="es"?"Notificaciones":"Notifications"}</span><button class="btn3d grey sm" data-action="notifClose">✕</button></div>${items}</div></div>`;
+}
 function checkEngineering(projects){
   const engIds=projects.filter(p=>p.stage==="Engineering").map(p=>p.id);
   let seen=null; try{ seen=JSON.parse(localStorage.getItem("wm_eng_seen")||"null"); }catch(e){}
@@ -696,7 +737,14 @@ function projPill(){
   if(P.status==="error") return `<span class="pill" style="background:var(--warn)" title="${esc(P.err||"")}">API error</span><button class="btn3d sm" data-action="projRefresh">⟳</button>`;
   return `<span class="pill" style="background:var(--wh-grey)">not connected</span><button class="btn3d sm" data-action="projRefresh">⟳ Try live</button>`;
 }
+async function loadProjectNotes(id){
+  S.proj.notes={id:id,status:"loading",list:[]}; render();
+  try{ const r=await fetch("/api/zoho-notes?id="+encodeURIComponent(id),{cache:"no-store"}); const j=await r.json(); S.proj.notes={id:id,status:(j&&j.ok)?"live":"error",list:(j&&j.notes)||[]}; }
+  catch(e){ S.proj.notes={id:id,status:"error",list:[]}; }
+  render();
+}
 function projectDetailHTML(p){
+  const es=S.lang==="es";
   const row=(label,val)=> val?`<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line)"><span style="color:var(--text-dim);font-size:12.5px">${label}</span><span style="font-weight:700;font-size:13px;text-align:right">${esc(val)}</span></div>`:"";
   const sc=STAGE_META[p.stage]||{c:"var(--wh-grey)"};
   const STAGE_TL={"NTP":0,"Site Visit":1,"Engineering":2,"Permitting":4,"Install":5,"Post-Installation":7};
@@ -706,32 +754,50 @@ function projectDetailHTML(p){
     const col=done?"#16A34A":isCur?"var(--wh-orange)":"var(--line)";
     const lineCol=(done||past)?"#16A34A":"var(--line)";
     const sub=tm.date?fmtDate(tm.date):isCur?ptr("inprogress"):past?"—":ptr("pending");
-    return `<div style="display:flex;gap:10px;align-items:flex-start">
+    const focused=S.proj.noteFrom&&tm.date&&S.proj.noteFrom===tm.date;
+    return `<div data-action="projStageFocus" data-id="${tm.date||''}" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;border-radius:8px;padding:2px 6px;margin-left:-6px;background:${focused?'rgba(248,155,36,.12)':'transparent'}" title="${es?'Ver notas desde esta etapa':'Show notes from this stage'}">
       <div style="display:flex;flex-direction:column;align-items:center"><span style="width:14px;height:14px;border-radius:50%;background:${col};border:2px solid var(--bg)"></span>${i<p.timeline.length-1?`<span style="width:2px;flex:1;min-height:20px;background:${lineCol}"></span>`:""}</div>
       <div style="padding-bottom:12px"><div style="font-weight:700;font-size:13px${isCur?";color:var(--wh-orange)":""}">${esc(tm.label)}</div><div style="font-size:12px;color:var(--text-dim)">${sub}</div></div></div>`;
   }).join("");
   const tel=p.mobile||p.phone;
   const sys=[p.systemKw?p.systemKw+" kW":null,p.modules?(p.modules+" mod"+(p.moduleW?" · "+p.moduleW+"W":"")):null,p.battery?("🔋 "+p.battery):null].filter(Boolean).join(" · ");
-  return `<div class="card fade" style="padding:0;margin-bottom:16px;border-left:8px solid ${sc.c};overflow:hidden">
-    <div style="padding:18px 20px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+  // ── Notes feed (lazy-loaded per project) ──
+  const ns=S.proj.notes, ready=ns.id===p.id&&ns.status==="live", loadingN=ns.id===p.id&&ns.status==="loading";
+  let noteList=ready?ns.list:[];
+  if(S.proj.noteFrom) noteList=noteList.filter(n=>n.time&&n.time.slice(0,10)>=S.proj.noteFrom);
+  const notesInner = loadingN?`<div style="color:var(--text-dim);font-size:13px;padding:8px">⟳ ${es?'Cargando notas…':'Loading notes…'}</div>`
+    : !ready?`<div style="color:var(--text-dim);font-size:12px;padding:8px">${es?'Las notas se cargan en producción.':'Notes load live in production.'}</div>`
+    : noteList.length?noteList.map(n=>`<div style="padding:10px 12px;border-radius:10px;background:var(--bg-2);border:1px solid var(--line);margin-bottom:8px"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:4px"><span style="font-weight:700;font-size:12px;color:var(--wh-blue-light)">${esc(n.author||'—')}</span><span style="font-size:11px;color:var(--text-dim)">${n.time?fmtDate(n.time.slice(0,10)):''}</span></div>${n.title?`<div style="font-weight:700;font-size:13px;margin-bottom:2px">${esc(n.title)}</div>`:''}<div style="font-size:13px;white-space:pre-wrap;line-height:1.5">${esc(n.content)}</div></div>`).join("")
+    : `<div style="color:var(--text-dim);font-size:13px;padding:8px">${es?'Sin notas':'No notes'}${S.proj.noteFrom?` ${es?'desde':'from'} ${fmtDate(S.proj.noteFrom)}`:''}.</div>`;
+  const notesHead=`<div style="display:flex;align-items:center;gap:10px;margin:6px 0 10px;flex-wrap:wrap"><div class="label" style="margin:0">📝 ${es?'Notas':'Notes'}${ready?` (${ns.list.length})`:''}</div>${S.proj.noteFrom?`<button class="btn3d ghost sm" data-action="projStageFocus" data-id="">✕ ${es?'Todas':'All'}</button><span style="font-size:11px;color:var(--wh-orange)">${es?'desde':'from'} ${fmtDate(S.proj.noteFrom)}</span>`:''}</div>`;
+  const zohoUrl="https://crm.zoho.com/crm/org20063498498/tab/Deals/"+esc(p.id);
+  return `<div class="card fade" style="padding:0;margin-bottom:16px;border-left:8px solid ${sc.c};overflow:auto;max-height:82vh">
+    <div style="padding:18px 20px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;position:sticky;top:0;background:var(--panel);z-index:2;border-bottom:1px solid var(--line)">
       <div><span class="pill" style="background:${sc.c}">${esc(stageLabel(p.stage))}</span>
         <h2 style="margin:10px 0 2px;font-size:22px">${esc(p.name)}</h2>
-        <div style="color:var(--text-dim);font-weight:700;font-size:13px">${esc(p.num)}${p.owner?(" · "+ptr("owner")+": "+esc(p.owner)):""}</div></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn3d sm" data-action="scFromProject" data-id="${esc(p.num)}">📸 SiteCapture</button><button class="btn3d grey sm" data-action="closeProject">✕ ${ptr("close")}</button></div></div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(258px,1fr));gap:0 24px;padding:0 20px 18px">
+        <div style="color:var(--text-dim);font-weight:700;font-size:13px">${esc(p.num)}${(p.salesRep||p.owner)?(" · "+ptr("owner")+": "+esc(p.salesRep||p.owner)):""}</div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn3d blue sm" href="${zohoUrl}" target="_blank">🔗 Zoho</a><button class="btn3d sm" data-action="scFromProject" data-id="${esc(p.num)}">📸 SiteCapture</button><button class="btn3d grey sm" data-action="closeProject">✕ ${ptr("close")}</button></div></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(258px,1fr));gap:0 24px;padding:14px 20px 0">
       <div>
         <div class="label" style="margin:6px 0">${ptr("contact")}</div>
         ${tel?`<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap"><a class="btn3d green sm" href="tel:${esc(tel.replace(/[^0-9+]/g,""))}">📞 ${esc(tel)}</a>${p.email?`<a class="btn3d blue sm" href="mailto:${esc(p.email)}">✉ ${ptr("email")}</a>`:""}</div>`:`<div style="color:var(--text-dim);font-size:12px;margin-bottom:8px">${ptr("noPhone")}</div>`}
         ${p.address?`<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line)"><span style="color:var(--text-dim);font-size:12.5px">📍</span><a href="https://maps.google.com/?q=${encodeURIComponent(p.address)}" target="_blank" style="font-weight:700;font-size:13px;text-align:right;color:var(--wh-blue-light)">${esc(p.address)}</a></div>`:""}
         <div class="label" style="margin:16px 0 6px">${ptr("system")}</div>
         ${sys?`<div style="font-weight:700;font-size:13px;margin-bottom:6px">${esc(sys)}</div>`:`<div style="color:var(--text-dim);font-size:12px;margin-bottom:6px">—</div>`}
-        ${row(ptr("finance"),p.finance)}
+        <div class="label" style="margin:16px 0 6px">${es?'Financiamiento':'Financing'}</div>
+        ${row(es?'Compañía':'Company',p.finance)}
+        ${row(es?'Monto':'Amount',p.amount!=null?('$'+Number(p.amount).toLocaleString()):'')}
+        ${row(es?'Cuenta #':'Acct #',p.financeCustNo)}
+        ${row(es?'Financiam. 2º':'Secondary',p.secondaryFinance?(es?'Sí':'Yes'):'')}
+        ${p.financeNotes?`<div style="margin-top:6px;font-size:12.5px;color:var(--text-dim);white-space:pre-wrap">${esc(p.financeNotes)}</div>`:''}
         ${row(ptr("ahj"),p.ahj)}
         ${row(ptr("hoa"),p.hoa)}
         ${row("Roof",[p.roofType,p.reroof].filter(Boolean).join(" · "))}
       </div>
       <div><div class="label" style="margin:6px 0">${ptr("timeline")}</div><div style="margin-top:4px">${tl}</div></div>
-    </div></div>`;
+    </div>
+    <div style="padding:8px 20px 18px;border-top:1px solid var(--line);margin-top:8px">${notesHead}<div style="max-height:300px;overflow:auto">${notesInner}</div></div>
+  </div>`;
 }
 function projectsHTML(){
   const P=S.proj;
@@ -1260,6 +1326,7 @@ function render(){
         <div><div style="font-weight:900;font-size:18px;color:#fff">WindMar <span style="color:#FFD9A8">${t("appName")}</span></div>
           <div style="font-size:11px;color:#cfe0ff;font-weight:600;text-transform:uppercase;letter-spacing:1px">${t("appTagline")}</div></div>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+          <button class="btn3d ghost sm" data-action="notifToggle" style="color:#fff;border-color:#0c1322">🔔${S.notif.unread?(" "+S.notif.unread):""}</button>
           <button class="btn3d ghost sm" data-action="toggleLang" style="color:#fff;border-color:#0c1322">🌐 ${t("lang")}</button>
           <button class="btn3d ghost sm" data-action="toggleTheme" style="color:#fff;border-color:#0c1322">${S.theme==="dark"?"☀":"🌙"}</button></div>
       </div></header>
@@ -1267,7 +1334,7 @@ function render(){
       <div class="scroll" style="max-width:1180px;margin:0 auto;padding:0 12px;display:flex;overflow-x:auto">
         ${TABS.map(tb=>`<button class="tabbtn ${S.tab===tb.id?'active':''}" data-action="setTab" data-id="${tb.id}">${t(tb.key)}</button>`).join("")}
       </div></nav>
-    <main style="max-width:1180px;margin:0 auto;padding:22px 20px 70px">${active.fn()}</main>`;
+    <main style="max-width:1180px;margin:0 auto;padding:22px 20px 70px">${active.fn()}</main>${notifPanelHTML()}`;
   if(aeId){const el=document.getElementById(aeId);if(el){el.focus();if(caret!=null&&el.setSelectionRange){try{el.setSelectionRange(caret,caret);}catch(e){}}}}
   if(S.tab==="crews") setTimeout(initCrewMap,0);
 }
@@ -1279,13 +1346,17 @@ document.addEventListener("click",e=>{
   const a=el.getAttribute("data-action"), id=el.getAttribute("data-id");
   if(el.tagName==="SELECT"||el.tagName==="OPTION") return;
   switch(a){
+    case "notifToggle": S.notif.open=!S.notif.open; if(S.notif.open) S.notif.unread=0; render(); break;
+    case "notifClose": S.notif.open=false; render(); break;
+    case "notifOpen": S.notif.open=false; S.tab="projects"; S.proj.selected=id; S.proj.noteFrom=null; S.proj.stageFilter="all"; loadProjectNotes(id); render(); break;
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
     case "setTab": S.tab=id; if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="projects"&&S.proj.status==="idle") loadProjects(); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); render(); break;
     case "jobsRefresh": loadJobs(); break;
     case "projRefresh": loadProjects(); break;
-    case "selectProject": S.proj.selected=id; render(); break;
-    case "closeProject": S.proj.selected=null; render(); break;
+    case "selectProject": S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); render(); break;
+    case "projStageFocus": S.proj.noteFrom=(id&&S.proj.noteFrom!==id)?id:null; render(); break;
+    case "closeProject": S.proj.selected=null; S.proj.noteFrom=null; render(); break;
     case "projStage": S.proj.stageFilter=id; S.proj.selected=null; render(); break;
     case "projClearAlerts": S.proj.alerts=[]; render(); break;
     case "projEnableAlerts": enableAlerts(); break;
