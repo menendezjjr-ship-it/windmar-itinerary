@@ -1,0 +1,161 @@
+// /api/zoho-projects.js — LIVE project pipeline for the coordinator.
+// Pulls Zoho CRM Deals across the operational lifecycle (NTP → Post-Installation)
+// with full status, homeowner contact, system specs and a dated stage timeline.
+// Secrets live ONLY in env vars (ZOHO_CLIENT_ID/SECRET/REFRESH_TOKEN).
+
+import { readFileSync, existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
+const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
+const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
+
+// Local dev only: serve a real-data snapshot when creds are absent (dev/ is gitignored).
+function readDevSnapshot(name) {
+  try { const p = join(dirname(fileURLToPath(import.meta.url)), "..", "dev", name); if (existsSync(p)) return JSON.parse(readFileSync(p, "utf8").replace(/^﻿/, "")); } catch (e) {}
+  return null;
+}
+
+// Ordered operational pipeline the coordinator works (NTP → post-install).
+const STAGES = ["NTP", "Site Visit", "Engineering", "Permitting", "Install", "Post-Installation"];
+const STAGE_IDX = Object.fromEntries(STAGES.map((s, i) => [s, i]));
+
+let cachedToken = null, tokenExpiry = 0;
+function hasCreds() { return !!(process.env.ZOHO_CLIENT_ID && process.env.ZOHO_CLIENT_SECRET && process.env.ZOHO_REFRESH_TOKEN); }
+
+async function getAccessToken() {
+  if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
+  const res = await fetch(`${ACCOUNTS_HOST}/oauth/v2/token`, {
+    method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token", client_id: process.env.ZOHO_CLIENT_ID,
+      client_secret: process.env.ZOHO_CLIENT_SECRET, refresh_token: process.env.ZOHO_REFRESH_TOKEN,
+    }),
+  });
+  const data = await res.json();
+  if (!data.access_token) throw new Error(`token refresh failed: ${data.error || JSON.stringify(data)}`);
+  cachedToken = data.access_token; tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
+  return cachedToken;
+}
+
+async function searchAll(module, criteria, fields, token) {
+  const all = [];
+  for (let page = 1; page <= 30; page++) {
+    const path = `${encodeURIComponent(module)}/search?criteria=${encodeURIComponent(criteria)}&fields=${encodeURIComponent(fields)}&per_page=200&page=${page}`;
+    const res = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+    if (res.status === 204) break;
+    if (!res.ok) throw new Error(`Zoho ${module} ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const data = await res.json();
+    const batch = data.data || [];
+    all.push(...batch);
+    if (batch.length < 200 || !(data.info && data.info.more_records)) break;
+  }
+  return all;
+}
+
+const lookup = (v) => (v && typeof v === "object" ? v.name : v) || "";
+const clean = (s) => String(s || "").replace(/[\s,]+$/, "").trim();
+
+function fmtPhone(s) {
+  const d = String(s || "").replace(/\D/g, "");
+  if (d.length === 10) return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+  if (d.length === 11 && d[0] === "1") return `(${d.slice(1, 4)}) ${d.slice(4, 7)}-${d.slice(7)}`;
+  return s || "";
+}
+
+// "DL8649 ROSARITO GÓMEZ COLLAZO 8200 Mara Vista Court, Orlando, FL" -> code/num/customer
+function parseDeal(name) {
+  const out = { code: "", num: "", customer: "" };
+  if (!name) return out;
+  const m = name.match(/^\s*((?:RDL|RL|DL|MSP|S)\d{2,})\s+(.*)$/i);
+  if (!m) { out.customer = name.trim(); return out; }
+  out.num = m[1].toUpperCase();
+  out.code = (out.num.match(/^(RDL|RL|DL|MSP|S)/) || [])[1] || "";
+  const rest = m[2].trim();
+  const a = rest.match(/^(.+?)[\s,]+\d{1,6}[\s,].+$/);
+  out.customer = a ? a[1].replace(/[\s,]+$/, "").trim() : rest;
+  return out;
+}
+
+function mapDeal(r) {
+  const d = parseDeal(r.Deal_Name);
+  const addr = [clean(r.Address), clean(r.City), [clean(r.State), clean(r.Zip)].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  // Curated stage timeline (label + date) in lifecycle order; nulls shown as pending client-side.
+  const timeline = [
+    { key: "ntp", label: "NTP", date: r.NTP_From || null },
+    { key: "survey", label: "Site Survey", date: r.Site_Survey_Completed_Date || r.Site_Survey_Scheduled_Date || null },
+    { key: "engineering", label: "Engineering", date: r.Design_Engineering_From ? String(r.Design_Engineering_From).slice(0, 10) : null },
+    { key: "permit_sub", label: "Permit Submitted", date: r.Permit_Submitted_Date || null },
+    { key: "permit_rec", label: "Permit Received", date: r.Permit_Received_Date || null },
+    { key: "install", label: "Install", date: (r.Install_From ? String(r.Install_From).slice(0, 10) : null) || r.Installation_Completed_Date || null },
+    { key: "inspection", label: "Final Inspection", date: r.Final_Inspection_Approved || r.Final_Inspection_Scheduled_Date || null },
+    { key: "pto", label: "PTO / Utility", date: r.PTO_Approval_Date || null },
+  ];
+  const battery = lookup(r.Battery_Brand) || (r.Tesla_Powerwall_Quantity ? lookup(r.Tesla_Powerwall_Quantity) : "");
+  return {
+    id: r.id,
+    num: d.num || "",
+    code: d.code || "DL",
+    name: d.customer || r.Deal_Name || "",
+    stage: r.Stage,
+    stageIdx: STAGE_IDX[r.Stage] != null ? STAGE_IDX[r.Stage] : 99,
+    phone: fmtPhone(r.Client_Phone),
+    mobile: fmtPhone(r.Client_Mobile),
+    email: r.Client_Email || "",
+    contact: lookup(r.Contact_Name) || "",
+    owner: lookup(r.Owner) || "",
+    address: addr,
+    systemKw: (r.System_Size_kW1 != null && r.System_Size_kW1 !== 0) ? r.System_Size_kW1 : null,
+    modules: r.Module_Count || null,
+    moduleW: lookup(r.Module_Wattage) || null,
+    battery: battery || null,
+    finance: lookup(r.Primary_Finance_Company) || "",
+    ahj: lookup(r.Authority_Having_Jurisdiction_AHJ) || "",
+    hoa: lookup(r.Is_there_an_HOA) || (r.HOA ? "Yes" : ""),
+    roofType: lookup(r.Roof_Type) || "",
+    reroof: lookup(r.Windmar_Roofing) || "",
+    modified: r.Modified_Time || null,
+    stageModified: r.Stage_Modified_Time || null,
+    timeline,
+  };
+}
+
+const FIELDS = [
+  "Deal_Name", "Stage", "Modified_Time", "Stage_Modified_Time",
+  "Client_Phone", "Client_Mobile", "Client_Email", "Contact_Name", "Owner",
+  "Address", "City", "State", "Zip",
+  "System_Size_kW1", "Module_Count", "Module_Wattage", "Battery_Brand", "Tesla_Powerwall_Quantity",
+  "Primary_Finance_Company", "Authority_Having_Jurisdiction_AHJ", "Is_there_an_HOA", "HOA", "Roof_Type", "Windmar_Roofing",
+  "NTP_From", "Site_Survey_Scheduled_Date", "Site_Survey_Completed_Date", "Design_Engineering_From",
+  "Permit_Submitted_Date", "Permit_Received_Date", "Install_From", "Installation_Completed_Date",
+  "Final_Inspection_Scheduled_Date", "Final_Inspection_Approved", "PTO_Approval_Date",
+].join(",");
+
+export default async function handler(req, res) {
+  res.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=120");
+  if (!hasCreds()) {
+    const snap = readDevSnapshot("raw-deals.json"); // array of raw Deal records
+    if (Array.isArray(snap)) {
+      const projects = snap.map(mapDeal).sort((a, b) => a.stageIdx - b.stageIdx || String(a.num).localeCompare(String(b.num)));
+      const byStage = {}; STAGES.forEach((s) => (byStage[s] = 0)); projects.forEach((p) => { if (byStage[p.stage] != null) byStage[p.stage]++; });
+      return res.status(200).json({ configured: true, ok: true, source: "snapshot", updated: new Date().toISOString(), stages: STAGES, counts: { total: projects.length, byStage }, projects });
+    }
+    return res.status(200).json({ configured: false, ok: false, stages: STAGES, projects: [] });
+  }
+  try {
+    const token = await getAccessToken();
+    const criteria = "(" + STAGES.map((s) => `(Stage:equals:${s})`).join("or") + ")";
+    const deals = await searchAll("Deals", criteria, FIELDS, token);
+    const projects = deals.map(mapDeal).sort((a, b) => a.stageIdx - b.stageIdx || String(a.num).localeCompare(String(b.num)));
+    const byStage = {};
+    STAGES.forEach((s) => (byStage[s] = 0));
+    projects.forEach((p) => { if (byStage[p.stage] != null) byStage[p.stage]++; });
+    return res.status(200).json({
+      configured: true, ok: true, updated: new Date().toISOString(),
+      stages: STAGES, counts: { total: projects.length, byStage }, projects,
+    });
+  } catch (e) {
+    return res.status(200).json({ configured: true, ok: false, error: String(e && e.message || e), stages: STAGES, projects: [] });
+  }
+}
