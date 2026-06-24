@@ -46,7 +46,8 @@ export default async function handler(req, res) {
     }));
     const tmap = {}; projects.forEach((p) => { if (p.template_key) tmap[p.template_key] = p.template || p.template_key; });
     const templates = Object.keys(tmap).map((k) => ({ key:k, name:tmap[k] }));
-    return res.status(200).json({ configured:true, ok:true, count:(arr.length), projects, templates, via:"service-app" });
+    const canCreate = !!((process.env.SITECAPTURE_USER && process.env.SITECAPTURE_PASS) || process.env.Site_Capture_Key);
+    return res.status(200).json({ configured:true, ok:true, canCreate, count:(arr.length), projects, templates, via:"service-app" });
   } catch (e) {
     return res.status(200).json({ configured:true, ok:false, error:String(e), projects:[] });
   }
