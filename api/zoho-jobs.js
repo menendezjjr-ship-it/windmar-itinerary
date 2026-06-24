@@ -104,7 +104,7 @@ function normCrew(raw) {
 const INSTALL_FIELDS = "Name,Installation_Start_Date,Installation_Complete_Date,Installation_Team,Deal,MSP_Upgrade_Required,Battery_Type,Language_Preference,Number_of_Days_Needed";
 const SERVICE_FIELDS = "Name,Scheduled_Visit_1,Assigned_Technician,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description";
 
-function mapInstall(r, todayISO) {
+export function mapInstall(r, todayISO) {
   const deal = parseDeal(lookup(r.Deal));
   const crew = normCrew(lookup(r.Installation_Team) || "Unassigned");
   const date = r.Installation_Start_Date || null;
@@ -128,6 +128,8 @@ function mapInstall(r, todayISO) {
     window: "All day",
     hhmm: "00:00",
     status,
+    cat: status === "done" ? "completed" : status, // installs: completed | pastdue | scheduled
+    rawStatus: r.Installation_Complete_Date ? "Installed" : "",
     msp,
     phone: "",
     geo: null,
@@ -135,7 +137,7 @@ function mapInstall(r, todayISO) {
   };
 }
 
-function mapService(r, todayISO) {
+export function mapService(r, todayISO) {
   const deal = parseDeal(lookup(r.Associated_Deal));
   const crew = normCrew(lookup(r.Assigned_Technician) || "Unassigned");
   const v = splitDT(r.Scheduled_Visit_1);
@@ -143,6 +145,14 @@ function mapService(r, todayISO) {
   let status = "scheduled";
   if (/^(7|8)\b/.test(st) || /complete/i.test(st)) status = "done";
   else if (v.date && v.date < todayISO) status = "pastdue";
+  // Richer category from the Zoho Ticket_Status for the stage dashboard.
+  let cat;
+  if (/^(7|8)\b/.test(st) || /complete/i.test(st)) cat = "completed";
+  else if (/^5\b/.test(st) || /reschedul/i.test(st)) cat = "reschedule";
+  else if (/^3\b/.test(st) || /need.*schedule/i.test(st)) cat = "needs_schedule";
+  else if (/^6\b/.test(st) || /tier|rma|warranty/i.test(st)) cat = "in_progress";
+  else if (v.date && v.date < todayISO) cat = "pastdue";
+  else cat = "scheduled";
   const svc = Array.isArray(r.Type_of_Service) ? r.Type_of_Service.join(", ") : (r.Type_of_Service || "");
   return {
     id: deal.num ? `${deal.num} · ${r.Name}` : r.Name,
@@ -156,6 +166,8 @@ function mapService(r, todayISO) {
     window: v.time || "Time TBD",
     hhmm: v.hhmm || "23:59",
     status,
+    cat,
+    rawStatus: st,
     msp: false,
     phone: "",
     geo: null,

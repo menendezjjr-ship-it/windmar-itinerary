@@ -8,7 +8,7 @@ const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
 const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
 
 // Ordered operational pipeline the coordinator works (NTP → post-install).
-const STAGES = ["NTP", "Site Visit", "Engineering", "Permitting", "Install", "Post-Installation"];
+export const STAGES = ["NTP", "Site Visit", "Engineering", "Permitting", "Install", "Post-Installation"];
 const STAGE_IDX = Object.fromEntries(STAGES.map((s, i) => [s, i]));
 
 let cachedToken = null, tokenExpiry = 0;
@@ -68,7 +68,7 @@ function parseDeal(name) {
   return out;
 }
 
-function mapDeal(r) {
+export function mapDeal(r) {
   const d = parseDeal(r.Deal_Name);
   const addr = [clean(r.Address), clean(r.City), [clean(r.State), clean(r.Zip)].filter(Boolean).join(" ")].filter(Boolean).join(", ");
   // Curated stage timeline (label + date) in lifecycle order; nulls shown as pending client-side.

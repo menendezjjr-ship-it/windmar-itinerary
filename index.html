@@ -346,7 +346,7 @@ export async function POST(req){
    APP STATE
    ============================================================================ */
 const S={
-  lang:"en", theme:"dark", tab:"itinerary", dayOffset:0, selectedJob:null, itinView:"board",
+  lang:"en", theme:"dark", tab:"itinerary", dayOffset:0, selectedJob:null, itinView:"board", boardFilter:"all",
   live:{status:"idle",ok:false,jobs:[],updated:null,err:""},
   proj:{status:"idle",ok:false,list:[],updated:null,err:"",selected:null,q:"",stageFilter:"all",alerts:[],notify:false},
   cal:{status:"idle",data:null,view:"all",month:(new Date().getFullYear()+"-"+String(new Date().getMonth()+1).padStart(2,"0")+"-01"),err:""},
@@ -484,6 +484,18 @@ function statusLabel(s){
   if(s==="pastdue") return S.lang==="en"?"Past Due":S.lang==="es"?"Atrasado":"Atrasado";
   return t(STATUS_KEY[s]||"st_scheduled");
 }
+// ── Stage dashboard categories (ordered) ──
+const STAGE_CATS=[
+  {key:"completed",     color:"#16A34A", icon:"✓", en:"Completed",        es:"Completado"},
+  {key:"scheduled",     color:"#F89B24", icon:"●", en:"Scheduled",        es:"Programado"},
+  {key:"in_progress",   color:"#1D429B", icon:"▶", en:"In Progress",      es:"En Progreso"},
+  {key:"reschedule",    color:"#A855F7", icon:"↻", en:"Needs Reschedule", es:"Reprogramar"},
+  {key:"needs_schedule",color:"#06B6D4", icon:"+", en:"Needs Scheduling", es:"Por Programar"},
+  {key:"pastdue",       color:"#DC2626", icon:"!", en:"Past Due",         es:"Atrasado"},
+];
+function jobCat(j){ return j.cat || (j.status==="done"?"completed":j.status==="pastdue"?"pastdue":j.status==="enroute"||j.status==="onsite"?"in_progress":"scheduled"); }
+function stageMeta(cat){ return STAGE_CATS.find(c=>c.key===cat)||{key:cat,color:"var(--wh-grey)",icon:"●",en:cat,es:cat}; }
+function stageText(cat){ const m=stageMeta(cat); return S.lang==="es"?m.es:m.en; }
 function livePill(){
   const L=S.live||{};
   if(L.ok) return `<span class="pill" style="background:var(--jc-DL)"><span class="livedot" style="background:#bdf7c8;margin-right:5px"></span>LIVE</span>`
@@ -753,10 +765,12 @@ function itineraryHTML(){
   const dateISO=dShift(S.dayOffset), dObj=new Date(dateISO+"T00:00:00");
   const dateLabel=`${I18N[S.lang].weekdays[dObj.getDay()]}, ${I18N[S.lang].months[dObj.getMonth()]} ${dObj.getDate()}`;
   const dayJobs=activeJobs().filter(j=>j.date===dateISO);
+  const stageCounts={}; STAGE_CATS.forEach(c=>stageCounts[c.key]=0); dayJobs.forEach(j=>{const c=jobCat(j); if(stageCounts[c]!=null)stageCounts[c]++;});
+  const fJobs=S.boardFilter==="all"?dayJobs:dayJobs.filter(j=>jobCat(j)===S.boardFilter);
   const sel=S.selectedJob?activeJobs().find(j=>j.id===S.selectedJob):null;
-  const dayCrews=boardCrews(dayJobs);
+  const dayCrews=boardCrews(fJobs);
   const cols=dayCrews.map(crew=>{
-    const cj=dayJobs.filter(j=>j.crew===crew.id).sort((a,b)=>(a.hhmm||a.window||"").localeCompare(b.hhmm||b.window||""));
+    const cj=fJobs.filter(j=>j.crew===crew.id).sort((a,b)=>(a.hhmm||a.window||"").localeCompare(b.hhmm||b.window||""));
     const chips=cj.length?cj.map(job=>{const s=JOB_CODE[job.code];
       return `<div class="jobchip" style="background:linear-gradient(160deg,${s.color},${s.d})" data-action="selectJob" data-id="${job.id}">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
@@ -765,7 +779,7 @@ function itineraryHTML(){
         <div style="font-weight:800;font-size:15px;margin-top:6px">${esc(job.project)}</div>
         <div style="font-size:12.5px;opacity:.95;margin-top:2px">${esc(job.window)}</div>
         <div style="font-size:12px;opacity:.9;margin-top:4px">📍 ${esc(job.address)}</div>
-        <div style="margin-top:8px"><span class="pill" style="background:${calStColor(job.status)}">${calStIcon(job.status)} ${statusLabel(job.status)}</span></div></div>`;
+        <div style="margin-top:8px"><span class="pill" style="background:${stageMeta(jobCat(job)).color}">${stageMeta(jobCat(job)).icon} ${stageText(jobCat(job))}</span></div></div>`;
     }).join(""):`<div style="color:var(--text-dim);font-size:13px;padding:24px 8px;text-align:center">${t("noJobs")}</div>`;
     return `<div class="card" style="padding:14px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)">
@@ -801,6 +815,10 @@ function itineraryHTML(){
         <button class="btn3d grey sm" data-action="dayNext">${t("nextDay")} ▶</button>
         <div style="font-weight:900;font-size:20px;margin-left:8px">${dateLabel}</div></div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">${livePill()}${legendHTML()}</div></div>
+    <div class="chipbar" style="display:flex;gap:8px;overflow-x:auto;margin-bottom:16px;padding-bottom:4px">
+      <button class="btn3d ${S.boardFilter==='all'?'':'ghost'} sm" data-action="boardFilter" data-id="all">${S.lang==='es'?'Todos':'All'} ${dayJobs.length}</button>
+      ${STAGE_CATS.filter(c=>stageCounts[c.key]>0).map(c=>{const on=S.boardFilter===c.key;return `<button data-action="boardFilter" data-id="${c.key}" style="font-family:inherit;font-weight:800;font-size:13px;cursor:pointer;white-space:nowrap;border:2px solid ${c.color};border-radius:13px;padding:8px 13px;display:inline-flex;align-items:center;gap:8px;transition:transform .12s ease,box-shadow .12s ease;background:${on?c.color:'transparent'};color:${on?'#fff':'var(--text)'};box-shadow:${on?'0 6px 14px -4px '+c.color:'none'}"><span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:${on?'rgba(255,255,255,.25)':c.color};color:#fff;font-size:11px;font-weight:900">${c.icon}</span>${stageText(c.key)} <span style="font-size:15px;font-weight:900">${stageCounts[c.key]}</span></button>`;}).join("")}
+    </div>
     <div class="stagger" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:16px;align-items:start;padding-bottom:8px">${cols||`<div style="color:var(--text-dim);padding:24px">${t("noJobs")}</div>`}</div>
     ${panel}</div>`;
 }
@@ -1155,6 +1173,7 @@ document.addEventListener("click",e=>{
     case "projClearAlerts": S.proj.alerts=[]; render(); break;
     case "projEnableAlerts": enableAlerts(); break;
     case "scFromProject": { S.tab="sitecapture"; S.sc.showNew=true; S.sc.q=id||""; S.sc.createMsg=""; loadSiteCapture(id||""); render(); break; }
+    case "boardFilter": S.boardFilter=(S.boardFilter===id?"all":id); S.selectedJob=null; render(); break;
     case "dayPrev": S.dayOffset--; S.selectedJob=null; render(); break;
     case "dayToday": S.dayOffset=0; S.selectedJob=null; render(); break;
     case "dayNext": S.dayOffset++; S.selectedJob=null; render(); break;
