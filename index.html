@@ -1531,5 +1531,42 @@ loadProjects();
 // Live polling so Engineering-stage alerts fire app-wide while the dashboard is open.
 setInterval(function(){ if(S.proj.ok) loadProjects(); },75000);
 </script>
+<script>
+/* WindMar crew status notifications — polls shared Supabase, alerts the coordinator */
+(function(){
+  var SB_URL='https://lmlixmzmzpzgeggvywwb.supabase.co';
+  var SB_KEY='sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov';
+  var KEY='wm_status_seen';
+  var box=document.createElement('div');
+  box.style.cssText='position:fixed;top:14px;right:14px;z-index:99999;display:flex;flex-direction:column;gap:8px;max-width:340px;font-family:Montserrat,system-ui,sans-serif';
+  document.body.appendChild(box);
+  var st=document.createElement('style');st.textContent='@keyframes wmIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}';document.head.appendChild(st);
+  function esc(s){return String(s==null?'':s).replace(/[<>&]/g,function(c){return{'<':'&lt;','>':'&gt;','&':'&amp;'}[c];});}
+  var COL={'Complete':'#22c55e','Completado':'#22c55e','Concluído':'#22c55e','Inspection Complete':'#06b6d4','Inspección Completa':'#06b6d4','Inspeção Concluída':'#06b6d4','Needs Inspection':'#F89B24','Necesita Inspección':'#F89B24','Precisa Inspeção':'#F89B24','Needs Re-scheduling':'#ef4444','Necesita Reprogramación':'#ef4444','Precisa Reagendar':'#ef4444'};
+  function toast(ev){
+    var col=COL[ev.status]||'#1D429B';
+    var who=[ev.dl_number,ev.customer].filter(Boolean).join(' ')||ev.job_id||'Job';
+    var d=document.createElement('div');
+    d.style.cssText='background:#122042;color:#f1f5f9;border:1px solid #1D429B55;border-left:4px solid '+col+';border-radius:12px;padding:12px 14px;box-shadow:0 12px 30px -8px rgba(0,0,0,.55);cursor:pointer;animation:wmIn .3s ease-out';
+    d.innerHTML='<div style="font-weight:800;font-size:13px;color:'+col+'">🔔 '+esc(ev.status)+'</div><div style="font-size:13px;font-weight:600;margin-top:2px">'+esc(who)+'</div><div style="font-size:11px;color:#A6C3E6;margin-top:2px">'+esc(ev.team||'')+(ev.created_at?' · '+new Date(ev.created_at).toLocaleTimeString():'')+'</div>';
+    d.onclick=function(){d.remove();};
+    box.appendChild(d);
+    setTimeout(function(){d.remove();},14000);
+    try{if(typeof Notification!=='undefined'&&Notification.permission==='granted')new Notification('WindMar — '+ev.status,{body:who});}catch(e){}
+  }
+  function poll(){
+    fetch(SB_URL+'/rest/v1/job_status_events?select=*&order=created_at.desc&limit=25',{headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY}})
+      .then(function(r){return r.ok?r.json():[];}).then(function(rows){
+        if(!Array.isArray(rows))return;
+        var seen;try{seen=JSON.parse(localStorage.getItem(KEY));}catch(e){}
+        if(!Array.isArray(seen)){localStorage.setItem(KEY,JSON.stringify(rows.map(function(r){return r.id;})));return;}
+        var seenSet={};seen.forEach(function(id){seenSet[id]=1;});
+        var fresh=rows.filter(function(r){return !seenSet[r.id];});
+        if(fresh.length){localStorage.setItem(KEY,JSON.stringify(rows.map(function(r){return r.id;}).concat(seen).slice(0,300)));fresh.reverse().forEach(toast);}
+      }).catch(function(){});
+  }
+  poll();setInterval(poll,25000);window.addEventListener('focus',poll);
+})();
+</script>
 </body>
 </html>
