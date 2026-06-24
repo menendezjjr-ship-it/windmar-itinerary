@@ -9,21 +9,10 @@
 //   (optional) ZOHO_API_DOMAIN      default https://www.zohoapis.com
 //   (optional) ZOHO_API_VERSION     default v8   (v2 rejects between: on dates)
 
-import { readFileSync, existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
-
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
 const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
 const TZ = "-04:00"; // Florida (EDT). Visit datetimes carry their own offset; this is only for the query window.
-
-// Local dev only: when creds are absent, serve a real-data snapshot (dev/ is gitignored,
-// never deployed). On Vercel creds are present so this path is never taken.
-function readDevSnapshot(name) {
-  try { const p = join(dirname(fileURLToPath(import.meta.url)), "..", "dev", name); if (existsSync(p)) return JSON.parse(readFileSync(p, "utf8").replace(/^﻿/, "")); } catch (e) {}
-  return null;
-}
 
 let cachedToken = null;
 let tokenExpiry = 0;
@@ -176,18 +165,7 @@ function mapService(r, todayISO) {
 
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=120");
-  if (!hasCreds()) {
-    const snap = readDevSnapshot("raw-jobs.json"); // { installs:[...], services:[...] }
-    if (snap) {
-      const todayISO = new Date().toISOString().slice(0, 10);
-      const jobs = [
-        ...(snap.installs || []).map((r) => mapInstall(r, todayISO)),
-        ...(snap.services || []).map((r) => mapService(r, todayISO)),
-      ].filter((j) => j.date);
-      return res.status(200).json({ configured: true, ok: true, source: "snapshot", updated: new Date().toISOString(), counts: { installs: (snap.installs || []).length, services: (snap.services || []).length, jobs: jobs.length }, jobs });
-    }
-    return res.status(200).json({ configured: false, ok: false, jobs: [] });
-  }
+  if (!hasCreds()) return res.status(200).json({ configured: false, ok: false, jobs: [] });
 
   // Date window: default today-14 .. today+45 (covers day nav + the monthly snapshot).
   const today = new Date();

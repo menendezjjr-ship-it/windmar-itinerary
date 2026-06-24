@@ -3,19 +3,9 @@
 // with full status, homeowner contact, system specs and a dated stage timeline.
 // Secrets live ONLY in env vars (ZOHO_CLIENT_ID/SECRET/REFRESH_TOKEN).
 
-import { readFileSync, existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
-
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
 const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
-
-// Local dev only: serve a real-data snapshot when creds are absent (dev/ is gitignored).
-function readDevSnapshot(name) {
-  try { const p = join(dirname(fileURLToPath(import.meta.url)), "..", "dev", name); if (existsSync(p)) return JSON.parse(readFileSync(p, "utf8").replace(/^﻿/, "")); } catch (e) {}
-  return null;
-}
 
 // Ordered operational pipeline the coordinator works (NTP → post-install).
 const STAGES = ["NTP", "Site Visit", "Engineering", "Permitting", "Install", "Post-Installation"];
@@ -134,15 +124,7 @@ const FIELDS = [
 
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=120");
-  if (!hasCreds()) {
-    const snap = readDevSnapshot("raw-deals.json"); // array of raw Deal records
-    if (Array.isArray(snap)) {
-      const projects = snap.map(mapDeal).sort((a, b) => a.stageIdx - b.stageIdx || String(a.num).localeCompare(String(b.num)));
-      const byStage = {}; STAGES.forEach((s) => (byStage[s] = 0)); projects.forEach((p) => { if (byStage[p.stage] != null) byStage[p.stage]++; });
-      return res.status(200).json({ configured: true, ok: true, source: "snapshot", updated: new Date().toISOString(), stages: STAGES, counts: { total: projects.length, byStage }, projects });
-    }
-    return res.status(200).json({ configured: false, ok: false, stages: STAGES, projects: [] });
-  }
+  if (!hasCreds()) return res.status(200).json({ configured: false, ok: false, stages: STAGES, projects: [] });
   try {
     const token = await getAccessToken();
     const criteria = "(" + STAGES.map((s) => `(Stage:equals:${s})`).join("or") + ")";
