@@ -102,7 +102,7 @@ function normCrew(raw) {
 }
 
 const INSTALL_FIELDS = "Name,Installation_Start_Date,Installation_Complete_Date,Installation_Team,Deal,MSP_Upgrade_Required,Battery_Type,Language_Preference,Number_of_Days_Needed";
-const SERVICE_FIELDS = "Name,Scheduled_Visit_1,Assigned_Technician,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description";
+const SERVICE_FIELDS = "Name,Scheduled_Visit_1,Assigned_Technician,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description,Priority";
 
 export function mapInstall(r, todayISO) {
   const deal = parseDeal(lookup(r.Deal));
@@ -118,6 +118,7 @@ export function mapInstall(r, todayISO) {
   if (r.Number_of_Days_Needed) scopeBits.push(`${r.Number_of_Days_Needed}-day`);
   return {
     id: deal.num || r.Name,
+    num: deal.num || "",
     kind: "install",
     code: deal.code || "DL",
     project: deal.customer || r.Name,
@@ -156,8 +157,11 @@ export function mapService(r, todayISO) {
   const svc = Array.isArray(r.Type_of_Service) ? r.Type_of_Service.join(", ") : (r.Type_of_Service || "");
   return {
     id: deal.num ? `${deal.num} · ${r.Name}` : r.Name,
+    num: deal.num || r.Name,
     kind: "service",
     code: "S",
+    priority: r.Priority || "",
+    ticketNo: r.Name,
     project: deal.customer || r.Name,
     address: deal.address || "",
     crew: crew.id,
