@@ -8,6 +8,27 @@ function b64(s){ return Buffer.from(s).toString("base64"); }
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "s-maxage=20, stale-while-revalidate=60");
   try {
+    // Diagnostic: tests the SAME credentials the create uses against a simple read,
+    // so we can tell if a 401 is bad login vs. something else. Leaks no secrets.
+    if (req.method === "GET" && req.query.diag) {
+      let src = "none", basic = null;
+      if (process.env.SITECAPTURE_USER && process.env.SITECAPTURE_PASS) {
+        basic = "Basic " + b64(process.env.SITECAPTURE_USER + ":" + process.env.SITECAPTURE_PASS);
+        src = "SITECAPTURE_USER/PASS";
+      } else if (process.env.Site_Capture_Key) {
+        const k = process.env.Site_Capture_Key.trim();
+        basic = k.toLowerCase().startsWith("basic ") ? k : (k.indexOf(":") >= 0 ? "Basic " + b64(k) : "Basic " + k);
+        src = "Site_Capture_Key";
+      }
+      if (!basic) return res.status(200).json({ diag: true, authSource: "none", note: "No SiteCapture creds set on this project" });
+      const FIXED = process.env.SITECAPTURE_API_KEY || "zapier-api-4320";
+      const userLen = (process.env.SITECAPTURE_USER || "").length, passLen = (process.env.SITECAPTURE_PASS || "").length;
+      try {
+        const r = await fetch("https://api.sitecapture.com/customer_api/2_0/projects?max=1", { headers: { Authorization: basic, "API_KEY": FIXED, Accept: "application/json" } });
+        const txt = await r.text();
+        return res.status(200).json({ diag: true, authSource: src, apiKeyUsed: FIXED, userLen, passLen, status: r.status, ok: r.ok, body: txt.slice(0, 180) });
+      } catch (e) { return res.status(200).json({ diag: true, authSource: src, error: String(e) }); }
+    }
     if (req.method === "POST") {
       let body = req.body;
       if (typeof body === "string") { try { body = JSON.parse(body); } catch (e) { body = {}; } }
