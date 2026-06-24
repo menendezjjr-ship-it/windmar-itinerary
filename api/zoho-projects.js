@@ -86,18 +86,19 @@ function inspStatus(r) {
   const code = ((r.Deal_Name || "").match(/^\s*(RDL|RL|DL|MSP|S)/i) || [, "DL"])[1].toUpperCase();
   const inWindow = r.Stage === "Install" || r.Stage === "Post-Installation";
   const vip = r.VIP_Customer === true;
+  const isVip = vip || /\bvip\b/i.test(r.Inspection_Stage || "");
   const items = [];
-  // Final / electrical (solar/battery/MSP/service) inspection
+  // Final / electrical inspection (solar/battery/MSP/service). VIP → its own type.
   if (code === "DL" || code === "RDL" || code === "MSP" || code === "S") {
-    const f = inspOne(r.Inspection_Stage, r.Final_Inspection_Scheduled_Date, r.Final_Inspection_Approved, inWindow, vip);
-    if (f.status !== "none") items.push({ type: "final", vip, ...f });
+    const f = inspOne(r.Inspection_Stage, r.Final_Inspection_Scheduled_Date, r.Final_Inspection_Approved, inWindow, isVip);
+    if (f.status !== "none") items.push({ type: isVip ? "vip" : "final", vip: isVip, ...f });
   }
   // Roofing inspection
   if (code === "RL" || code === "RDL") {
     const rf = inspOne("", r.Roofing_Final_Inspection_Scheduled_Date, r.Roofing_Final_Inspection_Approved_Date, inWindow, false);
     if (rf.status !== "none") items.push({ type: "roofing", vip: false, ...rf });
   }
-  if (!items.length && vip) items.push({ type: "final", vip: true, status: "missing", label: "VIP — not scheduled", scheduled: null, approved: null });
+  if (!items.length && isVip) items.push({ type: "vip", vip: true, status: "missing", label: "VIP — not scheduled", scheduled: null, approved: null });
   const rank = { missing: 0, ready: 1, pending: 2, scheduled: 3, approved: 4 };
   let worst = "none"; items.forEach((it) => { if (worst === "none" || rank[it.status] < rank[worst]) worst = it.status; });
   return { items, isItem: items.length > 0, status: worst, vip };

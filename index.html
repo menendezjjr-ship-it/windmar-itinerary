@@ -710,7 +710,7 @@ const INSP_ORDER=["missing","ready","pending","scheduled","approved"];
 function inspMeta(s){ return INSP_META[s]||{c:"var(--wh-grey)",en:s,es:s}; }
 function inspText(s){ const m=inspMeta(s); return S.lang==="es"?m.es:m.en; }
 function inspItems(){ return (S.proj.list||[]).filter(p=>p.insp&&p.insp.isItem); }
-const INSP_TYPE_META={ final:{c:"#0EA5E9",en:"Final Insp",es:"Insp. Final"}, roofing:{c:"#F97316",en:"Roofing Insp",es:"Insp. Techo"} };
+const INSP_TYPE_META={ vip:{c:"#FACC15",en:"VIP Insp",es:"Insp. VIP"}, final:{c:"#0EA5E9",en:"Final Insp",es:"Insp. Final"}, roofing:{c:"#F97316",en:"Roofing Insp",es:"Insp. Techo"} };
 function inspTypeMeta(t){ return INSP_TYPE_META[t]||{c:"var(--wh-grey)",en:t,es:t}; }
 function inspTypeText(t){ const m=inspTypeMeta(t); return S.lang==="es"?m.es:m.en; }
 function inspEntriesFrom(listArr){ const out=[]; (listArr||[]).forEach(p=>{ if(p.insp&&p.insp.items) p.insp.items.forEach(it=>out.push({p:p,it:it})); }); return out; }
@@ -720,7 +720,7 @@ function inspEntryCard(p,it){ const sm=inspMeta(it.status), tm=inspTypeMeta(it.t
   return `<div class="card jobchip" style="padding:12px 14px;cursor:pointer;border-left:5px solid ${sm.c};background:var(--panel)" data-action="selectProject" data-id="${esc(p.id)}">
     <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:14px">${esc(p.name)}</span><span class="pill" style="background:${tm.c};font-size:10px">${esc(inspTypeText(it.type))}</span></div>
     <div style="font-size:12px;color:var(--text-dim);margin-top:4px">${esc(p.num||"")}${p.address?(" · 📍 "+esc(p.address)):""}</div>
-    <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="pill" style="background:${sm.c}">${esc(inspText(it.status))}</span>${it.vip?`<span class="pill" style="background:var(--jc-MSP)">VIP</span>`:""}${it.scheduled?`<span style="font-size:11px;color:var(--text-dim)">📅 ${fmtDate(it.scheduled)}</span>`:""}</div>
+    <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="pill" style="background:${sm.c}">${esc(inspText(it.status))}</span>${(it.vip&&it.type!=="vip")?`<span class="pill" style="background:var(--jc-MSP)">VIP</span>`:""}${it.scheduled?`<span style="font-size:11px;color:var(--text-dim)">📅 ${fmtDate(it.scheduled)}</span>`:""}</div>
     ${it.label&&it.label!==inspText(it.status)?`<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${esc(it.label)}</div>`:""}</div>`;
 }
 /* ── "Needs Attention" dashboard (Itinerary tab) — live, big, user-friendly ── */
@@ -881,7 +881,7 @@ function projectsHTML(){
   const alertBanner=(P.alerts&&P.alerts.length)?`<div class="card" style="padding:12px 16px;margin-bottom:14px;border-left:6px solid var(--jc-MSP);background:rgba(168,85,247,.10)"><div style="font-weight:800;margin-bottom:6px">🔔 ${P.alerts.length} ${ptr("newEng")} — ${ptr("engAlert")}</div>${P.alerts.map(a=>`<div style="font-size:13px;margin:3px 0"><b>${esc(a.num||a.name)}</b> · ${esc(a.name)} ${a.phone?`· <a href="tel:${esc(String(a.phone).replace(/[^0-9+]/g,""))}" style="color:var(--ok)">${esc(a.phone)}</a>`:""}</div>`).join("")}<div style="margin-top:8px"><button class="btn3d sm" data-action="projClearAlerts">✓ ${ptr("close")}</button></div></div>`:"";
   let groups;
   if(P.stageFilter==="inspections"){
-    const entries=inspEntriesFrom(list); const rank={missing:0,ready:1,pending:2,scheduled:3,approved:4}; const TYPES=["final","roofing"];
+    const entries=inspEntriesFrom(list); const rank={missing:0,ready:1,pending:2,scheduled:3,approved:4}; const TYPES=["vip","final","roofing"];
     groups=`<div style="color:var(--text-dim);font-size:13px;margin:6px 0 4px">${S.lang==='es'?'Inspecciones entre Instalación y Post-Instalación, separadas por tipo (Final vs Techo). Rojo = falta programar.':'Inspections between Install and Post-Installation, split by type (Final vs Roofing). Red = needs scheduling.'}</div>`+
       TYPES.map(ty=>{ const te=entries.filter(e=>e.it.type===ty); if(!te.length) return ""; const tm=inspTypeMeta(ty);
         te.sort((a,b)=>rank[a.it.status]-rank[b.it.status]||String(a.p.num).localeCompare(String(b.p.num)));
