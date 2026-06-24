@@ -68,6 +68,24 @@ function parseDeal(name) {
   return out;
 }
 
+// Derive a normalized inspection status for the "Inspections" section.
+function inspStatus(r) {
+  const stext = (r.Inspection_Stage || "").trim();
+  const sched = r.Final_Inspection_Scheduled_Date || r.Roofing_Final_Inspection_Scheduled_Date || null;
+  const appr = r.Final_Inspection_Approved || r.Roofing_Final_Inspection_Approved_Date || null;
+  const vip = r.VIP_Customer === true;
+  const inWindow = r.Stage === "Install" || r.Stage === "Post-Installation";
+  let status = "none", label = "";
+  if (appr || /approv|pass/i.test(stext)) { status = "approved"; label = stext || "Approved"; }
+  else if (/pending|revision|hold|fail|denied/i.test(stext)) { status = "pending"; label = stext; }
+  else if (sched || /scheduled/i.test(stext)) { status = "scheduled"; label = stext || "Scheduled"; }
+  else if (/ready to schedule/i.test(stext)) { status = "ready"; label = stext; }
+  else if (stext) { status = "pending"; label = stext; }
+  else if (inWindow) { status = "missing"; label = "Not scheduled"; }
+  else if (vip) { status = "missing"; label = "VIP — not scheduled"; }
+  const isItem = status !== "none" || vip || !!stext || !!sched || !!appr;
+  return { status, label, scheduled: sched, approved: appr, vip, isItem };
+}
 export function mapDeal(r) {
   const d = parseDeal(r.Deal_Name);
   const addr = [clean(r.Address), clean(r.City), [clean(r.State), clean(r.Zip)].filter(Boolean).join(" ")].filter(Boolean).join(", ");
@@ -112,6 +130,7 @@ export function mapDeal(r) {
     reroof: lookup(r.Windmar_Roofing) || "",
     modified: r.Modified_Time || null,
     stageModified: r.Stage_Modified_Time || null,
+    insp: inspStatus(r),
     timeline,
   };
 }
@@ -125,7 +144,9 @@ const FIELDS = [
   "Authority_Having_Jurisdiction_AHJ", "Is_there_an_HOA", "HOA", "Roof_Type", "Windmar_Roofing",
   "NTP_From", "Site_Survey_Scheduled_Date", "Site_Survey_Completed_Date", "Design_Engineering_From",
   "Permit_Submitted_Date", "Permit_Received_Date", "Install_From", "Installation_Completed_Date",
-  "Final_Inspection_Scheduled_Date", "Final_Inspection_Approved", "PTO_Approval_Date",
+  "Final_Inspection_Scheduled_Date", "Final_Inspection_Approved", "Final_Inspection_Reschedule",
+  "Inspection_Stage", "VIP_Customer", "Roofing_Final_Inspection_Scheduled_Date", "Roofing_Final_Inspection_Approved_Date",
+  "PTO_Approval_Date",
 ].join(",");
 
 export default async function handler(req, res) {
