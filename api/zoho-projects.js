@@ -68,13 +68,9 @@ function parseDeal(name) {
   return out;
 }
 
-// Derive a normalized inspection status for the "Inspections" section.
-function inspStatus(r) {
-  const stext = (r.Inspection_Stage || "").trim();
-  const sched = r.Final_Inspection_Scheduled_Date || r.Roofing_Final_Inspection_Scheduled_Date || null;
-  const appr = r.Final_Inspection_Approved || r.Roofing_Final_Inspection_Approved_Date || null;
-  const vip = r.VIP_Customer === true;
-  const inWindow = r.Stage === "Install" || r.Stage === "Post-Installation";
+// Normalize one inspection's status from its text + dates.
+function inspOne(stext, sched, appr, inWindow, vip) {
+  stext = (stext || "").trim();
   let status = "none", label = "";
   if (appr || /approv|pass/i.test(stext)) { status = "approved"; label = stext || "Approved"; }
   else if (/pending|revision|hold|fail|denied/i.test(stext)) { status = "pending"; label = stext; }
@@ -83,8 +79,28 @@ function inspStatus(r) {
   else if (stext) { status = "pending"; label = stext; }
   else if (inWindow) { status = "missing"; label = "Not scheduled"; }
   else if (vip) { status = "missing"; label = "VIP — not scheduled"; }
-  const isItem = status !== "none" || vip || !!stext || !!sched || !!appr;
-  return { status, label, scheduled: sched, approved: appr, vip, isItem };
+  return { status, label, scheduled: sched || null, approved: appr || null };
+}
+// Build typed inspection entries (final/electrical vs roofing) for a deal.
+function inspStatus(r) {
+  const code = ((r.Deal_Name || "").match(/^\s*(RDL|RL|DL|MSP|S)/i) || [, "DL"])[1].toUpperCase();
+  const inWindow = r.Stage === "Install" || r.Stage === "Post-Installation";
+  const vip = r.VIP_Customer === true;
+  const items = [];
+  // Final / electrical (solar/battery/MSP/service) inspection
+  if (code === "DL" || code === "RDL" || code === "MSP" || code === "S") {
+    const f = inspOne(r.Inspection_Stage, r.Final_Inspection_Scheduled_Date, r.Final_Inspection_Approved, inWindow, vip);
+    if (f.status !== "none") items.push({ type: "final", vip, ...f });
+  }
+  // Roofing inspection
+  if (code === "RL" || code === "RDL") {
+    const rf = inspOne("", r.Roofing_Final_Inspection_Scheduled_Date, r.Roofing_Final_Inspection_Approved_Date, inWindow, false);
+    if (rf.status !== "none") items.push({ type: "roofing", vip: false, ...rf });
+  }
+  if (!items.length && vip) items.push({ type: "final", vip: true, status: "missing", label: "VIP — not scheduled", scheduled: null, approved: null });
+  const rank = { missing: 0, ready: 1, pending: 2, scheduled: 3, approved: 4 };
+  let worst = "none"; items.forEach((it) => { if (worst === "none" || rank[it.status] < rank[worst]) worst = it.status; });
+  return { items, isItem: items.length > 0, status: worst, vip };
 }
 export function mapDeal(r) {
   const d = parseDeal(r.Deal_Name);

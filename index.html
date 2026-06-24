@@ -710,14 +710,18 @@ const INSP_ORDER=["missing","ready","pending","scheduled","approved"];
 function inspMeta(s){ return INSP_META[s]||{c:"var(--wh-grey)",en:s,es:s}; }
 function inspText(s){ const m=inspMeta(s); return S.lang==="es"?m.es:m.en; }
 function inspItems(){ return (S.proj.list||[]).filter(p=>p.insp&&p.insp.isItem); }
-function inspNeedsScheduling(){ return inspItems().filter(p=>p.insp.status==="missing"||p.insp.status==="ready"); }
-function inspCardHTML(p){
-  const m=inspMeta(p.insp.status);
-  return `<div class="card jobchip" style="padding:12px 14px;cursor:pointer;border-left:5px solid ${m.c};background:var(--panel)" data-action="selectProject" data-id="${esc(p.id)}">
-    <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:14px">${esc(p.name)}</span><span class="pill" style="background:${m.c};font-size:10px">${esc(p.num||p.code)}</span></div>
-    <div style="font-size:12px;color:var(--text-dim);margin-top:4px">📍 ${esc(p.address||"—")}</div>
-    <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="pill" style="background:${m.c}">${esc(inspText(p.insp.status))}</span>${p.insp.vip?`<span class="pill" style="background:var(--jc-MSP)">VIP</span>`:""}${p.insp.scheduled?`<span style="font-size:11px;color:var(--text-dim)">📅 ${fmtDate(p.insp.scheduled)}</span>`:""}</div>
-    ${p.insp.label&&p.insp.label!==inspText(p.insp.status)?`<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${esc(p.insp.label)}</div>`:""}</div>`;
+const INSP_TYPE_META={ final:{c:"#0EA5E9",en:"Final Insp",es:"Insp. Final"}, roofing:{c:"#F97316",en:"Roofing Insp",es:"Insp. Techo"} };
+function inspTypeMeta(t){ return INSP_TYPE_META[t]||{c:"var(--wh-grey)",en:t,es:t}; }
+function inspTypeText(t){ const m=inspTypeMeta(t); return S.lang==="es"?m.es:m.en; }
+function inspEntriesFrom(listArr){ const out=[]; (listArr||[]).forEach(p=>{ if(p.insp&&p.insp.items) p.insp.items.forEach(it=>out.push({p:p,it:it})); }); return out; }
+function inspEntries(){ return inspEntriesFrom(S.proj.list); }
+function inspNeedsScheduling(){ return inspEntries().filter(e=>e.it.status==="missing"||e.it.status==="ready"); }
+function inspEntryCard(p,it){ const sm=inspMeta(it.status), tm=inspTypeMeta(it.type);
+  return `<div class="card jobchip" style="padding:12px 14px;cursor:pointer;border-left:5px solid ${sm.c};background:var(--panel)" data-action="selectProject" data-id="${esc(p.id)}">
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:14px">${esc(p.name)}</span><span class="pill" style="background:${tm.c};font-size:10px">${esc(inspTypeText(it.type))}</span></div>
+    <div style="font-size:12px;color:var(--text-dim);margin-top:4px">${esc(p.num||"")}${p.address?(" · 📍 "+esc(p.address)):""}</div>
+    <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="pill" style="background:${sm.c}">${esc(inspText(it.status))}</span>${it.vip?`<span class="pill" style="background:var(--jc-MSP)">VIP</span>`:""}${it.scheduled?`<span style="font-size:11px;color:var(--text-dim)">📅 ${fmtDate(it.scheduled)}</span>`:""}</div>
+    ${it.label&&it.label!==inspText(it.status)?`<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${esc(it.label)}</div>`:""}</div>`;
 }
 /* ── "Needs Attention" dashboard (Itinerary tab) — live, big, user-friendly ── */
 function daysStuck(p){ const ref=p.stageModified||p.modified; if(!ref) return null; return (Date.now()-new Date(ref).getTime())/86400000; }
@@ -751,11 +755,11 @@ function attentionHTML(){
     :`<div style="color:var(--text-dim);font-size:13px;padding:10px;text-align:center">${es?'Sin visitas mañana':'No visits tomorrow'}</div>`;
   const recentCards=recent.length?recent.map(n=>`<div ${n.projId?`data-action="notifOpen" data-id="${esc(n.projId)}"`:""} style="padding:9px 12px;border-radius:10px;background:var(--bg-2);border:1px solid var(--line);margin-bottom:8px;cursor:${n.projId?'pointer':'default'}"><div style="font-weight:700;font-size:12.5px">${esc(n.title)}</div>${n.body?`<div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">${esc(n.body)}</div>`:""}</div>`).join("")
     :`<div style="color:var(--text-dim);font-size:13px;padding:10px;text-align:center">${es?'Sin cambios recientes':'No recent changes'}</div>`;
-  const inspCards=inspNeed.length?inspNeed.map(p=>{const m=inspMeta(p.insp.status);
-    return `<div data-action="notifOpen" data-id="${esc(p.id)}" style="padding:10px 12px;border-radius:10px;background:var(--bg-2);border:1px solid var(--line);border-left:4px solid ${m.c};margin-bottom:8px;cursor:pointer">
-      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:13.5px">${esc(p.num||p.name)}</span><span class="pill" style="background:${m.c};font-size:9px">${esc(inspText(p.insp.status))}</span></div>
+  const inspCards=inspNeed.length?inspNeed.map(e=>{const p=e.p,it=e.it,sm=inspMeta(it.status),tm=inspTypeMeta(it.type);
+    return `<div data-action="notifOpen" data-id="${esc(p.id)}" style="padding:10px 12px;border-radius:10px;background:var(--bg-2);border:1px solid var(--line);border-left:4px solid ${sm.c};margin-bottom:8px;cursor:pointer">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:13.5px">${esc(p.num||p.name)}</span><span class="pill" style="background:${tm.c};font-size:9px">${esc(inspTypeText(it.type))}</span></div>
       <div style="font-size:12.5px;color:var(--text-dim);margin-top:2px">${esc(p.name)}</div>
-      <div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">${esc(stageLabel(p.stage))}${p.insp.vip?" · VIP":""}</div></div>`;}).join("")
+      <div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="pill" style="background:${sm.c};font-size:9px">${esc(inspText(it.status))}</span><span style="font-size:11px;color:var(--text-dim)">${esc(stageLabel(p.stage))}${it.vip?" · VIP":""}</span></div></div>`;}).join("")
     :`<div style="color:var(--text-dim);font-size:13px;padding:10px;text-align:center">${es?'Todo programado ✅':'All scheduled ✅'}</div>`;
   const col=(title,count,color,inner)=>`<div class="card" style="padding:0;overflow:hidden"><div style="padding:11px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;background:${color}22"><span style="font-weight:800;font-size:14px">${title}</span><span class="pill" style="background:${color};margin-left:auto">${count}</span></div><div style="padding:11px;max-height:300px;overflow:auto">${inner}</div></div>`;
   return `<div class="card rise" style="padding:16px 18px;margin-bottom:18px;border-left:6px solid var(--wh-orange)">
@@ -856,7 +860,7 @@ function projectDetailHTML(p){
         ${row(ptr("ahj"),p.ahj)}
         ${row(ptr("hoa"),p.hoa)}
         ${row("Roof",[p.roofType,p.reroof].filter(Boolean).join(" · "))}
-        ${(p.insp&&p.insp.isItem)?`<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line)"><span style="color:var(--text-dim);font-size:12.5px">🔍 ${es?'Inspección':'Inspection'}</span><span style="text-align:right"><span class="pill" style="background:${inspMeta(p.insp.status).c};font-size:10px">${esc(inspText(p.insp.status))}</span>${p.insp.vip?` <span class="pill" style="background:var(--jc-MSP);font-size:10px">VIP</span>`:""}${p.insp.scheduled?`<div style="font-size:11px;color:var(--text-dim);margin-top:3px">📅 ${fmtDate(p.insp.scheduled)}</div>`:""}${p.insp.label&&p.insp.label!==inspText(p.insp.status)?`<div style="font-size:11px;color:var(--text-dim);margin-top:3px">${esc(p.insp.label)}</div>`:""}</span></div>`:""}
+        ${(p.insp&&p.insp.items&&p.insp.items.length)?`<div class="label" style="margin:14px 0 6px">🔍 ${es?'Inspecciones':'Inspections'}</div>`+p.insp.items.map(it=>{const sm=inspMeta(it.status),tm=inspTypeMeta(it.type);return `<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line)"><span style="font-size:12.5px"><span class="pill" style="background:${tm.c};font-size:10px">${esc(inspTypeText(it.type))}</span>${it.vip?` <span class="pill" style="background:var(--jc-MSP);font-size:10px">VIP</span>`:""}</span><span style="text-align:right"><span class="pill" style="background:${sm.c};font-size:10px">${esc(inspText(it.status))}</span>${it.scheduled?`<div style="font-size:11px;color:var(--text-dim);margin-top:3px">📅 ${fmtDate(it.scheduled)}</div>`:""}${it.label&&it.label!==inspText(it.status)?`<div style="font-size:11px;color:var(--text-dim);margin-top:3px">${esc(it.label)}</div>`:""}</span></div>`;}).join(""):""}
       </div>
       <div><div class="label" style="margin:6px 0">${ptr("timeline")}</div><div style="margin-top:4px">${tl}</div></div>
     </div>
@@ -870,26 +874,27 @@ function projectsHTML(){
   if(q) list=list.filter(p=>((p.name||"")+" "+(p.num||"")+" "+(p.address||"")).toLowerCase().indexOf(q)>=0);
   const sel=P.selected?P.list.find(p=>p.id===P.selected):null;
   const counts={}; STAGE_ORDER.forEach(s=>counts[s]=0); P.list.forEach(p=>{ if(counts[p.stage]!=null)counts[p.stage]++; });
-  const inspCount=inspItems().length;
+  const inspCount=inspEntries().length;
   const inspChip=`<button class="btn3d ${P.stageFilter==='inspections'?'':'ghost'} sm" data-action="projStage" data-id="inspections" style="${P.stageFilter==='inspections'?'background:#0EA5E9':''}">🔍 ${S.lang==='es'?'Inspecciones':'Inspections'} ${inspCount}</button>`;
   const chips=`<button class="btn3d ${P.stageFilter==='all'?'':'ghost'} sm" data-action="projStage" data-id="all">${ptr("all")} ${P.list.length}</button>`+
     STAGE_ORDER.map(s=>`<button class="btn3d ${P.stageFilter===s?'':'ghost'} sm" data-action="projStage" data-id="${esc(s)}" style="${P.stageFilter===s?('background:'+STAGE_META[s].c):''}">${esc(stageLabel(s))} ${counts[s]}</button>`+(s==="Install"?inspChip:"")).join("");
   const alertBanner=(P.alerts&&P.alerts.length)?`<div class="card" style="padding:12px 16px;margin-bottom:14px;border-left:6px solid var(--jc-MSP);background:rgba(168,85,247,.10)"><div style="font-weight:800;margin-bottom:6px">🔔 ${P.alerts.length} ${ptr("newEng")} — ${ptr("engAlert")}</div>${P.alerts.map(a=>`<div style="font-size:13px;margin:3px 0"><b>${esc(a.num||a.name)}</b> · ${esc(a.name)} ${a.phone?`· <a href="tel:${esc(String(a.phone).replace(/[^0-9+]/g,""))}" style="color:var(--ok)">${esc(a.phone)}</a>`:""}</div>`).join("")}<div style="margin-top:8px"><button class="btn3d sm" data-action="projClearAlerts">✓ ${ptr("close")}</button></div></div>`:"";
   let groups;
   if(P.stageFilter==="inspections"){
-    const items=list.filter(p=>p.insp&&p.insp.isItem);
-    groups=`<div style="color:var(--text-dim);font-size:13px;margin:6px 0 4px">${S.lang==='es'?'Todo con inspección (VIP / final) entre Instalación y Post-Instalación — rojo = falta programar.':'Everything with an inspection (VIP / final) between Install and Post-Installation — red = needs scheduling.'}</div>`+
-      INSP_ORDER.map(st=>{ const gi=items.filter(p=>p.insp.status===st); if(!gi.length) return ""; const col=inspMeta(st).c;
-        return `<div style="margin:18px 0 8px;display:flex;align-items:center;gap:8px"><span style="width:11px;height:11px;border-radius:3px;background:${col}"></span><div style="font-weight:900;font-size:15px">${esc(inspText(st))}</div><span style="color:var(--text-dim);font-weight:700">(${gi.length})</span></div><div class="stagger" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">${gi.map(inspCardHTML).join("")}</div>`;
+    const entries=inspEntriesFrom(list); const rank={missing:0,ready:1,pending:2,scheduled:3,approved:4}; const TYPES=["final","roofing"];
+    groups=`<div style="color:var(--text-dim);font-size:13px;margin:6px 0 4px">${S.lang==='es'?'Inspecciones entre Instalación y Post-Instalación, separadas por tipo (Final vs Techo). Rojo = falta programar.':'Inspections between Install and Post-Installation, split by type (Final vs Roofing). Red = needs scheduling.'}</div>`+
+      TYPES.map(ty=>{ const te=entries.filter(e=>e.it.type===ty); if(!te.length) return ""; const tm=inspTypeMeta(ty);
+        te.sort((a,b)=>rank[a.it.status]-rank[b.it.status]||String(a.p.num).localeCompare(String(b.p.num)));
+        return `<div style="margin:18px 0 8px;display:flex;align-items:center;gap:8px"><span style="width:12px;height:12px;border-radius:3px;background:${tm.c}"></span><div style="font-weight:900;font-size:15px">🔍 ${esc(inspTypeText(ty))}</div><span style="color:var(--text-dim);font-weight:700">(${te.length})</span></div><div class="stagger" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">${te.map(e=>inspEntryCard(e.p,e.it)).join("")}</div>`;
       }).join("");
-    if(!items.length) groups+=`<div style="color:var(--text-dim);padding:16px">${S.lang==='es'?'Sin inspecciones':'No inspections'}</div>`;
+    if(!entries.length) groups+=`<div style="color:var(--text-dim);padding:16px">${S.lang==='es'?'Sin inspecciones':'No inspections'}</div>`;
   } else {
     const shown=P.stageFilter==="all"?STAGE_ORDER:[P.stageFilter];
     groups=shown.map(s=>{
       const items=list.filter(p=>p.stage===s);
       if(!items.length) return P.stageFilter==="all"?"":`<div style="color:var(--text-dim);padding:16px">${ptr("noProjects")}</div>`;
       const sc=STAGE_META[s]||{c:"var(--wh-grey)"};
-      const cards=items.map(p=>{ const tel=p.mobile||p.phone; const ib=(p.insp&&p.insp.isItem)?`<div style="margin-top:5px"><span class="pill" style="background:${inspMeta(p.insp.status).c};font-size:9px">🔍 ${esc(inspText(p.insp.status))}</span></div>`:"";
+      const cards=items.map(p=>{ const tel=p.mobile||p.phone; const ib=(p.insp&&p.insp.items&&p.insp.items.length)?`<div style="margin-top:5px;display:flex;gap:5px;flex-wrap:wrap">${p.insp.items.map(it=>`<span class="pill" style="background:${inspTypeMeta(it.type).c};font-size:9px">🔍 ${esc(inspTypeText(it.type))}: ${esc(inspText(it.status))}</span>`).join("")}</div>`:"";
         return `<div class="card jobchip" style="padding:12px 14px;cursor:pointer;border-left:5px solid ${sc.c};background:var(--panel)" data-action="selectProject" data-id="${esc(p.id)}">
           <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:14px">${esc(p.name)}</span><span class="pill" style="background:${sc.c};font-size:10px">${esc(p.num||p.code)}</span></div>
           <div style="font-size:12px;color:var(--text-dim);margin-top:4px">📍 ${esc(p.address||"—")}</div>
