@@ -478,10 +478,11 @@ async function loadOpsCal(){
 }
 function calChip(r){
   const col=teamColor(r.team), isS=r.type==="service", hot=isS&&calHot(r.priority);
-  const base="display:flex;align-items:center;gap:4px;width:100%;box-sizing:border-box;font-size:11px;padding:3px 6px;margin-bottom:2px;border-radius:5px;cursor:pointer;overflow:hidden;white-space:nowrap;font-weight:700;line-height:1.25;";
+  const base="display:block;width:100%;box-sizing:border-box;font-size:11.5px;padding:4px 7px;margin-bottom:3px;border-radius:6px;cursor:pointer;overflow:hidden;font-weight:700;line-height:1.3;";
   const style=isS?base+"background:var(--bg);color:"+col+";border:1.5px solid "+col+";border-left:4px solid "+(hot?"#ef4444":col)+";":base+"background:"+col+";color:"+textOn(col)+";";
   const tm=r.startTime?`<span style="opacity:.85;font-weight:600">${esc(r.startTime.replace(/:00 /," ").replace(" ",""))} </span>`:"";
-  return `<div data-action="calSelectJob" data-id="${esc(r.id)}" style="${style}" title="${esc((r.dlNumber||"")+" — "+(r.customerName||"")+" ("+r.team+")")}"><span style="flex-shrink:0">${isS?"🔧":"⚡"}</span><span style="overflow:hidden;text-overflow:ellipsis">${tm}${esc(r.dlNumber||r.customerName||"")}</span></div>`;
+  const addr=r.address?`<div style="font-size:10px;font-weight:500;opacity:.82;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px">📍 ${esc(r.address)}</div>`:"";
+  return `<div data-action="calSelectJob" data-id="${esc(r.id)}" style="${style}" title="${esc((r.dlNumber||"")+" — "+(r.customerName||"")+" ("+r.team+")"+(r.address?" · "+r.address:""))}"><div style="display:flex;align-items:center;gap:4px;overflow:hidden;white-space:nowrap"><span style="flex-shrink:0">${isS?"🔧":"⚡"}</span><span style="overflow:hidden;text-overflow:ellipsis">${tm}${esc(r.dlNumber||r.customerName||"")}</span></div>${addr}</div>`;
 }
 function calRow(r){
   const col=teamColor(r.team), isS=r.type==="service";
@@ -519,9 +520,9 @@ function opsCalHTML(){
   // month grid
   const firstDay=new Date(c.y,c.m-1,1).getDay(), daysInMonth=new Date(c.y,c.m,0).getDate();
   let cells="";
-  for(let i=0;i<firstDay;i++) cells+=`<div style="background:rgba(0,0,0,.15);border-left:1px solid var(--line);border-bottom:1px solid var(--line);min-height:${compact?64:104}px"></div>`;
+  for(let i=0;i<firstDay;i++) cells+=`<div style="background:rgba(0,0,0,.15);border-left:1px solid var(--line);border-bottom:1px solid var(--line);min-height:${compact?72:122}px"></div>`;
   for(let day=1;day<=daysInMonth;day++){ const recs=byDate[day]||[]; const ins=recs.filter(r=>r.type==="install"), svc=recs.filter(r=>r.type==="service"); const items=[]; for(let k=0;k<Math.max(ins.length,svc.length);k++){ if(k<svc.length)items.push(svc[k]); if(k<ins.length)items.push(ins[k]); } const isT=day===today.getDate()&&c.m===today.getMonth()+1&&c.y===today.getFullYear(); const dow=new Date(c.y,c.m-1,day).getDay(), wknd=dow===0||dow===6;
-    cells+=`<div ${recs.length?`data-action="calDay" data-id="${day}"`:""} style="padding:${compact?'4px 3px':'6px 7px'};border-left:1px solid var(--line);border-bottom:1px solid var(--line);min-height:${compact?64:104}px;background:${isT?'rgba(248,155,36,.10)':wknd?'rgba(255,255,255,.015)':'transparent'};cursor:${recs.length?'pointer':'default'};${isT?'outline:2px solid var(--wh-orange);outline-offset:-2px;':''}">
+    cells+=`<div ${recs.length?`data-action="calDay" data-id="${day}"`:""} style="padding:${compact?'4px 3px':'6px 7px'};border-left:1px solid var(--line);border-bottom:1px solid var(--line);min-height:${compact?72:122}px;background:${isT?'rgba(248,155,36,.10)':wknd?'rgba(255,255,255,.015)':'transparent'};cursor:${recs.length?'pointer':'default'};${isT?'outline:2px solid var(--wh-orange);outline-offset:-2px;':''}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px"><span style="font-size:${compact?11:13}px;font-weight:${isT?800:600};color:${isT?'var(--wh-orange)':'var(--text-dim)'}">${day}</span>${recs.length?`<span style="font-size:9px;font-weight:700;color:#7c8aa5">${recs.length}</span>`:""}</div>
       ${items.slice(0,maxChips).map(calChip).join("")}
       ${recs.length>maxChips?`<div data-action="calDay" data-id="${day}" style="font-size:10px;color:var(--wh-orange);font-weight:700;cursor:pointer;margin-top:2px">+${recs.length-maxChips} ${S.lang==='es'?'más':'more'}</div>`:""}</div>`;
