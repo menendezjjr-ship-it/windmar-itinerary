@@ -5,9 +5,12 @@ import webpush from "web-push";
 
 const SB_URL = "https://lmlixmzmzpzgeggvywwb.supabase.co";
 const SB_KEY = process.env.SUPABASE_ANON_KEY || "sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
-const PUB = process.env.VAPID_PUBLIC_KEY || "BO0cGVF5nq1ul-JqQgDOCiHi5vJgQPnSLM4Jdl-32Y8hOv6AjAAm8UI3tZjyVXZKD0KWD801im_MBk9deCBoFCo";
-const PRIV = process.env.VAPID_PRIVATE_KEY || "";
-const SUBJECT = process.env.VAPID_SUBJECT || "mailto:ops@windmarhome.com";
+// .trim() + strip any accidental padding/quotes so a stray space/newline pasted
+// into the Vercel env var doesn't break web-push's strict URL-safe-base64 check.
+const clean = (v) => String(v || "").trim().replace(/^["']|["']$/g, "").replace(/=+$/, "");
+const PUB = clean(process.env.VAPID_PUBLIC_KEY) || "BO0cGVF5nq1ul-JqQgDOCiHi5vJgQPnSLM4Jdl-32Y8hOv6AjAAm8UI3tZjyVXZKD0KWD801im_MBk9deCBoFCo";
+const PRIV = clean(process.env.VAPID_PRIVATE_KEY);
+const SUBJECT = String(process.env.VAPID_SUBJECT || "mailto:ops@windmarhome.com").trim();
 
 const H = { apikey: SB_KEY, Authorization: "Bearer " + SB_KEY, "Content-Type": "application/json" };
 const sb = (path, init) => fetch(SB_URL + "/rest/v1/" + path, { ...(init || {}), headers: { ...H, ...((init || {}).headers || {}) } });
