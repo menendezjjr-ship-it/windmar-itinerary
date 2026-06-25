@@ -45,6 +45,40 @@ export default async function handler(req, res) {
       } catch (e) { return res.status(200).json({ diag: true, authSource: src, error: String(e) }); }
     }
 
+    // Templates list — the valid template_keys for THIS portal. Tries the known
+    // SiteCapture customer_api template endpoints and returns the first that works.
+    if (req.method === "GET" && req.query.path === "templates") {
+      const basic = buildBasic();
+      if (!basic) return res.status(200).json({ ok: false, needsAuth: true, templates: [] });
+      const H = { Authorization: basic, "API_KEY": FIXED, Accept: "application/json" };
+      const cands = req.query.probe ? [
+        "https://api.sitecapture.com/customer_api/2_0/templates",
+        "https://api.sitecapture.com/customer_api/1_0/templates",
+        "https://api.sitecapture.com/customer_api/2_0/template",
+        "https://api.sitecapture.com/customer_api/1_0/template",
+        "https://api.sitecapture.com/customer_api/2_0/forms",
+        "https://api.sitecapture.com/customer_api/2_0/project_templates",
+      ] : ["https://api.sitecapture.com/customer_api/2_0/templates"];
+      const tried = [];
+      for (const u of cands) {
+        try {
+          const r = await fetch(u, { headers: H });
+          const txt = await r.text();
+          tried.push({ url: u, status: r.status, sample: txt.slice(0, 140) });
+          if (r.ok) {
+            let d; try { d = JSON.parse(txt); } catch (e) { d = null; }
+            const arr = Array.isArray(d) ? d : (d && (d.data || d.templates || d.results)) || [];
+            const templates = arr.map((t) => ({
+              key: t.template_key || t.key || t.id || "",
+              name: t.template_name || t.name || t.title || t.display_line1 || String(t.template_key || t.id || ""),
+            })).filter((t) => t.key);
+            return res.status(200).json({ ok: true, endpoint: u, count: templates.length, templates, raw: req.query.probe ? d : undefined });
+          }
+        } catch (e) { tried.push({ url: u, error: String(e) }); }
+      }
+      return res.status(200).json({ ok: false, templates: [], tried: req.query.probe ? tried : undefined });
+    }
+
     // Project detail (JSON) + media images (binary) — proxied through the service-app
     // (which holds working creds) so the browser can call them same-origin.
     if (req.method === "GET" && (req.query.path === "project" || req.query.path === "image")) {
