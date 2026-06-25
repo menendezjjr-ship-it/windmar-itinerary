@@ -1,6 +1,7 @@
 // /api/zoho-attachments.js — per-stage job documents for a project (Deal).
-// WindMar stores files on the linked Installation record: Permit Package (Permitting)
-// and BOM (Install). GET /api/zoho-attachments?id=<dealId>
+// WindMar stores files on the pipeline's stage sub-modules (linked to the Deal):
+//   NTP, Site_Survey (Site Visit), System_Info_Engineering (Engineering incl. FDA),
+//   Installation (Permitting + Install). GET /api/zoho-attachments?id=<dealId>
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
 const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
@@ -17,14 +18,38 @@ async function getAccessToken() {
   cachedToken = data.access_token; tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
   return cachedToken;
 }
-// A Zoho file-upload field is an array of file objects; normalize + newest first.
-function parseFiles(field, installId) {
+function parseFiles(field) {
   if (!Array.isArray(field)) return [];
-  return field
-    .map((f) => ({ aid: f.id, installId, name: f.File_Name__s || "file", size: f.Size__s || 0, modified: f.Modified_Time__s || f.Created_Time__s || "" }))
-    .filter((f) => f.aid)
-    .sort((a, b) => String(b.modified).localeCompare(String(a.modified)));
+  return field.map((f) => ({ aid: f.id, name: f.File_Name__s || "file", size: f.Size__s || 0, modified: f.Modified_Time__s || f.Created_Time__s || "" })).filter((f) => f.aid);
 }
+// Each stage's file-upload fields, fetched via the Deal's related list. `module` is
+// used to build the secure download URL (download_fields_attachment is record-scoped).
+const SOURCES = [
+  { rel: "NTP", module: "NTP", stage: "NTP", fields: [
+    { api: "Final_Design_to_be_Installed", label: "Approved Final Design" },
+    { api: "Signed_Design_Document", label: "Signed Design Document" },
+    { api: "Roof_Conditions_Report", label: "Roof Conditions Report" },
+    { api: "HOA_Form_Upload", label: "HOA Form" },
+  ] },
+  { rel: "Related_List_Name_6", module: "Site_Survey", stage: "Site Visit", fields: [
+    { api: "Preliminary_Design_Upload_File", label: "Preliminary Design" },
+    { api: "Signed_POA_Permit_App", label: "Signed POA / Permit App" },
+    { api: "Blank_NOC_form_for_SS_Tech", label: "NOC Form" },
+    { api: "HOA_Form_Upload", label: "HOA Form" },
+  ] },
+  { rel: "System_Info_and_Engineering", module: "System_Info_Engineering", stage: "Engineering", fields: [
+    { api: "Approved_FDA", label: "Approved FDA" },
+    { api: "Signed_Contract_O_I", label: "Signed Contract / O&I" },
+  ] },
+  { rel: "Installation_Info", module: "Installation", stage: "Permitting", fields: [
+    { api: "Permit_Package", label: "Permit Package / Plans" },
+  ] },
+  { rel: "Installation_Info", module: "Installation", stage: "Install", fields: [
+    { api: "BOM", label: "BOM" },
+  ] },
+];
+const STAGE_ORDER = ["NTP", "Site Visit", "Engineering", "Permitting", "Install", "Post-Installation"];
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=120");
   const id = String(req.query.id || "").replace(/[^0-9]/g, "");
@@ -32,18 +57,29 @@ export default async function handler(req, res) {
   if (!hasCreds()) return res.status(200).json({ configured: false, ok: false, groups: [] });
   try {
     const token = await getAccessToken();
-    const path = `Installation/search?criteria=${encodeURIComponent(`(Deal:equals:${id})`)}&fields=${encodeURIComponent("Name,Permit_Package,BOM")}&per_page=10`;
-    const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
-    if (r.status === 204) return res.status(200).json({ ok: true, groups: [], count: 0 });
-    if (!r.ok) return res.status(200).json({ ok: false, error: `Zoho ${r.status}: ${(await r.text()).slice(0, 160)}`, groups: [] });
-    const data = await r.json();
-    const permit = [], bom = [];
-    (data.data || []).forEach((ins) => { permit.push(...parseFiles(ins.Permit_Package, ins.id)); bom.push(...parseFiles(ins.BOM, ins.id)); });
-    const groups = [
-      { key: "permit", stage: "Permitting", label: "Permit Package / Plans", files: permit },
-      { key: "bom", stage: "Install", label: "BOM", files: bom },
-    ].filter((g) => g.files.length);
-    return res.status(200).json({ ok: true, count: permit.length + bom.length, groups });
+    const byStage = {};
+    // One fetch per related list (cache so Installation_Info isn't fetched twice).
+    const relCache = {};
+    for (const src of SOURCES) {
+      try {
+        if (!relCache[src.rel]) {
+          const allFields = [...new Set(SOURCES.filter((s) => s.rel === src.rel).flatMap((s) => s.fields.map((f) => f.api)))].concat("Name").join(",");
+          const path = `Deals/${id}/${src.rel}?fields=${encodeURIComponent(allFields)}&per_page=20`;
+          const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+          relCache[src.rel] = (r.status === 204 || !r.ok) ? [] : ((await r.json()).data || []);
+        }
+        relCache[src.rel].forEach((rec) => {
+          src.fields.forEach((ff) => {
+            parseFiles(rec[ff.api]).forEach((f) => {
+              (byStage[src.stage] = byStage[src.stage] || []).push({ module: src.module, recordId: rec.id, aid: f.aid, name: f.name, size: f.size, modified: f.modified, label: ff.label });
+            });
+          });
+        });
+      } catch (e) { /* skip this source */ }
+    }
+    const groups = STAGE_ORDER.filter((s) => byStage[s] && byStage[s].length).map((s) => ({ stage: s, files: byStage[s].sort((a, b) => String(b.modified).localeCompare(String(a.modified))) }));
+    const count = groups.reduce((n, g) => n + g.files.length, 0);
+    return res.status(200).json({ ok: true, count, groups });
   } catch (e) {
     return res.status(200).json({ ok: false, error: String(e && e.message || e), groups: [] });
   }

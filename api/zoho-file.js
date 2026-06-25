@@ -16,15 +16,17 @@ async function getAccessToken() {
   cachedToken = data.access_token; tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
   return cachedToken;
 }
+const MODULES = ["Installation", "System_Info_Engineering", "NTP", "Site_Survey"];
 export default async function handler(req, res) {
   const id = String(req.query.id || "").replace(/[^0-9]/g, "");
   const aid = String(req.query.aid || "").replace(/[^a-zA-Z0-9]/g, "");
+  const mod = MODULES.indexOf(String(req.query.module || "Installation")) >= 0 ? String(req.query.module) : "Installation";
   const name = String(req.query.name || "file").replace(/[^\w.\- ]/g, "").slice(0, 120);
   if (!id || !aid) return res.status(400).json({ ok: false, error: "id and aid required" });
   if (!hasCreds()) return res.status(503).json({ ok: false, error: "Zoho not configured" });
   try {
     const token = await getAccessToken();
-    const url = `${API_DOMAIN}/crm/${API_VERSION}/Installation/${id}/actions/download_fields_attachment?fields_attachment_id=${encodeURIComponent(aid)}`;
+    const url = `${API_DOMAIN}/crm/${API_VERSION}/${mod}/${id}/actions/download_fields_attachment?fields_attachment_id=${encodeURIComponent(aid)}`;
     const r = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
     if (!r.ok) return res.status(200).json({ ok: false, status: r.status, error: (await r.text()).slice(0, 200) });
     const ct = r.headers.get("content-type") || "application/octet-stream";
