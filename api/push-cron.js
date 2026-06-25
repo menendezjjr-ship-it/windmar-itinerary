@@ -43,7 +43,7 @@ export default async function handler(req, res) {
       for (const s of (Array.isArray(subs) ? subs : [])) {
         const subscription = { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } };
         try {
-          await webpush.sendNotification(subscription, payload);
+          await webpush.sendNotification(subscription, payload, { urgency: "high", TTL: 3600 });
           sent++;
         } catch (e) {
           // 404/410 = subscription expired → remove it
