@@ -45,6 +45,22 @@ export default async function handler(req, res) {
       } catch (e) { return res.status(200).json({ diag: true, authSource: src, error: String(e) }); }
     }
 
+    // Project detail (JSON) + media images (binary) — proxied through the service-app
+    // (which holds working creds) so the browser can call them same-origin.
+    if (req.method === "GET" && (req.query.path === "project" || req.query.path === "image")) {
+      const pid = String(req.query.id || "").replace(/[^0-9]/g, "");
+      if (!pid) return res.status(400).json({ ok: false, error: "id required" });
+      const r = await fetch(PROXY + "?path=" + req.query.path + "&id=" + pid, { headers: { Accept: "*/*" } });
+      if (req.query.path === "image") {
+        const buf = Buffer.from(await r.arrayBuffer());
+        res.setHeader("Content-Type", r.headers.get("content-type") || "image/jpeg");
+        res.setHeader("Cache-Control", "s-maxage=3600, stale-while-revalidate=86400");
+        return res.status(r.status).send(buf);
+      }
+      const j = await r.json();
+      return res.status(200).json(j);
+    }
+
     if (req.method === "POST") {
       let body = req.body;
       if (typeof body === "string") { try { body = JSON.parse(body); } catch (e) { body = {}; } }

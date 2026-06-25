@@ -355,7 +355,7 @@ const S={
   wx:{ cityIdx:0, current:null, days:[], live:false, loading:false },
   zoho:{ syncing:false, lastSync:new Date(), showCode:false },
   sc:{ q:"", project:null, cat:"inverter", queue:[], uploading:false, done:false,
-       nf:{ code:"DL", project:"", crew:"crew-morales", date:todayISO, address:"", window:"8:00 AM – 12:00 PM" }, created:null, scState:"sample", canCreate:false, searchOk:false, source:"", results:[], templates:[], nfType:"System Completion - FL", showNew:false, creating:false, createMsg:"", detail:null, err:"" },
+       nf:{ code:"DL", project:"", crew:"crew-morales", date:todayISO, address:"", window:"8:00 AM – 12:00 PM" }, created:null, scState:"sample", canCreate:false, searchOk:false, source:"", results:[], templates:[], detailMedia:{id:null,status:"idle",media:[]}, nfType:"System Completion - FL", showNew:false, creating:false, createMsg:"", detail:null, err:"" },
 };
 const t=k=>(I18N[S.lang][k] ?? I18N.en[k] ?? k);
 const esc=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -1265,6 +1265,17 @@ function weatherHTML(){
 }
 
 /* ---------- TAB: SITECAPTURE (live SiteCapture: search + create + view) ---------- */
+async function loadSCDetail(id){
+  S.sc.detailMedia={id:id,status:"loading",media:[]}; render();
+  try{
+    const r=await fetch("/api/sitecapture?path=project&id="+encodeURIComponent(id),{cache:"no-store"});
+    const j=await r.json(); const d=(j&&j.data)?j.data:j;
+    const media=[], seen={};
+    (function walk(x){ if(!x||typeof x!=="object")return; if(Array.isArray(x)){x.forEach(walk);return;} for(const k in x){ if(k==="media"&&Array.isArray(x[k])){ x[k].forEach(m=>{ if(m&&m.id&&!seen[m.id]&&!/video/i.test(m.type||"")){ seen[m.id]=1; media.push({id:m.id,caption:m.caption||""}); } }); } else walk(x[k]); } })(d);
+    S.sc.detailMedia={id:id,status:"live",media:media};
+  }catch(e){ S.sc.detailMedia={id:id,status:"error",media:[]}; }
+  render();
+}
 async function loadSiteCapture(q){
   S.sc.scState="loading"; render();
   try{
@@ -1315,8 +1326,13 @@ function siteCaptureHTML(){
       ${S.sc.createMsg?`<span style="font-weight:800;color:${/error|\u26a0/i.test(S.sc.createMsg)?'var(--warn)':'var(--jc-DL)'}">${esc(S.sc.createMsg)}</span>`:""}
     </div></div>`:"";
   let detail="";
-  if(S.sc.detail){ const d=list.find(x=>x.id===S.sc.detail);
-    if(d) detail=`<div class="card fade" style="padding:18px;margin-top:12px;border-left:8px solid ${scStatusStyle(d.status)}">
+  if(S.sc.detail){ const d=list.find(x=>x.id===S.sc.detail)||{id:S.sc.detail,name:"Project #"+S.sc.detail,status:""};
+    const dm=S.sc.detailMedia, dmReady=dm.id===S.sc.detail&&dm.status==="live", dmLoading=dm.id===S.sc.detail&&dm.status==="loading", dmErr=dm.id===S.sc.detail&&dm.status==="error";
+    const photos=dmLoading?`<div style="color:var(--text-dim);padding:12px 4px">⟳ ${S.lang==='es'?'Cargando fotos…':'Loading photos…'}</div>`
+      :dmErr?`<div style="color:var(--warn);padding:12px 4px">${S.lang==='es'?'No se pudieron cargar las fotos.':'Could not load photos.'}</div>`
+      :dmReady?(dm.media.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:8px;margin-top:10px;max-height:460px;overflow:auto">${dm.media.map(m=>`<a href="/api/sitecapture?path=image&id=${esc(m.id)}" target="_blank" rel="noopener" title="${esc(m.caption||'')}" style="display:block;border-radius:9px;overflow:hidden;border:1px solid var(--line);background:var(--bg-2);aspect-ratio:1"><img src="/api/sitecapture?path=image&id=${esc(m.id)}" loading="lazy" onerror="var a=this.closest('a'); if(a) a.style.display='none';" style="width:100%;height:100%;object-fit:cover;display:block"/></a>`).join("")}</div>`:`<div style="color:var(--text-dim);padding:12px 4px">${t("sc_noPhotos")||'No photos found for this project.'}</div>`)
+      :`<div style="color:var(--text-dim);padding:12px 4px">…</div>`;
+    detail=`<div class="card fade" style="padding:18px;margin-top:12px;border-left:8px solid ${scStatusStyle(d.status)}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
         <div><h3 style="margin:0 0 4px">${esc(d.name)}</h3><div style="color:var(--text-dim);font-size:13px">#${esc(d.id)}</div></div>
         <button class="btn3d grey sm" data-action="scCloseDetail">✕ ${t("sc_close")}</button></div>
@@ -1326,7 +1342,9 @@ function siteCaptureHTML(){
         ${d.owner?`<div><div class="label">${t("sc_owner")}</div>${esc(d.owner)}</div>`:""}
         ${d.template?`<div><div class="label">${t("sc_template")}</div>${esc(d.template)}</div>`:""}
         ${d.updated?`<div><div class="label">${t("sc_updated")}</div>${esc(d.updated)}</div>`:""}
-      </div></div>`; }
+      </div>
+      <div class="label" style="margin-top:16px">📸 ${t("sc_photos")||'Photos'}${dmReady?` (${dm.media.length})`:''}</div>${photos}
+      </div>`; }
   const cards=list.length? list.map(p=>`<div class="card" style="padding:15px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
         <div style="font-weight:800;font-size:15px">${esc(p.name)}</div>
@@ -1506,7 +1524,7 @@ document.addEventListener("click",e=>{
     case "scSelectProject": S.sc.project=id; S.sc.done=false; render(); break;
     case "scLiveSearch": { const inp=document.getElementById("scSearch"); S.sc.q=inp?inp.value:""; loadSiteCapture(S.sc.q.trim()); break; }
     case "scToggleNew": S.sc.showNew=!S.sc.showNew; S.sc.createMsg=""; render(); break;
-    case "scOpenDetail": S.sc.detail=id; render(); break;
+    case "scOpenDetail": S.sc.detail=id; loadSCDetail(id); render(); break;
     case "scCloseDetail": S.sc.detail=null; render(); break;
     case "scCreate": {
       const txt=document.getElementById("scTemplateKey"); const sel=document.getElementById("scTemplate"); const tk=(txt&&txt.value.trim())||(sel&&sel.value)||"";
