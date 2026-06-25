@@ -79,6 +79,33 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: false, templates: [], tried: req.query.probe ? tried : undefined });
     }
 
+    // TEMP discovery: find the correct endpoint to set a project field value.
+    if (req.method === "GET" && req.query.path === "probeUpdate") {
+      const basic = buildBasic();
+      if (!basic) return res.status(200).json({ ok: false, needsAuth: true });
+      const id = String(req.query.id || "").replace(/[^0-9]/g, "");
+      const key = String(req.query.key || "homeowner_name");
+      const val = String(req.query.value || "DLPROBE Test");
+      const H = { Authorization: basic, "API_KEY": FIXED, "Content-Type": "application/json", Accept: "application/json" };
+      const attempts = [
+        { m: "POST", u: "https://api.sitecapture.com/customer_api/2_0/project/" + id, b: { fields: [{ key, value: val }] } },
+        { m: "POST", u: "https://api.sitecapture.com/customer_api/1_0/project/" + id, b: { fields: { [key]: val } } },
+        { m: "PUT", u: "https://api.sitecapture.com/customer_api/2_0/project/" + id, b: { fields: [{ key, value: val }] } },
+        { m: "POST", u: "https://api.sitecapture.com/customer_api/2_0/project/" + id + "/fields", b: { fields: [{ key, value: val }] } },
+        { m: "POST", u: "https://api.sitecapture.com/customer_api/1_0/project/" + id + "/field", b: { key, value: val } },
+        { m: "POST", u: "https://api.sitecapture.com/customer_api/2_0/project/" + id + "/field", b: [{ key, value: val }] },
+      ];
+      const out = [];
+      for (const a of attempts) {
+        try {
+          const r = await fetch(a.u, { method: a.m, headers: H, body: JSON.stringify(a.b) });
+          const t = await r.text();
+          out.push({ m: a.m, u: a.u.replace("https://api.sitecapture.com/customer_api", ""), body: JSON.stringify(a.b).slice(0, 60), status: r.status, resp: t.slice(0, 120) });
+        } catch (e) { out.push({ u: a.u, error: String(e) }); }
+      }
+      return res.status(200).json({ ok: true, attempts: out });
+    }
+
     // Project detail (JSON) + media images (binary) — proxied through the service-app
     // (which holds working creds) so the browser can call them same-origin.
     if (req.method === "GET" && (req.query.path === "project" || req.query.path === "image")) {
