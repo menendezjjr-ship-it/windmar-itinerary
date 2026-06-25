@@ -1512,7 +1512,7 @@ document.addEventListener("click",e=>{
     case "projStage": S.proj.stageFilter=id; S.proj.selected=null; render(); break;
     case "projClearAlerts": S.proj.alerts=[]; render(); break;
     case "projEnableAlerts": enableAlerts(); break;
-    case "scFromProject": { const pp=(S.proj.list||[]).find(x=>x.id===id||x.num===id); const dl=pp?((pp.code||"DL")+pp.num):(id||""); S.tab="sitecapture"; S.sc.showNew=true; S.sc.q=pp?pp.num:(id||""); S.sc.cnew={dl:dl,customer:pp?(pp.name||""):"",address:pp?(pp.address||""):""}; S.sc.createMsg=""; loadSiteCapture(S.sc.q); render(); break; }
+    case "scFromProject": { const pp=(S.proj.list||[]).find(x=>x.id===id||x.num===id); const num=(pp&&pp.num)||""; const dl=num?(/^[A-Za-z]/.test(num)?num:((pp.code||"DL")+num)):(id||""); S.tab="sitecapture"; S.sc.showNew=true; S.sc.q=pp?pp.num:(id||""); S.sc.cnew={dl:dl,customer:pp?(pp.name||""):"",address:pp?(pp.address||""):""}; S.sc.createMsg=""; loadSiteCapture(S.sc.q); render(); break; }
     case "boardFilter": S.boardFilter=(S.boardFilter===id?"all":id); S.selectedJob=null; render(); break;
     case "dayPrev": S.dayOffset--; S.selectedJob=null; render(); break;
     case "dayToday": S.dayOffset=0; S.selectedJob=null; render(); break;
