@@ -117,29 +117,24 @@ export default async function handler(req, res) {
     const q = (req.query.q || "").toString().slice(0, 80);
     const basic = buildBasic();
 
-    // READS via the WindMar service-app proxy — it holds the working SiteCapture
-    // login AND supports search through its `q` param (forwards &search=&exact_text=false).
+    // READS via the WindMar service-app proxy (holds the working login + supports search
+    // via `q`). CREATE needs this project's OWN login — validated by a tiny direct read.
+    // Both run in PARALLEL so the response returns in one round-trip, not two.
+    const proxyU = PROXY + "?path=projects&offset=0" + (q ? ("&q=" + encodeURIComponent(q)) : "");
+    const [pRes, cRes] = await Promise.all([
+      fetch(proxyU, { headers: { Accept: "application/json" } }).catch(() => null),
+      basic ? fetch("https://api.sitecapture.com/customer_api/2_0/projects?max=1", { headers: { Authorization: basic, "API_KEY": FIXED, Accept: "application/json" } }).catch(() => null) : Promise.resolve(null),
+    ]);
     let projects = [], ok = false;
-    try {
-      const u = PROXY + "?path=projects&offset=0" + (q ? ("&q=" + encodeURIComponent(q)) : "");
-      const r = await fetch(u, { headers: { Accept: "application/json" } });
-      if (r.ok) {
-        const body = await r.json();
+    if (pRes && pRes.ok) {
+      try {
+        const body = await pRes.json();
         const arr = Array.isArray(body) ? body : (body.data || body.projects || body.results || []);
         projects = mapList(arr);
         ok = true;
-      }
-    } catch (e) { /* leave ok=false */ }
-
-    // CREATE still needs this project's own SiteCapture login (the proxy can't create).
-    // Validate it with a tiny direct read so the UI knows whether Create will work.
-    let canCreate = false;
-    if (basic) {
-      try {
-        const cr = await fetch("https://api.sitecapture.com/customer_api/2_0/projects?max=1", { headers: { Authorization: basic, "API_KEY": FIXED, Accept: "application/json" } });
-        canCreate = cr.ok;
-      } catch (e) { /* canCreate stays false */ }
+      } catch (e) { /* leave ok=false */ }
     }
+    const canCreate = !!(cRes && cRes.ok);
 
     return res.status(200).json({ configured: true, ok, source: "proxy", searchOk: ok, canCreate, count: projects.length, projects, templates: templatesOf(projects), note: canCreate ? "" : "Create a project needs valid SITECAPTURE_USER + SITECAPTURE_PASS on this Vercel project." });
   } catch (e) {

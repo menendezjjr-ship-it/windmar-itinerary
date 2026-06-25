@@ -462,8 +462,8 @@ function calStartOfWeek(d){const x=new Date(d.getFullYear(),d.getMonth(),d.getDa
 function calHot(p){return /very high|high|urgent/i.test(p||"");}
 const calTypeBadge=(type)=>"display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:800;letter-spacing:.04em;padding:2px 7px;border-radius:5px;white-space:nowrap;"+(type==="service"?"background:rgba(248,155,36,.15);color:var(--wh-orange);border:1px solid rgba(248,155,36,.4);":"background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.4);");
 function calRec(j){ return { type:j.kind, id:j.id, team:j.crewLabel||"Unassigned", startDate:j.date, startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", phone:j.phone||"", cat:jobCat(j) }; }
-async function loadOpsCal(){
-  S.cal.status="loading"; render();
+async function loadOpsCal(silent){
+  if(!silent){ S.cal.status="loading"; render(); }
   let from,to;
   if(S.cal.view==="week"){ const ws=S.cal.weekStartISO?new Date(S.cal.weekStartISO+"T00:00:00"):calStartOfWeek(new Date()); from=calYMD(ws); to=calYMD(calAddDays(ws,6)); }
   else { from=S.cal.y+"-"+String(S.cal.m).padStart(2,"0")+"-01"; const last=new Date(S.cal.y,S.cal.m,0).getDate(); to=S.cal.y+"-"+String(S.cal.m).padStart(2,"0")+"-"+String(last).padStart(2,"0"); }
@@ -474,7 +474,7 @@ async function loadOpsCal(){
     else if(j&&j.configured){ S.cal.records=[]; S.cal.status="error"; S.cal.err=j.error||"error"; }
     else { S.cal.records=[]; S.cal.status="unconfigured"; }
   }catch(e){ S.cal.records=[]; S.cal.status="error"; S.cal.err=String(e); }
-  render();
+  if(!silent || S.tab==="calendar" || (S.tab==="itinerary"&&S.itinView==="brigada")) render();
 }
 function calChip(r){
   const col=teamColor(r.team), isS=r.type==="service", hot=isS&&calHot(r.priority);
@@ -566,11 +566,11 @@ function opsCalHTML(){
     ${view}${dayModal}${selModal}</div>`;
 }
 function calendarTabHTML(){ return opsCalHTML(); }
-setInterval(function(){ if(((S.tab==="itinerary"&&S.itinView==="brigada")||S.tab==="calendar")&&S.cal.status==="live") loadOpsCal(); }, 90000);
+setInterval(function(){ if(((S.tab==="itinerary"&&S.itinView==="brigada")||S.tab==="calendar")&&S.cal.status==="live") loadOpsCal(true); }, 90000);
 
 /* ---------- LIVE Zoho jobs feed (Installations + Service Tickets) ---------- */
-async function loadJobs(){
-  S.live.status="loading"; render();
+async function loadJobs(silent){
+  if(!silent){ S.live.status="loading"; render(); }
   try{
     const r=await fetch("/api/zoho-jobs",{cache:"no-store"});
     const j=await r.json();
@@ -583,12 +583,12 @@ async function loadJobs(){
       S.live={status:"unconfigured",ok:false,jobs:[],updated:null,err:""};
     }
   }catch(e){ S.live={status:"error",ok:false,jobs:[],updated:null,err:String(e)}; }
-  render();
+  if(!silent || S.tab==="itinerary") render();
 }
 // Active jobs = live Zoho when available, else the built-in demo set.
 function activeJobs(){ return (S.live&&S.live.ok&&S.live.jobs&&S.live.jobs.length)?S.live.jobs:JOBS; }
 // Auto-refresh the live feed while viewing the board (every 90s).
-setInterval(function(){ if(S.live&&S.live.ok&&S.tab==="itinerary"&&S.itinView==="board") loadJobs(); },90000);
+setInterval(function(){ if(S.live&&S.live.ok&&S.tab==="itinerary"&&S.itinView==="board") loadJobs(true); },90000);
 
 const CREW_PALETTE=["#3B82F6","#F89B24","#16A34A","#06B6D4","#A855F7","#EC4899","#DC2626","#0EA5E9","#65A30D","#D97706","#0891B2","#7C3AED"];
 function crewColor(id){ let h=0; for(let i=0;i<id.length;i++) h=(h*31+id.charCodeAt(i))>>>0; return CREW_PALETTE[h%CREW_PALETTE.length]; }
@@ -657,8 +657,8 @@ const STAGE_LABEL={ es:{"Site Visit":"Visita de Sitio","Engineering":"Ingenierí
 function stageLabel(s){ return (STAGE_LABEL[S.lang]&&STAGE_LABEL[S.lang][s])||s; }
 function fmtDate(d){ if(!d)return null; const x=new Date(d+(String(d).length<=10?"T00:00:00":"")); if(isNaN(x))return d; return x.toLocaleDateString(S.lang==="es"?"es-US":"en-US",{month:"short",day:"numeric",year:"numeric"}); }
 
-async function loadProjects(){
-  S.proj.status="loading"; render();
+async function loadProjects(silent){
+  if(!silent){ S.proj.status="loading"; render(); }
   try{
     const r=await fetch("/api/zoho-projects",{cache:"no-store"});
     const j=await r.json();
@@ -668,7 +668,7 @@ async function loadProjects(){
     } else if(j&&j.configured){ S.proj.status="error"; S.proj.ok=false; S.proj.list=[]; S.proj.err=j.error||"error"; }
     else { S.proj.status="unconfigured"; S.proj.ok=false; S.proj.list=[]; }
   }catch(e){ S.proj.status="error"; S.proj.ok=false; S.proj.err=String(e); }
-  render();
+  if(!silent || S.tab==="projects" || S.tab==="itinerary") render();
 }
 // Notify when a project ENTERS Engineering. Seeds silently on first load so the
 // current backlog doesn't all fire; persists across reloads via localStorage.
@@ -1277,8 +1277,8 @@ async function loadSCDetail(id){
   }catch(e){ S.sc.detailMedia={id:id,status:"error",media:[]}; }
   render();
 }
-async function loadSiteCapture(q){
-  S.sc.scState="loading"; render();
+async function loadSiteCapture(q,silent){
+  if(!silent){ S.sc.scState="loading"; render(); }
   try{
     const r=await fetch("/api/sitecapture?q="+encodeURIComponent(q||""),{cache:"no-store"});
     const j=await r.json();
@@ -1286,7 +1286,7 @@ async function loadSiteCapture(q){
     else if(j&&j.configured){ S.sc.results=[]; S.sc.scState="error"; S.sc.err=j.error||("HTTP "+j.status); }
     else { S.sc.results=[]; S.sc.scState="sample"; }
   }catch(e){ S.sc.results=[]; S.sc.scState="sample"; }
-  render();
+  if(!silent || S.tab==="sitecapture") render();
 }
 async function loadSCTemplates(){
   try{
@@ -1596,8 +1596,9 @@ render();
 loadJobs();
 loadProjects();
 loadSCTemplates();
-// Live polling so Engineering-stage alerts fire app-wide while the dashboard is open.
-setInterval(function(){ if(S.proj.ok) loadProjects(); },75000);
+loadSiteCapture("",true); // log in to SiteCapture immediately so the tab opens instantly (silent — no flash)
+// Live polling so Engineering-stage alerts fire app-wide while the dashboard is open (silent — no flash).
+setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
 </script>
 <script>
 /* WindMar crew status notifications — polls shared Supabase, alerts the coordinator */
@@ -1637,7 +1638,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(); },75000);
           var fresh=rows.filter(function(r){return !seenSet[r.id];});
           if(fresh.length){localStorage.setItem(KEY,JSON.stringify(rows.map(function(r){return r.id;}).concat(seen).slice(0,300)));fresh.reverse().forEach(toast);}
         }
-        if(changed&&typeof render==='function'){try{render();}catch(e){}}
+        if(changed&&S.tab==='itinerary'&&typeof render==='function'){try{render();}catch(e){}}
       }).catch(function(){});
   }
   poll();setInterval(poll,25000);window.addEventListener('focus',poll);
