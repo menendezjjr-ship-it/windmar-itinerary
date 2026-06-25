@@ -355,7 +355,7 @@ const S={
   wx:{ cityIdx:0, current:null, days:[], live:false, loading:false },
   zoho:{ syncing:false, lastSync:new Date(), showCode:false },
   sc:{ q:"", project:null, cat:"inverter", queue:[], uploading:false, done:false,
-       nf:{ code:"DL", project:"", crew:"crew-morales", date:todayISO, address:"", window:"8:00 AM – 12:00 PM" }, created:null, scState:"sample", canCreate:false, results:[], templates:[], nfType:"System Completion - FL", showNew:false, creating:false, createMsg:"", detail:null, err:"" },
+       nf:{ code:"DL", project:"", crew:"crew-morales", date:todayISO, address:"", window:"8:00 AM – 12:00 PM" }, created:null, scState:"sample", canCreate:false, searchOk:false, source:"", results:[], templates:[], nfType:"System Completion - FL", showNew:false, creating:false, createMsg:"", detail:null, err:"" },
 };
 const t=k=>(I18N[S.lang][k] ?? I18N.en[k] ?? k);
 const esc=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -1253,7 +1253,7 @@ async function loadSiteCapture(q){
   try{
     const r=await fetch("/api/sitecapture?q="+encodeURIComponent(q||""),{cache:"no-store"});
     const j=await r.json();
-    if(j&&j.configured&&j.ok){ S.sc.results=j.projects||[]; S.sc.templates=j.templates||[]; S.sc.canCreate=!!j.canCreate; S.sc.scState="live"; }
+    if(j&&j.configured&&j.ok){ S.sc.results=j.projects||[]; S.sc.templates=j.templates||[]; S.sc.canCreate=!!j.canCreate; S.sc.searchOk=!!j.searchOk; S.sc.source=j.source||""; S.sc.scState="live"; }
     else if(j&&j.configured){ S.sc.results=[]; S.sc.scState="error"; S.sc.err=j.error||("HTTP "+j.status); }
     else { S.sc.results=[]; S.sc.scState="sample"; }
   }catch(e){ S.sc.results=[]; S.sc.scState="sample"; }
@@ -1274,6 +1274,8 @@ function siteCaptureHTML(){
     <span style="width:11px;height:11px;border-radius:50%;background:${live?'var(--jc-DL)':'var(--wh-grey)'};box-shadow:${live?'0 0 8px var(--jc-DL)':'none'}"></span>
     <span style="font-weight:800">${live?t("sc_connected"):t("sc_localMode")}</span>
     ${live?`<span class="pill" style="background:var(--jc-DL)">${S.sc.results.length}+ ${t("sc_projects")}</span>`:""}
+    ${(live&&S.sc.searchOk)?`<span class="pill" style="background:var(--jc-DL)">🔎 ${S.lang==='es'?'Búsqueda activa':'Live search'}</span>`:""}
+    ${(live&&!S.sc.searchOk)?`<span class="pill" style="background:var(--warn)" title="${S.lang==='es'?'Agrega SITECAPTURE_USER + SITECAPTURE_PASS en Vercel':'Add SITECAPTURE_USER + SITECAPTURE_PASS in Vercel'}">⚠ ${S.lang==='es'?'Solo navegación — búsqueda/creación requieren login':'Browse only — search & create need a SiteCapture login'}</span>`:""}
     ${S.sc.scState==="error"?`<span class="pill" style="background:var(--warn)">API error</span>`:""}</div>`;
   const SC_TYPES=[
     {type:"System Completion - FL", key:"install_completion_form", templates:["Core Delivery BOMs","INSTALL COMPLETION FL 3.0 (MICROINVERTERS)","INSTALL COMPLETION FL 3.0 (TESLA)","Install Completion 2.0","Installation Daily Report FL","Re-installs","Trailer Inspection Form","Warehouse Material Accountability","Wire Dispatch Report"]},
@@ -1522,9 +1524,10 @@ document.addEventListener("click",e=>{
     }
   }
 });
+document.addEventListener("keydown",function(e){ if(e.key==="Enter"&&e.target&&e.target.id==="scSearch"){ S.sc.q=e.target.value; loadSiteCapture(S.sc.q.trim()); } });
 document.addEventListener("input",function(e){
   if(e.target.id==="projSearch"){ S.proj.q=e.target.value; render(); }
-  else if(e.target.id==="scSearch"){ S.sc.q=e.target.value; if(S.sc.scState==="live")S.sc.scState="sample"; render(); }
+  else if(e.target.id==="scSearch"){ S.sc.q=e.target.value; render(); }
   else if(e.target.hasAttribute&&e.target.hasAttribute("data-nf")){ S.sc.nf[e.target.getAttribute("data-nf")]=e.target.value; S.sc.created=null; render(); }
 });
 document.addEventListener("change",function(e){

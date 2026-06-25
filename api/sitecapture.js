@@ -1,75 +1,98 @@
 // /api/sitecapture.js
-// READS (search/list): reuse the WindMar Service app's authenticated proxy — no creds needed here.
-// WRITES (create project): require SiteCapture write credentials, because creating in your account
-//   always needs authentication. Set SITECAPTURE_USER + SITECAPTURE_PASS (your SiteCapture login)
-//   in Vercel, OR Site_Capture_Key = base64("user:pass").
+// BROWSE: falls back to the WindMar Service app proxy (no creds, but no search).
+// SEARCH + CREATE: use the direct SiteCapture API — requires a valid SiteCapture
+//   login. Set SITECAPTURE_USER + SITECAPTURE_PASS (your SiteCapture login) in
+//   Vercel, OR Site_Capture_Key = base64("user:pass").
 const PROXY = process.env.SITECAPTURE_PROXY || "https://windmar-service-app.vercel.app/api/sitecapture";
-function b64(s){ return Buffer.from(s).toString("base64"); }
+const FIXED = process.env.SITECAPTURE_API_KEY || "zapier-api-4320";
+function b64(s) { return Buffer.from(s).toString("base64"); }
+
+// Build the Basic-auth header from whichever credential env is set.
+function buildBasic() {
+  if (process.env.SITECAPTURE_USER && process.env.SITECAPTURE_PASS) return "Basic " + b64(process.env.SITECAPTURE_USER + ":" + process.env.SITECAPTURE_PASS);
+  if (process.env.Site_Capture_Key) { const k = process.env.Site_Capture_Key.trim(); return k.toLowerCase().startsWith("basic ") ? k : (k.indexOf(":") >= 0 ? "Basic " + b64(k) : "Basic " + k); }
+  return null;
+}
+function mapList(arr) {
+  return (arr || []).slice(0, 80).map((p) => ({
+    id: String(p.id || p.project_id || ""),
+    name: p.display_line1 || p.name || p.project_name || p.title || ("Project " + (p.id || "")),
+    address: p.display_line2 || p.address || p.site_address || "",
+    owner: p.display_line3 || p.assigned_user || p.owner || "",
+    status: (p.status || p.project_status || "").toString(),
+    template: p.template_name || p.template || "",
+    updated: p.display_line4 || p.last_updated || p.modified_date || "",
+    template_key: p.template_key || "",
+  }));
+}
+function templatesOf(projects) {
+  const t = {}; projects.forEach((p) => { if (p.template_key) t[p.template_key] = p.template || p.template_key; });
+  return Object.keys(t).map((k) => ({ key: k, name: t[k] }));
+}
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "s-maxage=20, stale-while-revalidate=60");
   try {
-    // Diagnostic: tests the SAME credentials the create uses against a simple read,
-    // so we can tell if a 401 is bad login vs. something else. Leaks no secrets.
+    // Diagnostic — tests the credentials against a simple read. Leaks no secrets.
     if (req.method === "GET" && req.query.diag) {
-      let src = "none", basic = null;
-      if (process.env.SITECAPTURE_USER && process.env.SITECAPTURE_PASS) {
-        basic = "Basic " + b64(process.env.SITECAPTURE_USER + ":" + process.env.SITECAPTURE_PASS);
-        src = "SITECAPTURE_USER/PASS";
-      } else if (process.env.Site_Capture_Key) {
-        const k = process.env.Site_Capture_Key.trim();
-        basic = k.toLowerCase().startsWith("basic ") ? k : (k.indexOf(":") >= 0 ? "Basic " + b64(k) : "Basic " + k);
-        src = "Site_Capture_Key";
-      }
+      const basic = buildBasic();
+      const src = (process.env.SITECAPTURE_USER && process.env.SITECAPTURE_PASS) ? "SITECAPTURE_USER/PASS" : (process.env.Site_Capture_Key ? "Site_Capture_Key" : "none");
       if (!basic) return res.status(200).json({ diag: true, authSource: "none", note: "No SiteCapture creds set on this project" });
-      const FIXED = process.env.SITECAPTURE_API_KEY || "zapier-api-4320";
-      const userLen = (process.env.SITECAPTURE_USER || "").length, passLen = (process.env.SITECAPTURE_PASS || "").length;
       try {
         const r = await fetch("https://api.sitecapture.com/customer_api/2_0/projects?max=1", { headers: { Authorization: basic, "API_KEY": FIXED, Accept: "application/json" } });
         const txt = await r.text();
-        return res.status(200).json({ diag: true, authSource: src, apiKeyUsed: FIXED, userLen, passLen, status: r.status, ok: r.ok, body: txt.slice(0, 180) });
+        return res.status(200).json({ diag: true, authSource: src, apiKeyUsed: FIXED, userLen: (process.env.SITECAPTURE_USER || "").length, passLen: (process.env.SITECAPTURE_PASS || "").length, status: r.status, ok: r.ok, body: txt.slice(0, 180) });
       } catch (e) { return res.status(200).json({ diag: true, authSource: src, error: String(e) }); }
     }
+
     if (req.method === "POST") {
       let body = req.body;
       if (typeof body === "string") { try { body = JSON.parse(body); } catch (e) { body = {}; } }
       body = body || {};
-      if (!body.template_key) return res.status(200).json({ ok:false, error:"template_key required" });
-      const FIXED = process.env.SITECAPTURE_API_KEY || "zapier-api-4320";
-      let basic = null;
-      if (process.env.SITECAPTURE_USER && process.env.SITECAPTURE_PASS) {
-        basic = "Basic " + b64(process.env.SITECAPTURE_USER + ":" + process.env.SITECAPTURE_PASS);
-      } else if (process.env.Site_Capture_Key) {
-        const k = process.env.Site_Capture_Key.trim();
-        basic = k.toLowerCase().startsWith("basic ") ? k : (k.indexOf(":") >= 0 ? "Basic " + b64(k) : "Basic " + k);
-      }
-      if (!basic) return res.status(200).json({ ok:false, needsAuth:true, error:"Add SITECAPTURE_USER + SITECAPTURE_PASS in Vercel to create projects." });
+      if (!body.template_key) return res.status(200).json({ ok: false, error: "template_key required" });
+      const basic = buildBasic();
+      if (!basic) return res.status(200).json({ ok: false, needsAuth: true, error: "Add SITECAPTURE_USER + SITECAPTURE_PASS in Vercel to create projects." });
       const payload = { template_key: body.template_key };
       if (body.client_id) payload.client_id = body.client_id;
       const r = await fetch("https://api.sitecapture.com/customer_api/1_0/project", {
-        method:"POST", headers:{ Authorization:basic, "API_KEY":FIXED, "Content-Type":"application/json" },
+        method: "POST", headers: { Authorization: basic, "API_KEY": FIXED, "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const txt = await r.text(); let d; try { d = JSON.parse(txt); } catch (e) { d = { raw: txt }; }
-      if (!r.ok) return res.status(200).json({ ok:false, status:r.status, error:(d.errors ? d.errors.join("; ") : txt.slice(0,200)) });
-      return res.status(200).json({ ok:true, id:String(d.id || d.project_id || (d.project && d.project.id) || ""), project:d });
+      if (r.status === 401) return res.status(200).json({ ok: false, needsAuth: true, status: 401, error: "SiteCapture rejected the login (401). Set a valid SITECAPTURE_USER + SITECAPTURE_PASS in Vercel." });
+      if (!r.ok) return res.status(200).json({ ok: false, status: r.status, error: (d.errors ? d.errors.join("; ") : txt.slice(0, 200)) });
+      return res.status(200).json({ ok: true, id: String(d.id || d.project_id || (d.project && d.project.id) || ""), project: d });
     }
+
     const q = (req.query.q || "").toString().slice(0, 80);
-    const u = PROXY + "?path=projects&offset=0" + (q ? ("&search=" + encodeURIComponent(q)) : "");
+    const basic = buildBasic();
+
+    // Preferred path: direct SiteCapture API — supports real search + newest-first.
+    if (basic) {
+      try {
+        const du = "https://api.sitecapture.com/customer_api/2_0/projects?max=80&summary_only=true" + (q ? ("&search=" + encodeURIComponent(q)) : "");
+        const dr = await fetch(du, { headers: { Authorization: basic, "API_KEY": FIXED, Accept: "application/json" } });
+        if (dr.ok) {
+          const dj = await dr.json();
+          const darr = Array.isArray(dj) ? dj : (dj.data || dj.projects || dj.results || []);
+          const projects = mapList(darr);
+          return res.status(200).json({ configured: true, ok: true, source: "direct", searchOk: true, canCreate: true, count: darr.length, projects, templates: templatesOf(projects) });
+        }
+        // direct call failed (likely 401 bad creds) → fall through to browse-only proxy
+      } catch (e) { /* fall through */ }
+    }
+
+    // Fallback: service-app proxy (browse only — does NOT honor search).
+    const u = PROXY + "?path=projects&offset=0";
     const r = await fetch(u, { headers: { Accept: "application/json" } });
-    if (!r.ok) { const t = await r.text(); return res.status(200).json({ configured:true, ok:false, status:r.status, error:t.slice(0,160), projects:[] }); }
+    if (!r.ok) { const t = await r.text(); return res.status(200).json({ configured: true, ok: false, status: r.status, error: t.slice(0, 160), projects: [] }); }
     const j = await r.json();
     const arr = Array.isArray(j) ? j : (j.data || j.projects || j.results || []);
-    const projects = arr.slice(0, 60).map((p) => ({
-      id:String(p.id || p.project_id || ""), name:p.display_line1 || p.name || ("Project " + (p.id || "")),
-      address:p.display_line2 || p.address || "", owner:p.display_line3 || p.assigned_user || "",
-      status:(p.status || "").toString(), template:p.template_name || "", updated:p.display_line4 || p.last_updated || "",
-      template_key:p.template_key || "",
-    }));
-    const tmap = {}; projects.forEach((p) => { if (p.template_key) tmap[p.template_key] = p.template || p.template_key; });
-    const templates = Object.keys(tmap).map((k) => ({ key:k, name:tmap[k] }));
-    const canCreate = !!((process.env.SITECAPTURE_USER && process.env.SITECAPTURE_PASS) || process.env.Site_Capture_Key);
-    return res.status(200).json({ configured:true, ok:true, canCreate, count:(arr.length), projects, templates, via:"service-app" });
+    let projects = mapList(arr);
+    // Best-effort local filter so typing still narrows the browse list a bit.
+    if (q) { const ql = q.toLowerCase(); projects = projects.filter((p) => (p.name + " " + p.address + " " + p.id).toLowerCase().indexOf(ql) >= 0); }
+    return res.status(200).json({ configured: true, ok: true, source: "proxy", searchOk: false, canCreate: false, count: arr.length, projects, templates: templatesOf(projects), note: "Search & create need a valid SiteCapture login (SITECAPTURE_USER + SITECAPTURE_PASS) on this Vercel project." });
   } catch (e) {
-    return res.status(200).json({ configured:true, ok:false, error:String(e), projects:[] });
+    return res.status(200).json({ configured: true, ok: false, error: String(e), projects: [] });
   }
 }
