@@ -348,7 +348,7 @@ export async function POST(req){
 const S={
   lang:"en", theme:"dark", tab:"itinerary", dayOffset:0, selectedJob:null, itinView:"board", boardFilter:"all",
   live:{status:"idle",ok:false,jobs:[],updated:null,err:""},
-  proj:{status:"idle",ok:false,list:[],updated:null,err:"",selected:null,q:"",stageFilter:"all",alerts:[],notify:false,notes:{id:null,status:"idle",list:[]},noteFrom:null},
+  proj:{status:"idle",ok:false,list:[],updated:null,err:"",selected:null,q:"",stageFilter:"all",alerts:[],notify:false,notes:{id:null,status:"idle",list:[]},noteFrom:null,atts:{id:null,status:"idle",groups:[]}},
   notif:{items:[],unread:0,open:false}, attnOpen:true,
   cal:{status:"idle",records:[],y:new Date().getFullYear(),m:new Date().getMonth()+1,view:"month",typeFilter:"all",teamFilter:[],selected:null,dayPanel:null,weekStartISO:null,err:""},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
@@ -821,6 +821,12 @@ async function loadProjectNotes(id){
   catch(e){ S.proj.notes={id:id,status:"error",list:[]}; }
   render();
 }
+async function loadProjectAttachments(id){
+  S.proj.atts={id:id,status:"loading",groups:[]}; render();
+  try{ const r=await fetch("/api/zoho-attachments?id="+encodeURIComponent(id),{cache:"no-store"}); const j=await r.json(); S.proj.atts={id:id,status:(j&&j.ok)?"live":"error",groups:(j&&j.groups)||[]}; }
+  catch(e){ S.proj.atts={id:id,status:"error",groups:[]}; }
+  render();
+}
 function projectDetailHTML(p){
   const es=S.lang==="es";
   const row=(label,val)=> val?`<div style="display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line)"><span style="color:var(--text-dim);font-size:12.5px">${label}</span><span style="font-weight:700;font-size:13px;text-align:right">${esc(val)}</span></div>`:"";
@@ -847,6 +853,16 @@ function projectDetailHTML(p){
     : !ready?`<div style="color:var(--text-dim);font-size:12px;padding:8px">${es?'Las notas se cargan en producción.':'Notes load live in production.'}</div>`
     : noteList.length?noteList.map(n=>`<div style="padding:10px 12px;border-radius:10px;background:var(--bg-2);border:1px solid var(--line);margin-bottom:8px"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:4px"><span style="font-weight:700;font-size:12px;color:var(--wh-blue-light)">${esc(n.author||'—')}</span><span style="font-size:11px;color:var(--text-dim)">${n.time?fmtDate(n.time.slice(0,10)):''}</span></div>${n.title?`<div style="font-weight:700;font-size:13px;margin-bottom:2px">${esc(n.title)}</div>`:''}<div style="font-size:13px;white-space:pre-wrap;line-height:1.5">${esc(n.content)}</div></div>`).join("")
     : `<div style="color:var(--text-dim);font-size:13px;padding:8px">${es?'Sin notas':'No notes'}${S.proj.noteFrom?` ${es?'desde':'from'} ${fmtDate(S.proj.noteFrom)}`:''}.</div>`;
+  // ── Attachments (Permit Package → Permitting, BOM → Install; from linked Installation) ──
+  const at=S.proj.atts, atReady=at.id===p.id&&at.status==="live", atLoading=at.id===p.id&&at.status==="loading";
+  const fmtSize=(b)=>{b=+b||0;return b>=1048576?(b/1048576).toFixed(1)+" MB":b>=1024?Math.round(b/1024)+" KB":b+" B";};
+  const STAGEC={Permitting:"#F89B24",Install:"#16A34A"};
+  const attCount=atReady?at.groups.reduce((n,g)=>n+g.files.length,0):0;
+  const attInner=atLoading?`<div style="color:var(--text-dim);font-size:13px;padding:8px">⟳ ${es?'Cargando archivos…':'Loading files…'}</div>`
+    :!atReady?`<div style="color:var(--text-dim);font-size:12px;padding:8px">${es?'Los archivos se cargan en producción.':'Files load live in production.'}</div>`
+    :(at.groups&&at.groups.length)?at.groups.map(g=>`<div style="margin-bottom:12px"><div style="font-size:11px;font-weight:800;color:${STAGEC[g.stage]||'var(--text-dim)'};text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px">📄 ${esc(g.label)} <span style="opacity:.7;font-weight:600">· ${esc(g.stage)}</span></div>${g.files.map(f=>`<a href="/api/zoho-file?id=${esc(f.installId)}&aid=${esc(f.aid)}&name=${encodeURIComponent(f.name)}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:10px;background:var(--bg-2);border:1px solid var(--line);margin-bottom:6px;text-decoration:none;color:var(--text)"><span style="font-size:16px;flex-shrink:0">📎</span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;font-size:12.5px">${esc(f.name)}</span><span style="font-size:11px;color:var(--text-dim);flex-shrink:0">${fmtSize(f.size)}</span><span style="font-size:11px;font-weight:700;color:var(--wh-blue-light);flex-shrink:0">${es?'Abrir':'Open'} ↗</span></a>`).join("")}</div>`).join("")
+    :`<div style="color:var(--text-dim);font-size:13px;padding:8px">${es?'Sin archivos adjuntos':'No attachments'}</div>`;
+  const attSection=`<div style="padding:8px 20px 4px;border-top:1px solid var(--line);margin-top:8px"><div class="label" style="margin:6px 0 8px">📎 ${es?'Archivos / Adjuntos':'Attachments'}${atReady?` (${attCount})`:''}</div>${attInner}</div>`;
   const notesHead=`<div style="display:flex;align-items:center;gap:10px;margin:6px 0 10px;flex-wrap:wrap"><div class="label" style="margin:0">📝 ${es?'Notas':'Notes'}${ready?` (${ns.list.length})`:''}</div>${S.proj.noteFrom?`<button class="btn3d ghost sm" data-action="projStageFocus" data-id="">✕ ${es?'Todas':'All'}</button><span style="font-size:11px;color:var(--wh-orange)">${es?'desde':'from'} ${fmtDate(S.proj.noteFrom)}</span>`:''}</div>`;
   const zohoUrl="https://crm.zoho.com/crm/org666151142/tab/Potentials/"+esc(p.id);
   return `<div class="card fade" style="padding:0;margin-bottom:16px;border-left:8px solid ${sc.c};overflow:auto;max-height:82vh">
@@ -875,6 +891,7 @@ function projectDetailHTML(p){
       </div>
       <div><div class="label" style="margin:6px 0">${ptr("timeline")}</div><div style="margin-top:4px">${tl}</div></div>
     </div>
+    ${attSection}
     <div style="padding:8px 20px 18px;border-top:1px solid var(--line);margin-top:8px">${notesHead}<div style="max-height:300px;overflow:auto">${notesInner}</div></div>
   </div>`;
 }
@@ -1443,13 +1460,13 @@ document.addEventListener("click",e=>{
     case "attnToggle": S.attnOpen=!S.attnOpen; render(); break;
     case "notifToggle": S.notif.open=!S.notif.open; if(S.notif.open) S.notif.unread=0; render(); break;
     case "notifClose": S.notif.open=false; render(); break;
-    case "notifOpen": S.notif.open=false; S.tab="projects"; S.proj.selected=id; S.proj.noteFrom=null; S.proj.stageFilter="all"; loadProjectNotes(id); render(); break;
+    case "notifOpen": S.notif.open=false; S.tab="projects"; S.proj.selected=id; S.proj.noteFrom=null; S.proj.stageFilter="all"; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
     case "setTab": S.tab=id; if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="projects"&&S.proj.status==="idle") loadProjects(); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); render(); break;
     case "jobsRefresh": loadJobs(); break;
     case "projRefresh": loadProjects(); break;
-    case "selectProject": S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); render(); break;
+    case "selectProject": S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
     case "projStageFocus": S.proj.noteFrom=(id&&S.proj.noteFrom!==id)?id:null; render(); break;
     case "closeProject": S.proj.selected=null; S.proj.noteFrom=null; render(); break;
     case "projStage": S.proj.stageFilter=id; S.proj.selected=null; render(); break;
