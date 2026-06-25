@@ -102,8 +102,11 @@ export default async function handler(req, res) {
       if (!body.template_key) return res.status(200).json({ ok: false, error: "template_key required" });
       const basic = buildBasic();
       if (!basic) return res.status(200).json({ ok: false, needsAuth: true, error: "Add SITECAPTURE_USER + SITECAPTURE_PASS in Vercel to create projects." });
+      // Forward the DL identity so the new project is named/located for the job it's
+      // assigned to (not a blank "Project #"). SiteCapture ignores unknown fields.
       const payload = { template_key: body.template_key };
-      if (body.client_id) payload.client_id = body.client_id;
+      ["client_id", "name", "external_id", "address", "latitude", "longitude", "market", "company"].forEach((k) => { if (body[k] != null && body[k] !== "") payload[k] = body[k]; });
+      if (body.fields && typeof body.fields === "object") payload.fields = body.fields;
       const r = await fetch("https://api.sitecapture.com/customer_api/1_0/project", {
         method: "POST", headers: { Authorization: basic, "API_KEY": FIXED, "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -111,7 +114,20 @@ export default async function handler(req, res) {
       const txt = await r.text(); let d; try { d = JSON.parse(txt); } catch (e) { d = { raw: txt }; }
       if (r.status === 401) return res.status(200).json({ ok: false, needsAuth: true, status: 401, error: "SiteCapture rejected the login (401). Set a valid SITECAPTURE_USER + SITECAPTURE_PASS in Vercel." });
       if (!r.ok) return res.status(200).json({ ok: false, status: r.status, error: (d.errors ? d.errors.join("; ") : txt.slice(0, 200)) });
-      return res.status(200).json({ ok: true, id: String(d.id || d.project_id || (d.project && d.project.id) || ""), project: d });
+      const newId = String(d.id || d.project_id || (d.project && d.project.id) || "");
+      // After create, set the name/address fields on the project so it's identifiable by DL.
+      // Try the documented field-update call; non-fatal if the API shape differs.
+      let updated = null;
+      if (newId && body.fields && typeof body.fields === "object") {
+        try {
+          const ur = await fetch("https://api.sitecapture.com/customer_api/1_0/project/" + newId, {
+            method: "POST", headers: { Authorization: basic, "API_KEY": FIXED, "Content-Type": "application/json" },
+            body: JSON.stringify({ fields: body.fields }),
+          });
+          updated = { status: ur.status, ok: ur.ok };
+        } catch (e) { updated = { error: String(e) }; }
+      }
+      return res.status(200).json({ ok: true, id: newId, project: d, updated, sentPayload: req.query.debug ? payload : undefined });
     }
 
     const q = (req.query.q || "").toString().slice(0, 80);

@@ -249,7 +249,7 @@ const todayISO=iso(new Date());
 const dShift=n=>{const d=new Date();d.setDate(d.getDate()+n);return iso(d);};
 
 /* ---- crews (live GPS, like the service-app Crew Tracker) ---- */
-const HQ={name:"WindMar HQ",lat:28.4795,lon:-81.3730};
+const HQ={name:"WindMar Home Base — 6753 Kingspointe Pkwy, Ste 111, Orlando, FL 32819",lat:28.4576767,lon:-81.4387948};
 const CREWS=[
   {id:"crew-morales",type:"SERVICE",lead:"Luis Morales",phone:"863-555-1101",color:"#3B82F6",gps:{lat:28.4626,lon:-81.3853},addr:"1100 Arrowsmith Ave, Pine Castle, FL 32809",precision:"GEOCODED",ping:"11:45:04 AM",mph:0,state:"avail"},
   {id:"crew-radke",type:"SERVICE",lead:"David Radke",phone:"863-555-1102",color:"#F89B24",gps:{lat:27.7470,lon:-80.8900},addr:"Florida's Turnpike, Okeechobee County, FL",precision:"CITY-LEVEL",ping:"11:48:19 AM",mph:79,state:"enroute"},
@@ -925,7 +925,7 @@ function projectsHTML(){
       const sc=STAGE_META[s]||{c:"var(--wh-grey)"};
       const cards=items.map(p=>{ const tel=p.mobile||p.phone; const ib=(p.insp&&p.insp.items&&p.insp.items.length)?`<div style="margin-top:5px;display:flex;gap:5px;flex-wrap:wrap">${p.insp.items.map(it=>`<span class="pill" style="background:${inspTypeMeta(it.type).c};font-size:9px">🔍 ${esc(inspTypeText(it.type))}: ${esc(inspText(it.status))}</span>`).join("")}</div>`:"";
         return `<div class="card jobchip" style="padding:12px 14px;cursor:pointer;border-left:5px solid ${sc.c};background:var(--panel)" data-action="selectProject" data-id="${esc(p.id)}">
-          <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:14px">${esc(p.name)}</span><span class="pill" style="background:${sc.c};font-size:10px">${esc(p.num||p.code)}</span></div>
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:14px">${esc(p.name)}</span><span style="display:flex;align-items:center;gap:6px"><a href="https://crm.zoho.com/crm/org666151142/tab/Potentials/${esc(p.id)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="${ptr('openZoho')||'Open in Zoho CRM'}" style="font-size:11px;font-weight:800;color:var(--wh-blue-light);text-decoration:none;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:2px 7px;white-space:nowrap">🔗 Zoho</a><span class="pill" style="background:${sc.c};font-size:10px">${esc(p.num||p.code)}</span></span></div>
           <div style="font-size:12px;color:var(--text-dim);margin-top:4px">📍 ${esc(p.address||"—")}</div>
           <div style="font-size:11.5px;color:var(--text-dim);margin-top:4px">${tel?("📞 "+esc(tel)):""}${p.systemKw?(" · "+p.systemKw+" kW"):""}</div>${ib}</div>`;
       }).join("");
@@ -1436,7 +1436,7 @@ function initCrewMap(){
   const m=L.map(el).setView([28.45,-81.4],8); window._cm=m;
   L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19,attribution:"© CARTO"}).addTo(m);
   const pts=[];
-  L.circleMarker([HQ.lat,HQ.lon],{radius:7,color:"#fff",weight:3,fillColor:"#1D429B",fillOpacity:1}).addTo(m).bindTooltip("🏢 "+HQ.name,{direction:"top"});
+  L.marker([HQ.lat,HQ.lon],{icon:L.divIcon({className:"",html:'<div style="font-size:26px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,.5));transform:translate(-50%,-90%)">🏢</div>',iconSize:[0,0]})}).addTo(m).bindTooltip("🏢 "+HQ.name,{direction:"top",permanent:true,className:"distlbl",offset:[0,-22]});
   pts.push([HQ.lat,HQ.lon]);
   src.forEach(c=>{ if(!c.gps)return;
     L.circleMarker([c.gps.lat,c.gps.lon],{radius:10,color:"#ffffff",weight:3,fillColor:c.color,fillOpacity:1}).addTo(m)
