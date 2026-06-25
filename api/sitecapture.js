@@ -79,33 +79,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: false, templates: [], tried: req.query.probe ? tried : undefined });
     }
 
-    // TEMP discovery: find the correct endpoint to set a project field value.
-    if (req.method === "GET" && req.query.path === "probeUpdate") {
-      const basic = buildBasic();
-      if (!basic) return res.status(200).json({ ok: false, needsAuth: true });
-      const id = String(req.query.id || "").replace(/[^0-9]/g, "");
-      const key = String(req.query.key || "homeowner_name");
-      const val = String(req.query.value || "DLPROBE Test");
-      const H = { Authorization: basic, "API_KEY": FIXED, "Content-Type": "application/json", Accept: "application/json" };
-      const attempts = [
-        { m: "POST", u: "https://api.sitecapture.com/customer_api/2_0/project/" + id, b: { fields: [{ key, value: val }] } },
-        { m: "POST", u: "https://api.sitecapture.com/customer_api/1_0/project/" + id, b: { fields: { [key]: val } } },
-        { m: "PUT", u: "https://api.sitecapture.com/customer_api/2_0/project/" + id, b: { fields: [{ key, value: val }] } },
-        { m: "POST", u: "https://api.sitecapture.com/customer_api/2_0/project/" + id + "/fields", b: { fields: [{ key, value: val }] } },
-        { m: "POST", u: "https://api.sitecapture.com/customer_api/1_0/project/" + id + "/field", b: { key, value: val } },
-        { m: "POST", u: "https://api.sitecapture.com/customer_api/2_0/project/" + id + "/field", b: [{ key, value: val }] },
-      ];
-      const out = [];
-      for (const a of attempts) {
-        try {
-          const r = await fetch(a.u, { method: a.m, headers: H, body: JSON.stringify(a.b) });
-          const t = await r.text();
-          out.push({ m: a.m, u: a.u.replace("https://api.sitecapture.com/customer_api", ""), body: JSON.stringify(a.b).slice(0, 60), status: r.status, resp: t.slice(0, 120) });
-        } catch (e) { out.push({ u: a.u, error: String(e) }); }
-      }
-      return res.status(200).json({ ok: true, attempts: out });
-    }
-
     // Project detail (JSON) + media images (binary) — proxied through the service-app
     // (which holds working creds) so the browser can call them same-origin.
     if (req.method === "GET" && (req.query.path === "project" || req.query.path === "image")) {
@@ -142,19 +115,20 @@ export default async function handler(req, res) {
       if (r.status === 401) return res.status(200).json({ ok: false, needsAuth: true, status: 401, error: "SiteCapture rejected the login (401). Set a valid SITECAPTURE_USER + SITECAPTURE_PASS in Vercel." });
       if (!r.ok) return res.status(200).json({ ok: false, status: r.status, error: (d.errors ? d.errors.join("; ") : txt.slice(0, 200)) });
       const newId = String(d.id || d.project_id || (d.project && d.project.id) || "");
-      // After create, set the name/address fields on the project so it's identifiable by DL.
-      // Try the documented field-update call; non-fatal if the API shape differs.
+      // After create, set the name/location fields so the project is tied to its DL.
+      // Correct endpoint: POST /customer_api/2_0/project/<id> with fields:[{key,value}].
+      // Unknown field keys are safely ignored by SiteCapture (returns OK).
       let updated = null;
-      if (newId && body.fields && typeof body.fields === "object") {
+      if (newId && Array.isArray(body.fields) && body.fields.length) {
         try {
-          const ur = await fetch("https://api.sitecapture.com/customer_api/1_0/project/" + newId, {
+          const ur = await fetch("https://api.sitecapture.com/customer_api/2_0/project/" + newId, {
             method: "POST", headers: { Authorization: basic, "API_KEY": FIXED, "Content-Type": "application/json" },
             body: JSON.stringify({ fields: body.fields }),
           });
           updated = { status: ur.status, ok: ur.ok };
         } catch (e) { updated = { error: String(e) }; }
       }
-      return res.status(200).json({ ok: true, id: newId, project: d, updated, sentPayload: req.query.debug ? payload : undefined });
+      return res.status(200).json({ ok: true, id: newId, project: d, updated });
     }
 
     const q = (req.query.q || "").toString().slice(0, 80);
