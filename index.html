@@ -792,15 +792,20 @@ function attentionHTML(){
       </div></div>`;}).join("")
     :`<div style="color:var(--text-dim);font-size:13px;padding:10px;text-align:center">${es?'Sin actualizaciones de cuadrilla aún':'No crew updates yet'}</div>`;
   const col=(title,count,color,inner,maxH)=>`<div class="card" style="padding:0;overflow:hidden"><div style="padding:11px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;background:${color}22"><span style="font-weight:800;font-size:14px">${title}</span><span class="pill" style="background:${color};margin-left:auto">${count}</span></div><div style="padding:11px;max-height:${maxH||300}px;overflow:auto">${inner}</div></div>`;
-  const crewCol=`<div class="card" style="padding:0;overflow:hidden;border:1.5px solid ${crewPending?'#ef444488':'#F89B2455'}"><div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:${crewPending?'#ef444418':'#F89B2422'}"><span style="font-weight:900;font-size:17px">👷 ${es?'Actualizaciones de Cuadrilla':'Crew Updates'}</span><span style="font-size:11px;color:var(--text-dim)">${es?'en vivo desde el Field HUB':'live from Field HUB'}</span>${crewPending?`<span class="pill prioPulse" style="background:#ef4444;font-size:11px;font-weight:800">⚠ ${crewPending} ${es?'requieren cambio de etapa':'need stage change'}</span>`:''}<span class="pill" style="background:#F89B24;margin-left:auto;font-size:13px;padding:3px 11px">${crewFeed.length}</span></div><div style="padding:14px;max-height:520px;overflow:auto">${crewCards}</div></div>`;
+  const pushSt=window.__pushState||"off";
+  const pushBtn=pushSt==="on"?`<span class="pill" style="background:#22c55e;font-size:10px" title="${es?'Recibirás alertas aunque la página esté cerrada':'You will get alerts even when the page is closed'}">🔔 ${es?'Alertas activas':'Alerts ON'}</span>`
+    :pushSt==="denied"?`<span class="pill" style="background:var(--wh-grey);font-size:10px" title="${es?'Permite las notificaciones en el navegador':'Allow notifications in your browser settings'}">🔕 ${es?'Bloqueadas':'Blocked'}</span>`
+    :pushSt==="unsupported"?``
+    :`<button class="btn3d sm" data-action="enablePush" style="background:#ef4444;font-size:11px">🔔 ${es?'Activar alertas (aunque esté cerrada)':'Enable alerts (even when closed)'}</button>`;
+  const crewCol=`<div class="card" style="padding:0;overflow:hidden;border:1.5px solid ${crewPending?'#ef444488':'#F89B2455'}"><div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:${crewPending?'#ef444418':'#F89B2422'}"><span style="font-weight:900;font-size:17px">👷 ${es?'Actualizaciones de Cuadrilla':'Crew Updates'}</span><span style="font-size:11px;color:var(--text-dim)">${es?'en vivo desde el Field HUB':'live from Field HUB'}</span>${crewPending?`<span class="pill prioPulse" style="background:#ef4444;font-size:11px;font-weight:800">⚠ ${crewPending} ${es?'requieren cambio de etapa':'need stage change'}</span>`:''}<span style="margin-left:auto;display:flex;align-items:center;gap:8px">${pushBtn}<span class="pill" style="background:#F89B24;font-size:13px;padding:3px 11px">${crewFeed.length}</span></span></div><div style="padding:14px;max-height:520px;overflow:auto">${crewCards}</div></div>`;
   return `<div class="card rise" style="padding:16px 18px;margin-bottom:18px;border-left:6px solid var(--wh-orange)">
     <div class="tap" data-action="attnToggle" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;cursor:pointer"><span style="font-weight:900;font-size:18px">🔔 ${es?'Atención Requerida':'Needs Attention'}</span><span style="margin-left:auto;color:var(--text-dim);font-size:12px">${es?'ocultar ▴':'hide ▴'}</span></div>
+    <div style="margin-bottom:14px">${crewCol}</div>
     <div class="stagger" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
       ${col("⏳ "+(es?'Estancados >3 días':'Stuck >3 days'),stuck.length,"#DC2626",stuckCards)}
       ${col("🔍 "+(es?'Inspecciones':'Inspections'),inspNeed.length,"#0EA5E9",inspCards)}
       ${col("🔔 "+(es?'Visitas Mañana':'Visits Tomorrow'),visits.length,"#1D429B",visitCards)}
-    </div>
-    <div style="margin-top:14px">${crewCol}</div></div>`;
+    </div></div>`;
 }
 function notifPanelHTML(){
   if(!S.notif.open) return "";
@@ -1540,6 +1545,7 @@ document.addEventListener("click",e=>{
   switch(a){
     case "attnToggle": S.attnOpen=!S.attnOpen; render(); break;
     case "crewToZoho": { const u=el.getAttribute("data-zurl"); if(u) window.open(u,"_blank","noopener"); break; }
+    case "enablePush": if(window.wmEnablePush) window.wmEnablePush(); break;
     case "crewAck": stageAck(id); render(); break;
     case "crewUnack": stageUnack(id); render(); break;
     case "notifToggle": S.notif.open=!S.notif.open; if(S.notif.open) S.notif.unread=0; render(); break;
@@ -1695,6 +1701,43 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
       }).catch(function(){});
   }
   poll();setInterval(poll,25000);window.addEventListener('focus',poll);
+})();
+</script>
+<script>
+/* WindMar Itinerary — Web Push: high-priority crew alerts even when the tab is CLOSED.
+   Registers a service worker + subscribes the browser; the /api/push-cron job (server)
+   sends a push for every new crew update to all subscribed coordinators. */
+(function(){
+  var VAPID_PUBLIC='BO0cGVF5nq1ul-JqQgDOCiHi5vJgQPnSLM4Jdl-32Y8hOv6AjAAm8UI3tZjyVXZKD0KWD801im_MBk9deCBoFCo';
+  var SB='https://lmlixmzmzpzgeggvywwb.supabase.co';
+  var KEY='sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov';
+  function reflect(){ if(typeof render==='function'){ try{ if(S&&S.tab==='itinerary') render(); }catch(e){} } }
+  function setState(s){ window.__pushState=s; reflect(); }
+  function b64u(base64){ var pad='='.repeat((4-base64.length%4)%4); var b=(base64+pad).replace(/-/g,'+').replace(/_/g,'/'); var raw=atob(b); var arr=new Uint8Array(raw.length); for(var i=0;i<raw.length;i++)arr[i]=raw.charCodeAt(i); return arr; }
+  function supported(){ return ('serviceWorker' in navigator)&&('PushManager' in window)&&('Notification' in window); }
+  var swReg=null;
+  if(supported()){
+    setState(Notification.permission==='denied'?'denied':'off');
+    navigator.serviceWorker.register('/sw.js').then(function(reg){
+      swReg=reg;
+      return reg.pushManager.getSubscription();
+    }).then(function(sub){ if(sub&&Notification.permission==='granted') setState('on'); }).catch(function(){});
+  } else { setState('unsupported'); }
+  function storeSub(sub){
+    var j=sub.toJSON(); var keys=j.keys||{};
+    return fetch(SB+'/rest/v1/push_subscriptions',{method:'POST',headers:{apikey:KEY,Authorization:'Bearer '+KEY,'Content-Type':'application/json',Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify({endpoint:j.endpoint,p256dh:keys.p256dh,auth:keys.auth,ua:(navigator.userAgent||'').slice(0,200)})});
+  }
+  window.wmEnablePush=function(){
+    if(!supported()){ alert(S&&S.lang==='es'?'Este navegador no soporta alertas push.':'This browser does not support push alerts.'); return; }
+    Notification.requestPermission().then(function(perm){
+      if(perm!=='granted'){ setState(perm==='denied'?'denied':'off'); return; }
+      var p=swReg?Promise.resolve(swReg):navigator.serviceWorker.register('/sw.js');
+      p.then(function(reg){ swReg=reg; return reg.pushManager.getSubscription().then(function(ex){ return ex||reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64u(VAPID_PUBLIC)}); }); })
+       .then(function(sub){ return storeSub(sub); })
+       .then(function(){ setState('on'); try{ new Notification('WindMar',{body:(S&&S.lang==='es')?'Alertas de cuadrilla activadas ✅':'Crew alerts enabled ✅'}); }catch(e){} })
+       .catch(function(e){ setState('off'); });
+    });
+  };
 })();
 </script>
 </body>
