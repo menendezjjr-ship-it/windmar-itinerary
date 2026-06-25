@@ -766,11 +766,12 @@ function attentionHTML(){
   // Crew status updates pushed from Field HUB (shared Supabase feed)
   const crewFeed=(window.CREW_FEED||[]);
   const crewC=function(s){s=(s||'').toLowerCase();if(/insp/.test(s))return /complet|conclu/.test(s)?'#06b6d4':'#F89B24';if(/complet|conclu/.test(s))return '#22c55e';if(/resched|reprogram|reagend/.test(s))return '#ef4444';return '#1D429B';};
-  const crewCards=crewFeed.length?crewFeed.slice(0,30).map(function(e){var c=crewC(e.status);var who=[e.dl_number,e.customer].filter(Boolean).join(' ')||e.job_id||'Job';var tm=e.created_at?new Date(e.created_at).toLocaleString(es?'es':'en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+  const crewCards=crewFeed.length?crewFeed.slice(0,30).map(function(e){var c=crewC(e.status);var who=[e.dl_number,e.customer].filter(Boolean).join(' ')||e.job_id||'Job';var tm=e.created_at?new Date(e.created_at).toLocaleString(es?'es':'en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';var note=e.note?String(e.note).trim():'';
     return `<div style="padding:10px 12px;border-radius:10px;background:var(--bg-2);border:1px solid var(--line);border-left:4px solid ${c};margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:13px;color:${c}">${esc(e.status)}</span><span style="font-size:10px;color:var(--text-dim)">${esc(tm)}</span></div>
       <div style="font-size:12.5px;font-weight:700;margin-top:2px">${esc(who)}</div>
-      <div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">${esc(e.team||'')}</div></div>`;}).join("")
+      <div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">${esc(e.team||'')}</div>
+      ${note?`<div style="font-size:12px;color:var(--text);margin-top:6px;background:var(--panel);border:1px solid var(--line);border-left:3px solid ${c};border-radius:8px;padding:7px 9px;white-space:pre-wrap;word-break:break-word">📝 ${esc(note)}</div>`:""}</div>`;}).join("")
     :`<div style="color:var(--text-dim);font-size:13px;padding:10px;text-align:center">${es?'Sin actualizaciones de cuadrilla aún':'No crew updates yet'}</div>`;
   const col=(title,count,color,inner)=>`<div class="card" style="padding:0;overflow:hidden"><div style="padding:11px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;background:${color}22"><span style="font-weight:800;font-size:14px">${title}</span><span class="pill" style="background:${color};margin-left:auto">${count}</span></div><div style="padding:11px;max-height:300px;overflow:auto">${inner}</div></div>`;
   return `<div class="card rise" style="padding:16px 18px;margin-bottom:18px;border-left:6px solid var(--wh-orange)">
@@ -1615,7 +1616,8 @@ setInterval(function(){ if(S.proj.ok) loadProjects(); },75000);
     var who=[ev.dl_number,ev.customer].filter(Boolean).join(' ')||ev.job_id||'Job';
     var d=document.createElement('div');
     d.style.cssText='background:#122042;color:#f1f5f9;border:1px solid #1D429B55;border-left:4px solid '+col+';border-radius:12px;padding:12px 14px;box-shadow:0 12px 30px -8px rgba(0,0,0,.55);cursor:pointer;animation:wmIn .3s ease-out';
-    d.innerHTML='<div style="font-weight:800;font-size:13px;color:'+col+'">🔔 '+esc(ev.status)+'</div><div style="font-size:13px;font-weight:600;margin-top:2px">'+esc(who)+'</div><div style="font-size:11px;color:#A6C3E6;margin-top:2px">'+esc(ev.team||'')+(ev.created_at?' · '+new Date(ev.created_at).toLocaleTimeString():'')+'</div>';
+    var note=ev.note?String(ev.note).trim():'';
+    d.innerHTML='<div style="font-weight:800;font-size:13px;color:'+col+'">🔔 '+esc(ev.status)+'</div><div style="font-size:13px;font-weight:600;margin-top:2px">'+esc(who)+'</div><div style="font-size:11px;color:#A6C3E6;margin-top:2px">'+esc(ev.team||'')+(ev.created_at?' · '+new Date(ev.created_at).toLocaleTimeString():'')+'</div>'+(note?'<div style="font-size:12px;color:#f1f5f9;margin-top:7px;background:#0c1628;border:1px solid #1D429B55;border-left:3px solid '+col+';border-radius:8px;padding:7px 9px;white-space:pre-wrap;word-break:break-word">📝 '+esc(note)+'</div>':'');
     d.onclick=function(){d.remove();};
     box.appendChild(d);
     setTimeout(function(){d.remove();},14000);
