@@ -67,31 +67,31 @@ export default async function handler(req, res) {
     const q = (req.query.q || "").toString().slice(0, 80);
     const basic = buildBasic();
 
-    // Preferred path: direct SiteCapture API — supports real search + newest-first.
+    // READS via the WindMar service-app proxy — it holds the working SiteCapture
+    // login AND supports search through its `q` param (forwards &search=&exact_text=false).
+    let projects = [], ok = false;
+    try {
+      const u = PROXY + "?path=projects&offset=0" + (q ? ("&q=" + encodeURIComponent(q)) : "");
+      const r = await fetch(u, { headers: { Accept: "application/json" } });
+      if (r.ok) {
+        const body = await r.json();
+        const arr = Array.isArray(body) ? body : (body.data || body.projects || body.results || []);
+        projects = mapList(arr);
+        ok = true;
+      }
+    } catch (e) { /* leave ok=false */ }
+
+    // CREATE still needs this project's own SiteCapture login (the proxy can't create).
+    // Validate it with a tiny direct read so the UI knows whether Create will work.
+    let canCreate = false;
     if (basic) {
       try {
-        const du = "https://api.sitecapture.com/customer_api/2_0/projects?max=80&summary_only=true" + (q ? ("&search=" + encodeURIComponent(q)) : "");
-        const dr = await fetch(du, { headers: { Authorization: basic, "API_KEY": FIXED, Accept: "application/json" } });
-        if (dr.ok) {
-          const dj = await dr.json();
-          const darr = Array.isArray(dj) ? dj : (dj.data || dj.projects || dj.results || []);
-          const projects = mapList(darr);
-          return res.status(200).json({ configured: true, ok: true, source: "direct", searchOk: true, canCreate: true, count: darr.length, projects, templates: templatesOf(projects) });
-        }
-        // direct call failed (likely 401 bad creds) → fall through to browse-only proxy
-      } catch (e) { /* fall through */ }
+        const cr = await fetch("https://api.sitecapture.com/customer_api/2_0/projects?max=1", { headers: { Authorization: basic, "API_KEY": FIXED, Accept: "application/json" } });
+        canCreate = cr.ok;
+      } catch (e) { /* canCreate stays false */ }
     }
 
-    // Fallback: service-app proxy (browse only — does NOT honor search).
-    const u = PROXY + "?path=projects&offset=0";
-    const r = await fetch(u, { headers: { Accept: "application/json" } });
-    if (!r.ok) { const t = await r.text(); return res.status(200).json({ configured: true, ok: false, status: r.status, error: t.slice(0, 160), projects: [] }); }
-    const j = await r.json();
-    const arr = Array.isArray(j) ? j : (j.data || j.projects || j.results || []);
-    let projects = mapList(arr);
-    // Best-effort local filter so typing still narrows the browse list a bit.
-    if (q) { const ql = q.toLowerCase(); projects = projects.filter((p) => (p.name + " " + p.address + " " + p.id).toLowerCase().indexOf(ql) >= 0); }
-    return res.status(200).json({ configured: true, ok: true, source: "proxy", searchOk: false, canCreate: false, count: arr.length, projects, templates: templatesOf(projects), note: "Search & create need a valid SiteCapture login (SITECAPTURE_USER + SITECAPTURE_PASS) on this Vercel project." });
+    return res.status(200).json({ configured: true, ok, source: "proxy", searchOk: ok, canCreate, count: projects.length, projects, templates: templatesOf(projects), note: canCreate ? "" : "Create a project needs valid SITECAPTURE_USER + SITECAPTURE_PASS on this Vercel project." });
   } catch (e) {
     return res.status(200).json({ configured: true, ok: false, error: String(e), projects: [] });
   }
