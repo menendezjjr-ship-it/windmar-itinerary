@@ -355,7 +355,7 @@ const S={
   wx:{ cityIdx:0, current:null, days:[], live:false, loading:false },
   zoho:{ syncing:false, lastSync:new Date(), showCode:false },
   sc:{ q:"", project:null, cat:"inverter", queue:[], uploading:false, done:false,
-       nf:{ code:"DL", project:"", crew:"crew-morales", date:todayISO, address:"", window:"8:00 AM – 12:00 PM" }, created:null, scState:"sample", canCreate:false, searchOk:false, source:"", results:[], templates:[], detailMedia:{id:null,status:"idle",media:[]}, nfType:"System Completion - FL", showNew:false, creating:false, createMsg:"", detail:null, err:"" },
+       nf:{ code:"DL", project:"", crew:"crew-morales", date:todayISO, address:"", window:"8:00 AM – 12:00 PM" }, created:null, scState:"sample", canCreate:false, searchOk:false, source:"", results:[], templates:[], scTemplates:[], detailMedia:{id:null,status:"idle",media:[]}, nfType:"Install / Completion", showNew:false, creating:false, createMsg:"", detail:null, err:"" },
 };
 const t=k=>(I18N[S.lang][k] ?? I18N.en[k] ?? k);
 const esc=s=>String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
@@ -1287,6 +1287,13 @@ async function loadSiteCapture(q){
   }catch(e){ S.sc.results=[]; S.sc.scState="sample"; }
   render();
 }
+async function loadSCTemplates(){
+  try{
+    const r=await fetch("/api/sitecapture?path=templates",{cache:"no-store"});
+    const j=await r.json();
+    if(j&&j.ok&&Array.isArray(j.templates)&&j.templates.length){ S.sc.scTemplates=j.templates; render(); }
+  }catch(e){}
+}
 function scStatusStyle(st){ st=(st||"").toUpperCase();
   if(st.indexOf("COMPLETE")>=0)return"var(--jc-DL)";
   if(st.indexOf("ASSIGN")>=0)return"var(--wh-orange)";
@@ -1305,14 +1312,24 @@ function siteCaptureHTML(){
     ${(live&&S.sc.searchOk)?`<span class="pill" style="background:var(--jc-DL)">🔎 ${S.lang==='es'?'Búsqueda activa':'Live search'}</span>`:""}
     ${(live&&!S.sc.searchOk)?`<span class="pill" style="background:var(--warn)" title="${S.lang==='es'?'Agrega SITECAPTURE_USER + SITECAPTURE_PASS en Vercel':'Add SITECAPTURE_USER + SITECAPTURE_PASS in Vercel'}">⚠ ${S.lang==='es'?'Solo navegación — búsqueda/creación requieren login':'Browse only — search & create need a SiteCapture login'}</span>`:""}
     ${S.sc.scState==="error"?`<span class="pill" style="background:var(--warn)">API error</span>`:""}</div>`;
-  const SC_TYPES=[
-    {type:"System Completion - FL", key:"install_completion_form", templates:["Core Delivery BOMs","INSTALL COMPLETION FL 3.0 (MICROINVERTERS)","INSTALL COMPLETION FL 3.0 (TESLA)","Install Completion 2.0","Installation Daily Report FL","Re-installs","Trailer Inspection Form","Warehouse Material Accountability","Wire Dispatch Report"]},
-    {type:"Site Survey - FL", key:"site_assessment_form_20160404082033", templates:["Site Survey - FL"]},
-    {type:"Service Repair", key:"service", templates:["SERVICE REPORT - FL","Service","Service / MSP / De-Rate"]}
+  // Templates load live from SiteCapture (real, portal-valid keys), grouped into friendly categories.
+  const SCT=S.sc.scTemplates||[];
+  const SC_CATS=[
+    {label:"Install / Completion", re:/install completion|installation daily|re-?install|commercial install|pw3 instalaci|reporte de instalaci|pre_?install/i},
+    {label:"Site Survey", re:/site survey|surveyor|survey|visita del sitio|site assessment/i},
+    {label:"Roofing / Water", re:/roof|water|sealing|sellado|filtrac/i},
+    {label:"Inspections / QC", re:/inspection|\bqc\b|supervis|pm inspect/i},
+    {label:"Service / Repair", re:/service|servicio|\brma\b|work order|\bmsp\b|de-?rate|loaner/i},
+    {label:"Delivery / Warehouse", re:/delivery|\bbom\b|warehouse|wire dispatch|trailer|despacho|anker|accountability|powerwall|material|flota/i},
+    {label:"Permitting", re:/permis/i},
   ];
-  const curT=SC_TYPES.find(x=>x.type===S.sc.nfType)||SC_TYPES[0];
-  const typeOpts=SC_TYPES.map(x=>`<option value="${esc(x.type)}" ${x.type===curT.type?"selected":""}>${esc(x.type)}</option>`).join("");
-  const tmplOpts=curT.templates.map(nm=>`<option value="${esc(curT.key)}">${esc(nm)}</option>`).join("");
+  const scCatOf=(nm)=>{ for(const c of SC_CATS){ if(c.re.test(nm||"")) return c.label; } return "Other"; };
+  const present={}; SCT.forEach(tp=>{ present[scCatOf(tp.name)]=1; });
+  const cats=["All Templates",...SC_CATS.map(c=>c.label).filter(l=>present[l]),(present["Other"]?"Other":null)].filter(Boolean);
+  const selCat=cats.indexOf(S.sc.nfType)>=0?S.sc.nfType:(cats.indexOf("Install / Completion")>=0?"Install / Completion":cats[0]);
+  const tpls=(selCat==="All Templates"?SCT.slice():SCT.filter(tp=>scCatOf(tp.name)===selCat)).sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  const typeOpts=cats.map(c=>`<option ${c===selCat?"selected":""}>${esc(c)}</option>`).join("");
+  const tmplOpts=tpls.length?tpls.map(tp=>`<option value="${esc(tp.key)}">${esc(tp.name)}</option>`).join(""):`<option value="">${SCT.length?'—':(S.sc.canCreate?'Loading templates…':'Set SiteCapture login to load templates')}</option>`;
   const newForm=S.sc.showNew?`<div class="card rise" style="padding:18px;margin-top:12px;border:1px solid var(--wh-blue)">
     <div style="font-weight:900;font-size:16px;margin-bottom:4px">\u2795 Create New Project <span class="pill" style="background:var(--wh-blue);font-size:10px">FL</span></div>
     <div style="color:var(--text-dim);font-size:12.5px;margin-bottom:14px">Pick the form type and template \u2014 it spins up a new project in SiteCapture, ready for photos.</div>
@@ -1523,7 +1540,7 @@ document.addEventListener("click",e=>{
     case "wxRefresh": loadWeather(); break;
     case "scSelectProject": S.sc.project=id; S.sc.done=false; render(); break;
     case "scLiveSearch": { const inp=document.getElementById("scSearch"); S.sc.q=inp?inp.value:""; loadSiteCapture(S.sc.q.trim()); break; }
-    case "scToggleNew": S.sc.showNew=!S.sc.showNew; S.sc.createMsg=""; render(); break;
+    case "scToggleNew": S.sc.showNew=!S.sc.showNew; S.sc.createMsg=""; if(S.sc.showNew&&!(S.sc.scTemplates||[]).length) loadSCTemplates(); render(); break;
     case "scOpenDetail": S.sc.detail=id; loadSCDetail(id); render(); break;
     case "scCloseDetail": S.sc.detail=null; render(); break;
     case "scCreate": {
@@ -1577,6 +1594,7 @@ document.addEventListener("change",function(e){
 render();
 loadJobs();
 loadProjects();
+loadSCTemplates();
 // Live polling so Engineering-stage alerts fire app-wide while the dashboard is open.
 setInterval(function(){ if(S.proj.ok) loadProjects(); },75000);
 </script>
