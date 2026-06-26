@@ -464,7 +464,7 @@ function calAddDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
 function calStartOfWeek(d){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());x.setDate(x.getDate()-x.getDay());return x;}
 function calHot(p){return /very high|high|urgent/i.test(p||"");}
 const calTypeBadge=(type)=>"display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:800;letter-spacing:.04em;padding:2px 7px;border-radius:5px;white-space:nowrap;"+(type==="service"?"background:rgba(248,155,36,.15);color:var(--wh-orange);border:1px solid rgba(248,155,36,.4);":"background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.4);");
-function calRec(j){ return { type:j.kind, id:j.id, team:j.crewLabel||"Unassigned", startDate:j.date, startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", phone:j.phone||"", cat:jobCat(j) }; }
+function calRec(j){ return { type:j.kind, id:j.id, recordId:j.recordId||"", plan:j.plan||null, bom:j.bom||null, team:j.crewLabel||"Unassigned", startDate:j.date, startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", phone:j.phone||"", cat:jobCat(j) }; }
 async function loadOpsCal(silent){
   if(!silent){ S.cal.status="loading"; render(); }
   let from,to;
@@ -506,7 +506,15 @@ function calDetailHTML(r){
     <h3 style="margin:0;font-size:20px;font-weight:700">${r.dlNumber?`<span style="color:var(--wh-orange)">${esc(r.dlNumber)} </span>`:""}${esc(r.customerName||"")}</h3>
     ${r.address?`<p style="margin:4px 0 0;color:var(--text-dim);font-size:13px">📍 <a href="https://maps.google.com/?q=${encodeURIComponent(r.address)}" target="_blank" style="color:var(--wh-blue-light)">${esc(r.address)}</a></p>`:""}
     ${r.phone?`<div style="margin-top:8px"><a class="btn3d green sm" href="tel:${esc(String(r.phone).replace(/[^0-9+]/g,""))}">📞 ${esc(r.phone)}</a></div>`:""}
-  </div><button class="btn3d grey sm" data-action="calClose">✕</button></div>${body}`;
+  </div><button class="btn3d grey sm" data-action="calClose">✕</button></div>${body}${(function(){
+    const es=S.lang==='es'; const fileLink=(rid,fl)=>`/api/zoho-file?id=${encodeURIComponent(rid)}&aid=${encodeURIComponent(fl.aid)}&module=Installation&name=${encodeURIComponent(fl.name||"download")}`;
+    const btns=[];
+    if(r.recordId&&r.plan) btns.push(`<a class="btn3d green sm" href="${fileLink(r.recordId,r.plan)}" target="_blank" rel="noopener">📐 ${es?'Ver Planos':'View Plans'}</a>`);
+    if(r.recordId&&r.bom) btns.push(`<a class="btn3d blue sm" href="${fileLink(r.recordId,r.bom)}" target="_blank" rel="noopener">📄 ${es?'Ver BOM':'View BOM'}</a>`);
+    const dl=String(r.dlNumber||"").replace(/[^0-9]/g,"");
+    if(dl) btns.push(`<a class="btn3d sm" href="https://crm.zoho.com/crm/org666151142/search?searchword=${encodeURIComponent(r.dlNumber)}" target="_blank" rel="noopener">🔗 Zoho</a>`);
+    return btns.length?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">${btns.join("")}</div>`:(r.type!=="service"?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--text-dim)">${es?'Sin planos/BOM adjuntos en esta instalación.':'No plans/BOM attached on this install.'}</div>`:"");
+  })()}`;
 }
 function opsCalHTML(){
   const c=S.cal, M=calM(), D=calD(), today=new Date();

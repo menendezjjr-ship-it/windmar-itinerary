@@ -101,7 +101,16 @@ function normCrew(raw) {
   return { id, label };
 }
 
-const INSTALL_FIELDS = "Name,Installation_Start_Date,Installation_Complete_Date,Installation_Team,Deal,MSP_Upgrade_Required,Battery_Type,Language_Preference,Number_of_Days_Needed";
+const INSTALL_FIELDS = "Name,Installation_Start_Date,Installation_Complete_Date,Installation_Team,Deal,MSP_Upgrade_Required,Battery_Type,Language_Preference,Number_of_Days_Needed,Permit_Package,BOM";
+// A Zoho file-upload field is an array of file objects; return the latest (newest-first).
+function latestFile(field) {
+  if (!Array.isArray(field)) return null;
+  const files = field
+    .map((f) => ({ aid: f.id, name: f.File_Name__s || "download", modified: f.Modified_Time__s || f.Created_Time__s || "" }))
+    .filter((f) => f.aid)
+    .sort((a, b) => String(b.modified).localeCompare(String(a.modified)));
+  return files[0] || null;
+}
 const SERVICE_FIELDS = "Name,Scheduled_Visit_1,Assigned_Technician,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description,Priority";
 
 export function mapInstall(r, todayISO) {
@@ -118,6 +127,9 @@ export function mapInstall(r, todayISO) {
   if (r.Number_of_Days_Needed) scopeBits.push(`${r.Number_of_Days_Needed}-day`);
   return {
     id: deal.num || r.Name,
+    recordId: r.id,           // real Zoho Installation record id (for file downloads)
+    plan: latestFile(r.Permit_Package), // latest Permit Package / plans
+    bom: latestFile(r.BOM),             // latest BOM
     num: deal.num || "",
     kind: "install",
     code: deal.code || "DL",
