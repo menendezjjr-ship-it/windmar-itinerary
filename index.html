@@ -468,7 +468,7 @@ function calRec(j){ return { type:j.kind, id:j.id, team:j.crewLabel||"Unassigned
 async function loadOpsCal(silent){
   if(!silent){ S.cal.status="loading"; render(); }
   let from,to;
-  if(S.cal.view==="week"){ const ws=S.cal.weekStartISO?new Date(S.cal.weekStartISO+"T00:00:00"):calStartOfWeek(new Date()); from=calYMD(ws); to=calYMD(calAddDays(ws,6)); }
+  if(S.cal.view==="week"||S.cal.view==="grid"){ const ws=S.cal.weekStartISO?new Date(S.cal.weekStartISO+"T00:00:00"):calStartOfWeek(new Date()); from=calYMD(ws); to=calYMD(calAddDays(ws,6)); }
   else { from=S.cal.y+"-"+String(S.cal.m).padStart(2,"0")+"-01"; const last=new Date(S.cal.y,S.cal.m,0).getDate(); to=S.cal.y+"-"+String(S.cal.m).padStart(2,"0")+"-"+String(last).padStart(2,"0"); }
   try{
     const r=await fetch("/api/zoho-jobs?from="+from+"&to="+to,{cache:"no-store"});
@@ -511,7 +511,7 @@ function calDetailHTML(r){
 function opsCalHTML(){
   const c=S.cal, M=calM(), D=calD(), today=new Date();
   const ws=c.weekStartISO?new Date(c.weekStartISO+"T00:00:00"):calStartOfWeek(today), we=calAddDays(ws,6);
-  const inView=(r)=>{ if(!r.startDate)return false; const d=new Date(r.startDate+"T12:00:00"); if(c.view==="week")return d>=ws&&d<calAddDays(ws,7); return d.getMonth()+1===c.m&&d.getFullYear()===c.y; };
+  const inView=(r)=>{ if(!r.startDate)return false; const d=new Date(r.startDate+"T12:00:00"); if(c.view==="week"||c.view==="grid")return d>=ws&&d<calAddDays(ws,7); return d.getMonth()+1===c.m&&d.getFullYear()===c.y; };
   const scoped=c.records.filter(r=>inView(r)&&(!c.teamFilter.length||c.teamFilter.indexOf(r.team)>=0));
   const installCount=scoped.filter(r=>r.type==="install").length, serviceCount=scoped.filter(r=>r.type==="service").length;
   const visible=scoped.filter(r=>c.typeFilter==="all"||r.type===c.typeFilter);
@@ -535,12 +535,29 @@ function opsCalHTML(){
   let weekHTML=""; for(let i=0;i<7;i++){ const d=calAddDays(ws,i); const list=visible.filter(r=>r.startDate===calYMD(d)).sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||"")); const td=calYMD(d)===calYMD(today);
     weekHTML+=`<div class="card" style="border-radius:12px;overflow:hidden;border:1px solid ${td?'var(--wh-orange)':'var(--line)'}"><div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:${td?'rgba(248,155,36,.10)':'rgba(255,255,255,.02)'};${list.length?'border-bottom:1px solid var(--line)':''}"><span style="font-weight:800;font-size:15px;color:${td?'var(--wh-orange)':'var(--text)'}">${D[d.getDay()]}</span><span style="color:var(--text-dim);font-size:13px">${M[d.getMonth()].slice(0,3)} ${d.getDate()}</span>${td?`<span style="font-size:9px;font-weight:800;color:var(--wh-orange)">${S.lang==='es'?'HOY':'TODAY'}</span>`:""}<span style="margin-left:auto;font-size:12px;font-weight:600;color:var(--text-dim)">${list.length} ${list.length!==1?(S.lang==='es'?'trabajos':'jobs'):(S.lang==='es'?'trabajo':'job')}</span></div>${list.map(calRow).join("")}</div>`; }
   const weekView=`<div style="display:flex;flex-direction:column;gap:10px">${weekHTML}</div>`;
+  // crew grid (weekly): crews down the side, days across the top, each cell = DL# + city
+  const es=S.lang==="es";
+  const cityOf=(a)=>{ if(!a)return ""; const p=String(a).split(","); let cc=p.length>=2?p[1]:p[0]; return cc.replace(/\bFL\b/ig,"").replace(/\d{5}(-\d{4})?/g,"").replace(/[,\s]+$/,"").trim(); };
+  const gByTeam={}; visible.forEach(r=>{(gByTeam[r.team]=gByTeam[r.team]||[]).push(r);});
+  const gTeams=Object.keys(gByTeam).sort((a,b)=>a.localeCompare(b));
+  const gDays=[]; for(let i=0;i<7;i++) gDays.push(calAddDays(ws,i));
+  const gCols="160px repeat(7,minmax(132px,1fr))";
+  const gHead=`<div style="display:grid;grid-template-columns:${gCols};position:sticky;top:0;z-index:3">
+    <div style="padding:10px 12px;border-bottom:2px solid var(--line);border-right:1px solid var(--line);font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);position:sticky;left:0;background:var(--panel);z-index:4">${es?'Cuadrilla':'Crew'}</div>
+    ${gDays.map(d=>{const td=calYMD(d)===calYMD(today);return `<div style="padding:8px 6px;text-align:center;border-bottom:2px solid var(--line);border-right:1px solid var(--line);background:${td?'rgba(248,155,36,.12)':'var(--panel)'}"><div style="font-weight:800;font-size:12px;color:${td?'var(--wh-orange)':'var(--text)'}">${D[d.getDay()]}</div><div style="font-size:11px;color:var(--text-dim)">${M[d.getMonth()].slice(0,3)} ${d.getDate()}</div></div>`;}).join("")}</div>`;
+  const gBody=gTeams.map(team=>{ const col=teamColor(team);
+    const cells=gDays.map(d=>{ const iso=calYMD(d); const td=iso===calYMD(today); const jobs=gByTeam[team].filter(r=>r.startDate===iso).sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||""));
+      return `<div style="padding:4px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);min-height:58px;background:${td?'rgba(248,155,36,.05)':'transparent'}">${jobs.map(j=>{const jc=j.type==="service"?"#06B6D4":col;return `<div data-action="calSelectJob" data-id="${esc(j.id)}" title="${esc((j.dlNumber||'')+' — '+(j.customerName||'')+(j.address?' · '+j.address:''))}" style="background:${jc};color:${textOn(jc)};border-radius:6px;padding:3px 6px;margin-bottom:3px;cursor:pointer;font-size:10.5px;line-height:1.22;overflow:hidden">${j.type==="service"?'<span style="opacity:.85">🔧 </span>':''}<span style="font-weight:800">${esc(j.dlNumber||j.id)}</span><div style="opacity:.92;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(cityOf(j.address)||j.customerName||"")}</div></div>`;}).join("")}</div>`;
+    }).join("");
+    return `<div style="display:grid;grid-template-columns:${gCols}"><div style="padding:8px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);border-left:4px solid ${col};position:sticky;left:0;background:var(--bg-2);z-index:2"><div style="font-weight:800;font-size:12.5px;line-height:1.2">${esc(team)}</div><div style="font-size:10px;color:var(--text-dim)">${gByTeam[team].length} ${es?'trab.':'jobs'}</div></div>${cells}</div>`;
+  }).join("");
+  const gridView=`<div class="card" style="border-radius:12px;overflow:auto;max-height:74vh"><div style="min-width:1020px">${gHead}${gTeams.length?gBody:`<div style="padding:44px;text-align:center;color:var(--text-dim)">${es?'Sin trabajos esta semana':'No jobs scheduled this week'}</div>`}</div></div>`;
   // list
   const byTeam={}; visible.forEach(r=>{(byTeam[r.team]=byTeam[r.team]||[]).push(r);});
   const listKeys=Object.keys(byTeam).sort((a,b)=>byTeam[b].length-byTeam[a].length);
   const listView=`<div style="display:flex;flex-direction:column;gap:12px">${listKeys.length?listKeys.map(team=>{const list=byTeam[team].sort((a,b)=>(a.startDate||"").localeCompare(b.startDate||"")||(a.startTime||"").localeCompare(b.startTime||""));const col=teamColor(team);return `<div class="card" style="border-radius:12px;overflow:hidden"><div style="padding:10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;background:${col}18"><span style="width:12px;height:12px;border-radius:3px;background:${col}"></span><span style="font-weight:700;font-size:14px">${esc(team)}</span><span style="color:var(--text-dim);font-size:12px;margin-left:auto">${list.length} ${list.length!==1?(S.lang==='es'?'trabajos':'jobs'):(S.lang==='es'?'trabajo':'job')}</span></div><div>${list.map(calRow).join("")}</div></div>`;}).join(""):`<div style="text-align:center;padding:40px;color:var(--text-dim)">${S.lang==='es'?'Sin trabajos programados':'No jobs scheduled'}</div>`}</div>`;
-  const view=c.status==="loading"?`<div style="text-align:center;padding:50px;color:var(--text-dim)">⟳ ${S.lang==='es'?'Cargando…':'Loading…'}</div>`:c.status==="error"?`<div class="card" style="padding:18px;color:var(--warn)">API error: ${esc(c.err||"")}</div>`:c.view==="month"?monthGrid:c.view==="week"?weekView:listView;
-  const navLabel=c.view==="week"?(M[ws.getMonth()].slice(0,3)+" "+ws.getDate()+" - "+(ws.getMonth()!==we.getMonth()?M[we.getMonth()].slice(0,3)+" ":"")+we.getDate()+", "+we.getFullYear()):(M[c.m-1]+" "+c.y);
+  const view=c.status==="loading"?`<div style="text-align:center;padding:50px;color:var(--text-dim)">⟳ ${S.lang==='es'?'Cargando…':'Loading…'}</div>`:c.status==="error"?`<div class="card" style="padding:18px;color:var(--warn)">API error: ${esc(c.err||"")}</div>`:c.view==="month"?monthGrid:c.view==="week"?weekView:c.view==="grid"?gridView:listView;
+  const navLabel=(c.view==="week"||c.view==="grid")?(M[ws.getMonth()].slice(0,3)+" "+ws.getDate()+" - "+(ws.getMonth()!==we.getMonth()?M[we.getMonth()].slice(0,3)+" ":"")+we.getDate()+", "+we.getFullYear()):(M[c.m-1]+" "+c.y);
   const dayModal=c.dayPanel!=null?calModal((function(){const recs=byDate[c.dayPanel]||[];return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><h3 style="margin:0;font-size:18px;font-weight:700">${M[c.m-1]} ${c.dayPanel}, ${c.y} <span style="color:var(--text-dim);font-weight:500;font-size:14px">· ${recs.length} ${recs.length!==1?'jobs':'job'}</span></h3><button class="btn3d grey sm" data-action="calClose">✕</button></div><div style="display:flex;flex-direction:column;gap:8px">${recs.map(calRow).join("")}</div>`;})()):"";
   const selModal=c.selected?(function(){const r=c.records.find(x=>x.id===c.selected);return r?calModal(calDetailHTML(r)):"";})():"";
   // ── KPI summary (Installation / Service totals + complete/in-progress/past-due) ──
@@ -554,7 +571,7 @@ function opsCalHTML(){
       <div><h1 style="font-size:${compact?18:24}px;font-weight:700;margin:0">📅 ${S.lang==='es'?'Calendario de Operaciones':'Operations Calendar'}</h1>
       <p style="color:var(--text-dim);font-size:${compact?12:14}px;margin:4px 0 0">${S.lang==='es'?'En vivo desde Zoho CRM':'Live from Zoho CRM'} • ⚡ ${installCount} ${S.lang==='es'?'instalaciones':'installs'} • 🔧 ${serviceCount} ${S.lang==='es'?'tickets':'service tickets'}</p></div>
       <div style="display:flex;gap:8px;align-items:center">
-        <div style="display:flex;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:2px">${[["month","Month","Mes"],["week","Week","Semana"],["list","List","Lista"]].map(v=>{const on=c.view===v[0];return `<button data-action="calView" data-id="${v[0]}" style="padding:7px 12px;border-radius:8px;border:none;cursor:pointer;font-size:12px;font-weight:${on?700:500};background:${on?'linear-gradient(135deg,var(--wh-blue),var(--wh-orange))':'transparent'};color:${on?'#fff':'var(--text-dim)'}">${S.lang==='es'?v[2]:v[1]}</button>`;}).join("")}</div>
+        <div style="display:flex;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:2px">${[["month","Month","Mes"],["week","Week","Semana"],["grid","Crew Grid","Cuadrícula"],["list","List","Lista"]].map(v=>{const on=c.view===v[0];return `<button data-action="calView" data-id="${v[0]}" style="padding:7px 12px;border-radius:8px;border:none;cursor:pointer;font-size:12px;font-weight:${on?700:500};background:${on?'linear-gradient(135deg,var(--wh-blue),var(--wh-orange))':'transparent'};color:${on?'#fff':'var(--text-dim)'}">${S.lang==='es'?v[2]:v[1]}</button>`;}).join("")}</div>
         <button class="btn3d sm" data-action="calRefresh">${c.status==='loading'?'…':'⟳'}</button>
       </div>
     </div>
@@ -1586,9 +1603,9 @@ document.addEventListener("click",e=>{
     case "dayToday": S.dayOffset=0; S.selectedJob=null; render(); break;
     case "dayNext": S.dayOffset++; S.selectedJob=null; render(); break;
     case "setItinView": S.itinView=id; if(id==="brigada"&&S.cal.status==="idle") loadOpsCal(); render(); break;
-    case "calView": S.cal.view=id; if(id==="week"&&!S.cal.weekStartISO) S.cal.weekStartISO=calYMD(calStartOfWeek(new Date())); loadOpsCal(); break;
-    case "calPrev": if(S.cal.view==="week"){ const w=new Date((S.cal.weekStartISO||calYMD(calStartOfWeek(new Date())))+"T00:00:00"); S.cal.weekStartISO=calYMD(calAddDays(w,-7)); } else { if(S.cal.m===1){S.cal.m=12;S.cal.y--;}else S.cal.m--; } S.cal.dayPanel=null; loadOpsCal(); break;
-    case "calNext": if(S.cal.view==="week"){ const w=new Date((S.cal.weekStartISO||calYMD(calStartOfWeek(new Date())))+"T00:00:00"); S.cal.weekStartISO=calYMD(calAddDays(w,7)); } else { if(S.cal.m===12){S.cal.m=1;S.cal.y++;}else S.cal.m++; } S.cal.dayPanel=null; loadOpsCal(); break;
+    case "calView": S.cal.view=id; if((id==="week"||id==="grid")&&!S.cal.weekStartISO) S.cal.weekStartISO=calYMD(calStartOfWeek(new Date())); loadOpsCal(); break;
+    case "calPrev": if(S.cal.view==="week"||S.cal.view==="grid"){ const w=new Date((S.cal.weekStartISO||calYMD(calStartOfWeek(new Date())))+"T00:00:00"); S.cal.weekStartISO=calYMD(calAddDays(w,-7)); } else { if(S.cal.m===1){S.cal.m=12;S.cal.y--;}else S.cal.m--; } S.cal.dayPanel=null; loadOpsCal(); break;
+    case "calNext": if(S.cal.view==="week"||S.cal.view==="grid"){ const w=new Date((S.cal.weekStartISO||calYMD(calStartOfWeek(new Date())))+"T00:00:00"); S.cal.weekStartISO=calYMD(calAddDays(w,7)); } else { if(S.cal.m===12){S.cal.m=1;S.cal.y++;}else S.cal.m++; } S.cal.dayPanel=null; loadOpsCal(); break;
     case "calType": S.cal.typeFilter=id; render(); break;
     case "calTeam": { const i=S.cal.teamFilter.indexOf(id); if(i>=0)S.cal.teamFilter.splice(i,1); else S.cal.teamFilter.push(id); render(); break; }
     case "calClearTeams": S.cal.teamFilter=[]; render(); break;
