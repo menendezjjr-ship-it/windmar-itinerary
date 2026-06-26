@@ -353,7 +353,7 @@ const S={
   live:{status:"idle",ok:false,jobs:[],updated:null,err:""},
   proj:{status:"idle",ok:false,list:[],updated:null,err:"",selected:null,q:"",stageFilter:"all",alerts:[],notify:false,notes:{id:null,status:"idle",list:[]},noteFrom:null,atts:{id:null,status:"idle",groups:[]}},
   notif:{items:[],unread:0,open:false}, attnOpen:true,
-  cal:{status:"idle",records:[],y:new Date().getFullYear(),m:new Date().getMonth()+1,view:"month",typeFilter:"all",teamFilter:[],selected:null,dayPanel:null,weekStartISO:null,err:""},
+  cal:{status:"idle",records:[],y:new Date().getFullYear(),m:new Date().getMonth()+1,view:"grid",typeFilter:"all",teamFilter:[],selected:null,dayPanel:null,weekStartISO:null,err:""},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
   wx:{ cityIdx:0, current:null, days:[], live:false, loading:false },
   zoho:{ syncing:false, lastSync:new Date(), showCode:false },
@@ -571,7 +571,7 @@ function opsCalHTML(){
       <div><h1 style="font-size:${compact?18:24}px;font-weight:700;margin:0">📅 ${S.lang==='es'?'Calendario de Operaciones':'Operations Calendar'}</h1>
       <p style="color:var(--text-dim);font-size:${compact?12:14}px;margin:4px 0 0">${S.lang==='es'?'En vivo desde Zoho CRM':'Live from Zoho CRM'} • ⚡ ${installCount} ${S.lang==='es'?'instalaciones':'installs'} • 🔧 ${serviceCount} ${S.lang==='es'?'tickets':'service tickets'}</p></div>
       <div style="display:flex;gap:8px;align-items:center">
-        <div style="display:flex;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:2px">${[["month","Month","Mes"],["week","Week","Semana"],["grid","Crew Grid","Cuadrícula"],["list","List","Lista"]].map(v=>{const on=c.view===v[0];return `<button data-action="calView" data-id="${v[0]}" style="padding:7px 12px;border-radius:8px;border:none;cursor:pointer;font-size:12px;font-weight:${on?700:500};background:${on?'linear-gradient(135deg,var(--wh-blue),var(--wh-orange))':'transparent'};color:${on?'#fff':'var(--text-dim)'}">${S.lang==='es'?v[2]:v[1]}</button>`;}).join("")}</div>
+        <div style="display:flex;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:2px">${[["grid","Crew Grid","Cuadrícula"],["month","Month","Mes"],["list","List","Lista"]].map(v=>{const on=c.view===v[0];return `<button data-action="calView" data-id="${v[0]}" style="padding:7px 12px;border-radius:8px;border:none;cursor:pointer;font-size:12px;font-weight:${on?700:500};background:${on?'linear-gradient(135deg,var(--wh-blue),var(--wh-orange))':'transparent'};color:${on?'#fff':'var(--text-dim)'}">${S.lang==='es'?v[2]:v[1]}</button>`;}).join("")}</div>
         <button class="btn3d sm" data-action="calRefresh">${c.status==='loading'?'…':'⟳'}</button>
       </div>
     </div>
