@@ -160,7 +160,7 @@ const I18N = {
   cr_onJob:"On job", cr_avail:"Available", cr_enroute:"En route", cr_idle:"Idle", cr_target:"Target address or FL city…", cr_noGeo:"couldn’t geocode — try a Florida city name", cr_supervisors:"Supervisors",
   // Weather (mirrors live app "Weather & Safety")
   wx_title:"Weather & Safety", wx_sub:"Real-time conditions and safety protocols for Florida job sites",
-  wx_radar:"Live Rain Radar — Florida", wx_radarNote:"RainViewer tiles render here in production (NEXRAD composite, 10-min loop).",
+  wx_radar:"Rain Forecast — Florida (press ▶ to see upcoming days)", wx_radarNote:"RainViewer tiles render here in production (NEXRAD composite, 10-min loop).",
   wx_7day:"7-Day Forecast", wx_safety:"Safety Tips", wx_alerts:"Active site alerts today",
   wx_noAlerts:"No weather alerts — clear for install & roofing work.",
   wx_rain:"Rain expected", wx_wind:"High winds", wx_heat:"Extreme heat", wx_roofRisk:"Roofing/solar install at risk",
@@ -207,7 +207,7 @@ const I18N = {
   cr_lastPing:"último ping", cr_geocoded:"GEOCODED", cr_city:"CITY-LEVEL", cr_approx:"APPROX",
   cr_onJob:"En trabajo", cr_avail:"Disponible", cr_enroute:"En camino", cr_idle:"Inactivo", cr_target:"Dirección o ciudad de FL…", cr_noGeo:"no se pudo geocodificar — prueba una ciudad de Florida", cr_supervisors:"Supervisores",
   wx_title:"Clima y Seguridad", wx_sub:"Condiciones en tiempo real y protocolos de seguridad para sitios en Florida",
-  wx_radar:"Radar de Lluvia en Vivo — Florida", wx_radarNote:"Las capas de RainViewer se muestran aquí en producción (compuesto NEXRAD, ciclo de 10 min).",
+  wx_radar:"Pronóstico de Lluvia — Florida (presiona ▶ para ver los próximos días)", wx_radarNote:"Las capas de RainViewer se muestran aquí en producción (compuesto NEXRAD, ciclo de 10 min).",
   wx_7day:"Pronóstico de 7 Días", wx_safety:"Consejos de Seguridad", wx_alerts:"Alertas activas hoy",
   wx_noAlerts:"Sin alertas — despejado para instalación y techado.",
   wx_rain:"Se espera lluvia", wx_wind:"Vientos fuertes", wx_heat:"Calor extremo", wx_roofRisk:"Instalación de techo/solar en riesgo",
@@ -1318,7 +1318,7 @@ const WX_RULES_EN=["Stop rooftop work at sustained winds ≥ 25 mph or gusts ≥
   "Cover open MSP/roof penetrations before any rain.","Heat index ≥ 103°F: mandatory shade + water breaks every hour."];
 const WX_RULES_ES=["Detener trabajo en techo con vientos sostenidos ≥ 40 km/h o ráfagas ≥ 56 km/h.","Sin trabajo PV/techo durante rayos — regla 30/30 (reanudar 30 min tras el último rayo).",
   "Cubrir aberturas de MSP/techo antes de lluvia.","Índice de calor ≥ 39°C: sombra obligatoria + agua cada hora."];
-function windyURL(city){ return "https://embed.windy.com/embed2.html?lat="+city.lat+"&lon="+city.lon+"&detailLat="+city.lat+"&detailLon="+city.lon+"&zoom=6&level=surface&overlay=radar&product=radar&menu=&message=&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=mph&metricTemp=%C2%B0F&radarRange=-1"; }
+function windyURL(city){ return "https://embed.windy.com/embed2.html?lat="+city.lat+"&lon="+city.lon+"&detailLat="+city.lat+"&detailLon="+city.lon+"&zoom=6&level=surface&overlay=rain&product=ecmwf&menu=&message=&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=mph&metricTemp=%C2%B0F"; }
 function weatherHTML(){
   const city=WX_CITIES[S.wx.cityIdx]||WX_CITIES[0];
   const cur=S.wx.current||wxMock(city).current;
