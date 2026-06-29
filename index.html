@@ -354,7 +354,7 @@ const S={
   proj:{status:"idle",ok:false,list:[],updated:null,err:"",selected:null,q:"",stageFilter:"all",alerts:[],notify:false,notes:{id:null,status:"idle",list:[]},noteFrom:null,atts:{id:null,status:"idle",groups:[]}},
   notif:{items:[],unread:0,open:false}, attnOpen:true,
   cal:{status:"idle",records:[],y:new Date().getFullYear(),m:new Date().getMonth()+1,view:"grid",typeFilter:"all",teamFilter:[],selected:null,dayPanel:null,weekStartISO:null,err:""},
-  crewRec:{status:"idle",list:[],crew:"all",q:""},
+  crewRec:{status:"idle",list:[],crew:"all",user:"all",q:""},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
   wx:{ cityIdx:0, current:null, days:[], live:false, loading:false },
   zoho:{ syncing:false, lastSync:new Date(), showCode:false },
@@ -1416,11 +1416,16 @@ async function loadCrewRecords(){
 function crewRecColor(s){ s=(s||"").toLowerCase(); if(/insp/.test(s))return /complet|conclu/.test(s)?"#06b6d4":"#F89B24"; if(/complet|conclu/.test(s))return "#22c55e"; if(/resched|reprogram|reagend/.test(s))return "#ef4444"; return "#1D429B"; }
 function crewRecordsHTML(){
   const es=S.lang==="es", R=S.crewRec, list=R.list||[];
-  const crews=[...new Set(list.map(e=>e.team||(es?"Sin cuadrilla":"Unassigned")))].sort((a,b)=>a.localeCompare(b));
+  const noUser=es?"Sin usuario":"No user";
+  const crewOf=(e)=>e.team||(es?"Sin cuadrilla":"Unassigned");
+  const userOf=(e)=>e.created_by||noUser;
+  const crews=[...new Set(list.map(crewOf))].sort((a,b)=>a.localeCompare(b));
+  const users=[...new Set(list.map(userOf))].sort((a,b)=>a.localeCompare(b));
   const q=(R.q||"").trim().toLowerCase();
   const filtered=list.filter(e=>{
-    if(R.crew!=="all"&&(e.team||(es?"Sin cuadrilla":"Unassigned"))!==R.crew) return false;
-    if(q){ const hay=[e.dl_number,e.customer,e.team,e.status,e.note].filter(Boolean).join(" ").toLowerCase(); if(hay.indexOf(q)<0) return false; }
+    if(R.crew!=="all"&&crewOf(e)!==R.crew) return false;
+    if(R.user!=="all"&&userOf(e)!==R.user) return false;
+    if(q){ const hay=[e.dl_number,e.customer,e.team,e.status,e.note,e.created_by].filter(Boolean).join(" ").toLowerCase(); if(hay.indexOf(q)<0) return false; }
     return true;
   });
   const stamp=(iso)=>{ if(!iso)return ""; const d=new Date(iso); return d.toLocaleString(es?"es":"en-US",{year:"numeric",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}); };
@@ -1430,15 +1435,20 @@ function crewRecordsHTML(){
   const zohoFor=(e)=>{ const k=String(e.dl_number||"").toUpperCase().replace(/\s+/g,""); const id=dealByDL[k]||dealByDL["DL"+k.replace(/^DL/,"")]; return id?("https://crm.zoho.com/crm/org666151142/tab/Potentials/"+id):("https://crm.zoho.com/crm/org666151142/search?searchword="+encodeURIComponent(e.dl_number||e.customer||"")); };
   const head=`<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:6px">
     <div><div style="font-weight:900;font-size:22px">📋 ${es?"Registros de Cuadrilla":"Crew Records"}</div>
-      <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Historial permanente de actualizaciones de cuadrilla — aislado por cuadrilla, con fecha y hora.":"Permanent log of every crew update — isolated per crew, with date & time stamps."}</div></div>
+      <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Historial permanente — aislado por usuario y cuadrilla, con fecha y hora.":"Permanent log — isolated per user & crew, with date & time stamps."}</div></div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span class="pill" style="background:${R.status==="live"?"var(--jc-DL)":"var(--wh-grey)"}">${R.status==="live"?(filtered.length+" "+(es?"registros":"records")):(R.status==="loading"?(es?"Cargando…":"Loading…"):"—")}</span>
       <button class="btn3d sm" data-action="recRefresh">⟳</button></div></div>
   <div style="margin:12px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
     <input id="recSearch" class="input" style="flex:1;min-width:240px" value="${esc(R.q||"")}" placeholder="${es?"Buscar por DL, cliente, nota…":"Search by DL, customer, note…"}"/></div>
-  <div class="scroll" style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px">
+  <div style="font-size:10px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">👷 ${es?"Cuadrilla":"Crew"}</div>
+  <div class="scroll" style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px">
     <button class="btn3d ${R.crew==="all"?"":"ghost"} sm" data-action="recCrew" data-id="all">${es?"Todas":"All crews"} ${list.length}</button>
-    ${crews.map(c=>{const col=teamColor(c);const n=list.filter(e=>(e.team||(es?"Sin cuadrilla":"Unassigned"))===c).length;const on=R.crew===c;return `<button class="btn3d ${on?"":"ghost"} sm" data-action="recCrew" data-id="${esc(c)}" style="${on?("background:"+col+";color:"+textOn(col)):("border:1.5px solid "+col)}">${esc(c)} ${n}</button>`;}).join("")}</div>`;
+    ${crews.map(c=>{const col=teamColor(c);const n=list.filter(e=>crewOf(e)===c).length;const on=R.crew===c;return `<button class="btn3d ${on?"":"ghost"} sm" data-action="recCrew" data-id="${esc(c)}" style="${on?("background:"+col+";color:"+textOn(col)):("border:1.5px solid "+col)}">${esc(c)} ${n}</button>`;}).join("")}</div>
+  <div style="font-size:10px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">👤 ${es?"Usuario":"User"}</div>
+  <div class="scroll" style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px">
+    <button class="btn3d ${R.user==="all"?"":"ghost"} sm" data-action="recUser" data-id="all">${es?"Todos":"All users"} ${list.length}</button>
+    ${users.map(u=>{const n=list.filter(e=>userOf(e)===u).length;const on=R.user===u;return `<button class="btn3d ${on?"":"ghost"} sm" data-action="recUser" data-id="${esc(u)}" style="${on?"background:var(--wh-blue)":""}">${esc(u)} ${n}</button>`;}).join("")}</div>`;
   let body;
   if(R.status==="loading") body=`<div style="text-align:center;padding:40px;color:var(--text-dim)">⟳ ${es?"Cargando registros…":"Loading records…"}</div>`;
   else if(R.status==="error") body=`<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudieron cargar los registros.":"Couldn't load records."}</div>`;
@@ -1449,7 +1459,7 @@ function crewRecordsHTML(){
       <span style="font-size:12px;color:var(--text-dim)">🕒 ${esc(stamp(e.created_at))}</span></div>
     <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-top:3px">
       <span style="font-weight:700;font-size:13.5px">${esc(who)}</span>
-      <span class="pill" style="background:${teamColor(e.team||"")};color:${textOn(teamColor(e.team||""))};font-size:10px">👷 ${esc(e.team||(es?"Sin cuadrilla":"Unassigned"))}</span></div>
+      <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="pill" style="background:var(--bg-2);border:1px solid var(--line);color:var(--text);font-size:10px">👤 ${esc(userOf(e))}</span><span class="pill" style="background:${teamColor(e.team||"")};color:${textOn(teamColor(e.team||""))};font-size:10px">👷 ${esc(crewOf(e))}</span></span></div>
     ${note?`<div style="font-size:13px;color:var(--text);margin-top:8px;background:var(--bg-2);border:1px solid var(--line);border-left:3px solid ${c};border-radius:9px;padding:8px 11px;white-space:pre-wrap;word-break:break-word;line-height:1.45">📝 ${esc(note)}</div>`:""}
     <div style="margin-top:9px"><a class="btn3d blue sm" href="${zohoFor(e)}" target="_blank" rel="noopener">🔗 ${es?"Abrir en Zoho":"Open in Zoho"}</a></div></div>`;}).join("")}</div>`;
   return `<div class="fade">${head}${body}</div>`;
@@ -1705,6 +1715,7 @@ document.addEventListener("click",e=>{
     case "scLiveSearch": { const inp=document.getElementById("scSearch"); S.sc.q=inp?inp.value:""; loadSiteCapture(S.sc.q.trim()); break; }
     case "recRefresh": loadCrewRecords(); break;
     case "recCrew": S.crewRec.crew=id; render(); break;
+    case "recUser": S.crewRec.user=id; render(); break;
     case "scToggleNew": S.sc.showNew=!S.sc.showNew; S.sc.createMsg=""; if(S.sc.showNew&&!(S.sc.scTemplates||[]).length) loadSCTemplates(); render(); break;
     case "scOpenDetail": S.sc.detail=id; loadSCDetail(id); render(); break;
     case "scCloseDetail": S.sc.detail=null; render(); break;
