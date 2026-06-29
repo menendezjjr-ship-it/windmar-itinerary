@@ -686,10 +686,10 @@ const STAGE_LABEL={ es:{"Site Visit":"Visita de Sitio","Engineering":"Ingenierí
 function stageLabel(s){ return (STAGE_LABEL[S.lang]&&STAGE_LABEL[S.lang][s])||s; }
 function fmtDate(d){ if(!d)return null; const x=new Date(d+(String(d).length<=10?"T00:00:00":"")); if(isNaN(x))return d; return x.toLocaleDateString(S.lang==="es"?"es-US":"en-US",{month:"short",day:"numeric",year:"numeric"}); }
 
-async function loadProjects(silent){
+async function loadProjects(silent,fresh){
   if(!silent){ S.proj.status="loading"; render(); }
   try{
-    const r=await fetch("/api/zoho-projects",{cache:"no-store"});
+    const r=await fetch("/api/zoho-projects"+(fresh?("?t="+Date.now()):""),{cache:"no-store"});
     const j=await r.json();
     if(j&&j.configured&&j.ok&&Array.isArray(j.projects)){
       S.proj.status="live"; S.proj.ok=true; S.proj.list=j.projects; S.proj.updated=j.updated;
@@ -1685,9 +1685,9 @@ document.addEventListener("click",e=>{
     case "notifOpen": S.notif.open=false; S.tab="projects"; S.proj.selected=id; S.proj.noteFrom=null; S.proj.stageFilter="all"; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
-    case "setTab": S.tab=id; if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="projects"&&S.proj.status==="idle") loadProjects(); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); render(); break;
+    case "setTab": S.tab=id; if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); render(); break;
     case "jobsRefresh": loadJobs(); break;
-    case "projRefresh": loadProjects(); break;
+    case "projRefresh": loadProjects(false,true); break;
     case "selectProject": S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
     case "projStageFocus": S.proj.noteFrom=(id&&S.proj.noteFrom!==id)?id:null; render(); break;
     case "closeProject": S.proj.selected=null; S.proj.noteFrom=null; render(); break;

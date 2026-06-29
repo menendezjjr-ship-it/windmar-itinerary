@@ -167,7 +167,7 @@ const FIELDS = [
 ].join(",");
 
 export default async function handler(req, res) {
-  res.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=120");
+  res.setHeader("Cache-Control", "s-maxage=15, stale-while-revalidate=30");
   if (!hasCreds()) return res.status(200).json({ configured: false, ok: false, stages: STAGES, projects: [] });
   try {
     const token = await getAccessToken();
