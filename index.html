@@ -1414,11 +1414,25 @@ async function loadCrewRecords(){
   render();
 }
 function crewRecColor(s){ s=(s||"").toLowerCase(); if(/insp/.test(s))return /complet|conclu/.test(s)?"#06b6d4":"#F89B24"; if(/complet|conclu/.test(s))return "#22c55e"; if(/resched|reprogram|reagend/.test(s))return "#ef4444"; return "#1D429B"; }
+// Crew roster — who is on each crew (names + login email for matching created_by).
+const CREW_ROSTER={
+  "Elite Crew #2":[{n:"Tailor Herrera",r:"Crew Lead",e:"tailor.herrera@windmarhome.com"},{n:"Maykel Pimentel",r:"Sub Lead",e:"maykel.pimentel@windmarhome.com"}],
+  "Elite Crew #3":[{n:"William Sierra",r:"Crew Lead",e:"william.sierra@windmarhome.com"},{n:"Luis Vargas",r:"Sub Lead",e:"luis.matos@windmarhome.com"}],
+  "Crew #1S":[{n:"Leonardo Torres",e:"leonardo.trujillo@windmarhome.com"}],
+  "Crew #2S":[{n:"David Radke",e:"david.radke@windmarhome.com"}],
+  "Crew #3S":[{n:"Luis Morales",e:"luis.morales@windmarhome.com"}],
+  "Crew H":[{n:"Douglas Olivera"},{n:"Anderson Terra"}],
+  "Warehouse Tech":[{n:"Angel Rivera Carballo",e:"angel.rivera@windmarhome.com"}],
+};
+const ROSTER_BY_EMAIL={}; const ROSTER_NAMES=[];
+Object.keys(CREW_ROSTER).forEach(cr=>CREW_ROSTER[cr].forEach(p=>{ if(p.e)ROSTER_BY_EMAIL[p.e.toLowerCase()]=p.n; ROSTER_NAMES.push(p.n); }));
+function rosterName(v){ if(!v)return ""; const s=String(v).trim(); const m=ROSTER_BY_EMAIL[s.toLowerCase()]; if(m)return m; const hit=ROSTER_NAMES.find(n=>n.toLowerCase()===s.toLowerCase()); return hit||s; }
+function crewPeople(team){ const arr=CREW_ROSTER[team]; return arr?arr.map(p=>p.n).join(", "):""; }
 function crewRecordsHTML(){
   const es=S.lang==="es", R=S.crewRec, list=R.list||[];
   const noUser=es?"Sin usuario":"No user";
   const crewOf=(e)=>e.team||(es?"Sin cuadrilla":"Unassigned");
-  const userOf=(e)=>e.created_by||noUser;
+  const userOf=(e)=>{ const cb=(e.created_by||"").trim(); if(cb&&cb.toLowerCase()!=="field hub") return rosterName(cb); return crewPeople(crewOf(e))||noUser; };
   const crews=[...new Set(list.map(crewOf))].sort((a,b)=>a.localeCompare(b));
   const users=[...new Set(list.map(userOf))].sort((a,b)=>a.localeCompare(b));
   const q=(R.q||"").trim().toLowerCase();
