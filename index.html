@@ -1931,5 +1931,51 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
   }).catch(function(){ showLogin(); });
 })();
 </script>
+<!-- ═══ WindMar seasonal flair (month-by-month, non-blocking) ═══ -->
+<script>
+(function(){
+  var SEASON={
+    1:{p:["❄️","✨","🎉"],fall:1,crosser:"🎉✨🎉",label:"Happy New Year!"},
+    2:{p:["💖","💕","💗","🌹"],rise:1,corner:"💝",label:"Happy Valentine's"},
+    3:{p:["🍀","☘️","✨"],fall:1,corner:"🍀",label:"Happy St. Patrick's"},
+    4:{p:["🌸","🌷","🐣"],rise:1,corner:"🐰",label:"Happy Spring"},
+    5:{p:["🌼","🌸","🐝"],rise:1,corner:"🌺"},
+    6:{p:["☀️","🌴","🌊"],rise:1,corner:"🏖️",label:"Summer's here ☀️"},
+    7:{p:["🎆","🎇","⭐"],rise:1,fireworks:1,crosser:"🇺🇸",label:"Happy 4th of July!"},
+    8:{p:["☀️","🌴","🍦"],rise:1,corner:"😎"},
+    9:{p:["🍂","🍁","🌰"],fall:1,corner:"🍁",label:"Happy Fall"},
+    10:{p:["🍂","🦇","👻"],fall:1,crosser:"🦇🦇",corner:"🎃",label:"Happy Halloween"},
+    11:{p:["🍂","🍁","🌽"],fall:1,corner:"🦃",dance:1,label:"Happy Thanksgiving"},
+    12:{p:["❄️","❄","✨"],fall:1,crosser:"🎅🛷🦌🦌",label:"Merry Christmas! 🎄"}
+  };
+  var month=new Date().getMonth()+1, cfg=SEASON[month];
+  if(!cfg) return;
+  try{ if(localStorage.getItem("wm_season_hide")===String(month)) return; }catch(e){}
+  var reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var st=document.createElement("style");
+  st.textContent="@keyframes wmsFall{0%{transform:translate(0,0) rotate(0)}100%{transform:translate(var(--d,0),112vh) rotate(360deg)}}@keyframes wmsRise{0%{transform:translate(0,0) rotate(0);opacity:.9}100%{transform:translate(var(--d,0),-114vh) rotate(180deg);opacity:.35}}@keyframes wmsCross{0%{left:-16%}48%{transform:translateY(-14px)}52%{transform:translateY(-14px)}100%{left:116%}}@keyframes wmsBob{0%,100%{transform:translateY(0) rotate(-4deg)}50%{transform:translateY(-10px) rotate(4deg)}}@keyframes wmsDance{0%,100%{transform:rotate(-12deg) scale(1)}25%{transform:rotate(10deg) scale(1.09)}50%{transform:rotate(-8deg) scale(1)}75%{transform:rotate(12deg) scale(1.09)}}@keyframes wmsBurst{0%{transform:scale(.3);opacity:0}30%{opacity:1}60%{transform:scale(1.3);opacity:.9}100%{transform:scale(1.7);opacity:0}}";
+  document.head.appendChild(st);
+  var lay=document.createElement("div"); lay.setAttribute("aria-hidden","true");
+  lay.style.cssText="position:fixed;inset:0;z-index:50;pointer-events:none;overflow:hidden";
+  var anim=cfg.fall?"wmsFall":"wmsRise";
+  if(!reduce){
+    for(var i=0;i<16;i++){
+      var s=document.createElement("span"), left=Math.round(Math.random()*100), size=14+Math.round(Math.random()*18), dur=7+Math.random()*9, delay=-Math.random()*12, drift=Math.round((Math.random()*2-1)*40);
+      s.textContent=cfg.p[i%cfg.p.length];
+      s.style.cssText="position:absolute;left:"+left+"%;top:"+(cfg.fall?"-6%":"104%")+";font-size:"+size+"px;opacity:.85;animation:"+anim+" "+dur+"s linear "+delay+"s infinite";
+      s.style.setProperty("--d",drift+"px"); lay.appendChild(s);
+    }
+    if(cfg.crosser){ var c=document.createElement("span"); c.textContent=cfg.crosser; c.style.cssText="position:absolute;top:9%;font-size:34px;white-space:nowrap;animation:wmsCross 16s linear infinite;filter:drop-shadow(0 3px 6px rgba(0,0,0,.35))"; lay.appendChild(c); }
+    if(cfg.fireworks){ for(var k=0;k<3;k++){ var fw=document.createElement("span"); fw.textContent="🎆"; fw.style.cssText="position:absolute;left:"+(15+k*30)+"%;top:"+(16+k*9)+"%;font-size:42px;animation:wmsBurst 2.4s ease-out "+(k*0.7)+"s infinite"; lay.appendChild(fw); } }
+  }
+  if(cfg.corner){ var cn=document.createElement("span"); cn.textContent=cfg.corner; cn.style.cssText="position:absolute;right:14px;bottom:16px;font-size:"+(reduce?38:46)+"px;"+(reduce?"":"animation:"+(cfg.dance?"wmsDance 1.1s":"wmsBob 2.6s")+" ease-in-out infinite;")+"filter:drop-shadow(0 4px 8px rgba(0,0,0,.45))"; lay.appendChild(cn); }
+  if(cfg.label){ var lb=document.createElement("div"); lb.textContent=cfg.label; lb.style.cssText="position:absolute;right:14px;bottom:"+(reduce?60:70)+"px;background:rgba(18,32,66,.92);color:#fff;font-size:12px;font-weight:800;padding:5px 11px;border-radius:20px;border:1px solid #1D429B66;font-family:Montserrat,system-ui,sans-serif;white-space:nowrap;box-shadow:0 6px 16px -6px rgba(0,0,0,.5)"; lay.appendChild(lb); }
+  var x=document.createElement("button"); x.textContent="✕"; x.title="Hide seasonal animation";
+  x.style.cssText="position:absolute;left:8px;bottom:8px;pointer-events:auto;width:24px;height:24px;border-radius:12px;border:none;background:rgba(18,32,66,.6);color:#A6C3E6;cursor:pointer;font-size:12px;line-height:1";
+  x.onclick=function(){ try{localStorage.setItem("wm_season_hide",String(month));}catch(e){} lay.remove(); };
+  lay.appendChild(x);
+  (function mount(){ if(document.body){document.body.appendChild(lay);}else{setTimeout(mount,30);} })();
+})();
+</script>
 </body>
 </html>
