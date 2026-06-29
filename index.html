@@ -138,7 +138,7 @@ const LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAoAAAAGNCAYAAACBu8BgAADG8ElEQVR42uz9fX
 const I18N = {
  en:{
   appName:"Itinerary", appTagline:"Dispatch & Field Operations", lang:"Español",
-  tab_itinerary:"Itinerary", tab_projects:"Projects", tab_crews:"Crews", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar",
+  tab_itinerary:"Itinerary", tab_projects:"Projects", tab_crews:"Crews", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_records:"Crew Records", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar",
   // job codes
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Solar / Battery Install", jc_RDL_long:"Re-Roof + Solar", jc_RL_long:"Roofing", jc_S_long:"Service Call", jc_MSP_long:"Main Service Panel Upgrade",
@@ -188,7 +188,7 @@ const I18N = {
  },
  es:{
   appName:"Itinerario", appTagline:"Despacho y Operaciones de Campo", lang:"English",
-  tab_itinerary:"Itinerario", tab_projects:"Proyectos", tab_crews:"Cuadrillas", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario",
+  tab_itinerary:"Itinerario", tab_projects:"Proyectos", tab_crews:"Cuadrillas", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_records:"Registros de Cuadrilla", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario",
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Instalación Solar / Batería", jc_RDL_long:"Re-Techado + Solar", jc_RL_long:"Techado", jc_S_long:"Llamada de Servicio", jc_MSP_long:"Mejora del Panel Principal",
   legend:"Leyenda de Códigos", crew:"Cuadrilla", today:"Hoy", prevDay:"Anterior", nextDay:"Siguiente",
@@ -354,6 +354,7 @@ const S={
   proj:{status:"idle",ok:false,list:[],updated:null,err:"",selected:null,q:"",stageFilter:"all",alerts:[],notify:false,notes:{id:null,status:"idle",list:[]},noteFrom:null,atts:{id:null,status:"idle",groups:[]}},
   notif:{items:[],unread:0,open:false}, attnOpen:true,
   cal:{status:"idle",records:[],y:new Date().getFullYear(),m:new Date().getMonth()+1,view:"grid",typeFilter:"all",teamFilter:[],selected:null,dayPanel:null,weekStartISO:null,err:""},
+  crewRec:{status:"idle",list:[],crew:"all",q:""},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
   wx:{ cityIdx:0, current:null, days:[], live:false, loading:false },
   zoho:{ syncing:false, lastSync:new Date(), showCode:false },
@@ -1390,6 +1391,58 @@ function scStatusStyle(st){ st=(st||"").toUpperCase();
   if(st.indexOf("PROGRESS")>=0)return"#06B6D4";
   if(st.indexOf("NEW")>=0)return"var(--wh-blue)";
   return"var(--wh-grey)"; }
+/* ── Crew Records: permanent, searchable archive of crew status updates (shared Supabase) ── */
+async function loadCrewRecords(){
+  S.crewRec.status="loading"; render();
+  try{
+    const SB="https://lmlixmzmzpzgeggvywwb.supabase.co", K="sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
+    const r=await fetch(SB+"/rest/v1/job_status_events?source=eq.field-hub&order=created_at.desc&limit=1000",{headers:{apikey:K,Authorization:"Bearer "+K},cache:"no-store"});
+    const rows=await r.json();
+    S.crewRec.status="live"; S.crewRec.list=Array.isArray(rows)?rows:[];
+  }catch(e){ S.crewRec.status="error"; S.crewRec.list=[]; }
+  render();
+}
+function crewRecColor(s){ s=(s||"").toLowerCase(); if(/insp/.test(s))return /complet|conclu/.test(s)?"#06b6d4":"#F89B24"; if(/complet|conclu/.test(s))return "#22c55e"; if(/resched|reprogram|reagend/.test(s))return "#ef4444"; return "#1D429B"; }
+function crewRecordsHTML(){
+  const es=S.lang==="es", R=S.crewRec, list=R.list||[];
+  const crews=[...new Set(list.map(e=>e.team||(es?"Sin cuadrilla":"Unassigned")))].sort((a,b)=>a.localeCompare(b));
+  const q=(R.q||"").trim().toLowerCase();
+  const filtered=list.filter(e=>{
+    if(R.crew!=="all"&&(e.team||(es?"Sin cuadrilla":"Unassigned"))!==R.crew) return false;
+    if(q){ const hay=[e.dl_number,e.customer,e.team,e.status,e.note].filter(Boolean).join(" ").toLowerCase(); if(hay.indexOf(q)<0) return false; }
+    return true;
+  });
+  const stamp=(iso)=>{ if(!iso)return ""; const d=new Date(iso); return d.toLocaleString(es?"es":"en-US",{year:"numeric",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}); };
+  const dl=(s)=>String(s||"").replace(/[^0-9]/g,"");
+  const zurl=(e)=>"https://crm.zoho.com/crm/org666151142/tab/Potentials/search?searchword="+encodeURIComponent(e.dl_number||e.customer||"");
+  const dealByDL={}; (S.proj.list||[]).forEach(p=>{ if(p.num) dealByDL[String(p.num).toUpperCase().replace(/\s+/g,"")]=p.id; });
+  const zohoFor=(e)=>{ const k=String(e.dl_number||"").toUpperCase().replace(/\s+/g,""); const id=dealByDL[k]||dealByDL["DL"+k.replace(/^DL/,"")]; return id?("https://crm.zoho.com/crm/org666151142/tab/Potentials/"+id):("https://crm.zoho.com/crm/org666151142/search?searchword="+encodeURIComponent(e.dl_number||e.customer||"")); };
+  const head=`<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:6px">
+    <div><div style="font-weight:900;font-size:22px">📋 ${es?"Registros de Cuadrilla":"Crew Records"}</div>
+      <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Historial permanente de actualizaciones de cuadrilla — aislado por cuadrilla, con fecha y hora.":"Permanent log of every crew update — isolated per crew, with date & time stamps."}</div></div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span class="pill" style="background:${R.status==="live"?"var(--jc-DL)":"var(--wh-grey)"}">${R.status==="live"?(filtered.length+" "+(es?"registros":"records")):(R.status==="loading"?(es?"Cargando…":"Loading…"):"—")}</span>
+      <button class="btn3d sm" data-action="recRefresh">⟳</button></div></div>
+  <div style="margin:12px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+    <input id="recSearch" class="input" style="flex:1;min-width:240px" value="${esc(R.q||"")}" placeholder="${es?"Buscar por DL, cliente, nota…":"Search by DL, customer, note…"}"/></div>
+  <div class="scroll" style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px">
+    <button class="btn3d ${R.crew==="all"?"":"ghost"} sm" data-action="recCrew" data-id="all">${es?"Todas":"All crews"} ${list.length}</button>
+    ${crews.map(c=>{const col=teamColor(c);const n=list.filter(e=>(e.team||(es?"Sin cuadrilla":"Unassigned"))===c).length;const on=R.crew===c;return `<button class="btn3d ${on?"":"ghost"} sm" data-action="recCrew" data-id="${esc(c)}" style="${on?("background:"+col+";color:"+textOn(col)):("border:1.5px solid "+col)}">${esc(c)} ${n}</button>`;}).join("")}</div>`;
+  let body;
+  if(R.status==="loading") body=`<div style="text-align:center;padding:40px;color:var(--text-dim)">⟳ ${es?"Cargando registros…":"Loading records…"}</div>`;
+  else if(R.status==="error") body=`<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudieron cargar los registros.":"Couldn't load records."}</div>`;
+  else if(!filtered.length) body=`<div style="text-align:center;padding:40px;color:var(--text-dim)">${es?"Sin registros":"No records"}.</div>`;
+  else body=`<div style="display:flex;flex-direction:column;gap:9px">${filtered.map(e=>{const c=crewRecColor(e.status);const who=[e.dl_number,e.customer].filter(Boolean).join(" ")||e.job_id||"Job";const note=e.note?String(e.note).trim():"";return `<div class="card" style="padding:13px 15px;border-left:5px solid ${c}">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
+      <span style="font-weight:800;font-size:14.5px;color:${c}">${esc(e.status||"")}</span>
+      <span style="font-size:12px;color:var(--text-dim)">🕒 ${esc(stamp(e.created_at))}</span></div>
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-top:3px">
+      <span style="font-weight:700;font-size:13.5px">${esc(who)}</span>
+      <span class="pill" style="background:${teamColor(e.team||"")};color:${textOn(teamColor(e.team||""))};font-size:10px">👷 ${esc(e.team||(es?"Sin cuadrilla":"Unassigned"))}</span></div>
+    ${note?`<div style="font-size:13px;color:var(--text);margin-top:8px;background:var(--bg-2);border:1px solid var(--line);border-left:3px solid ${c};border-radius:9px;padding:8px 11px;white-space:pre-wrap;word-break:break-word;line-height:1.45">📝 ${esc(note)}</div>`:""}
+    <div style="margin-top:9px"><a class="btn3d blue sm" href="${zohoFor(e)}" target="_blank" rel="noopener">🔗 ${es?"Abrir en Zoho":"Open in Zoho"}</a></div></div>`;}).join("")}</div>`;
+  return `<div class="fade">${head}${body}</div>`;
+}
 function siteCaptureHTML(){
   const live=S.sc.scState==="live";
   const q=S.sc.q.trim().toLowerCase();
@@ -1523,6 +1576,7 @@ const TABS=[
   {id:"crews",key:"tab_crews",fn:crewsHTML},
   {id:"weather",key:"tab_weather",fn:weatherHTML},
   {id:"sitecapture",key:"tab_sitecapture",fn:siteCaptureHTML},
+  {id:"records",key:"tab_records",fn:crewRecordsHTML},
   {id:"zoho",key:"tab_zoho",fn:zohoHTML},
 ];
 function initCrewMap(){
@@ -1596,7 +1650,7 @@ document.addEventListener("click",e=>{
     case "notifOpen": S.notif.open=false; S.tab="projects"; S.proj.selected=id; S.proj.noteFrom=null; S.proj.stageFilter="all"; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
-    case "setTab": S.tab=id; if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="projects"&&S.proj.status==="idle") loadProjects(); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); render(); break;
+    case "setTab": S.tab=id; if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="projects"&&S.proj.status==="idle") loadProjects(); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); render(); break;
     case "jobsRefresh": loadJobs(); break;
     case "projRefresh": loadProjects(); break;
     case "selectProject": S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
@@ -1638,6 +1692,8 @@ document.addEventListener("click",e=>{
     case "wxRefresh": loadWeather(); break;
     case "scSelectProject": S.sc.project=id; S.sc.done=false; render(); break;
     case "scLiveSearch": { const inp=document.getElementById("scSearch"); S.sc.q=inp?inp.value:""; loadSiteCapture(S.sc.q.trim()); break; }
+    case "recRefresh": loadCrewRecords(); break;
+    case "recCrew": S.crewRec.crew=id; render(); break;
     case "scToggleNew": S.sc.showNew=!S.sc.showNew; S.sc.createMsg=""; if(S.sc.showNew&&!(S.sc.scTemplates||[]).length) loadSCTemplates(); render(); break;
     case "scOpenDetail": S.sc.detail=id; loadSCDetail(id); render(); break;
     case "scCloseDetail": S.sc.detail=null; render(); break;
@@ -1681,6 +1737,7 @@ document.addEventListener("click",e=>{
 document.addEventListener("keydown",function(e){ if(e.key==="Enter"&&e.target&&e.target.id==="scSearch"){ S.sc.q=e.target.value; loadSiteCapture(S.sc.q.trim()); } });
 document.addEventListener("input",function(e){
   if(e.target.id==="projSearch"){ S.proj.q=e.target.value; render(); }
+  else if(e.target.id==="recSearch"){ S.crewRec.q=e.target.value; render(); }
   else if(e.target.hasAttribute&&e.target.hasAttribute("data-cnew")){ S.sc.cnew[e.target.getAttribute("data-cnew")]=e.target.value; const pv=document.getElementById("scNamePreview"); if(pv){ pv.textContent=((S.sc.cnew.dl||"")+" "+(S.sc.cnew.customer||"")).trim()||"(enter a DL #)"; } }
   else if(e.target.id==="scSearch"){ S.sc.q=e.target.value; render(); }
   else if(e.target.hasAttribute&&e.target.hasAttribute("data-nf")){ S.sc.nf[e.target.getAttribute("data-nf")]=e.target.value; S.sc.created=null; render(); }
