@@ -1877,7 +1877,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
 })();
 </script>
 <!-- ═══ WindMar unified sign-in gate (Microsoft + staff-code fallback) ═══ -->
-<script src="https://alcdn.msftauth.net/browser/2.38.4/js/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@2.38.4/lib/msal-browser.min.js"></script>
 <script>
 (function(){
   var APP_KEY="itinerary", APP_LABEL="Itinerary";
@@ -1902,7 +1902,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
       '<input id="wmc" type="password" placeholder="Staff access code" style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid #1D429B40;background:#0e1a35;color:#f1f5f9;font-size:14px;box-sizing:border-box;margin-bottom:10px"/>'+
       '<button id="wmcb" style="width:100%;padding:11px;border-radius:10px;border:1px solid #1D429B55;background:transparent;color:#A6C3E6;font-size:14px;font-weight:700;cursor:pointer">Enter</button>'):'')+
       '<div style="font-size:10px;color:#666;margin-top:14px">Sign in with your @windmarhome.com account</div>');
-    document.getElementById("wmms").onclick=function(){ try{msalApp.loginRedirect({scopes:["openid","profile","email","User.Read"]});}catch(e){showLogin("Microsoft sign-in unavailable. Try again.");} };
+    document.getElementById("wmms").onclick=function(){ try{ var _p=msalApp.loginRedirect({scopes:["openid","profile","email","User.Read"]}); if(_p&&_p.catch)_p.catch(function(){showLogin("Microsoft sign-in unavailable. Try again.");}); }catch(e){showLogin("Microsoft sign-in unavailable. Try again.");} };
     var go=function(){ if(document.getElementById("wmc").value===STAFF_CODE){ try{localStorage.setItem("wm_gate_code","1");}catch(e){} pass(); } else { showLogin("Incorrect code"); } };
     var _cb=document.getElementById("wmcb"); if(_cb) _cb.onclick=go;
     var _ci=document.getElementById("wmc"); if(_ci) _ci.onkeydown=function(e){ if(e.key==="Enter") go(); };
@@ -1925,7 +1925,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
   var msalApp;
   if(typeof msal==="undefined"){ showLogin("Microsoft library blocked — use the staff code."); return; }
   msalApp=new msal.PublicClientApplication({auth:{clientId:CLIENT_ID,authority:"https://login.microsoftonline.com/"+TENANT,redirectUri:window.location.origin},cache:{cacheLocation:"localStorage"}});
-  msalApp.handleRedirectPromise().then(function(resp){
+  Promise.resolve(msalApp.initialize?msalApp.initialize():0).then(function(){return msalApp.handleRedirectPromise();}).then(function(resp){
     var acct=(resp&&resp.account)||msalApp.getAllAccounts()[0];
     if(acct){ check(acct); } else { showLogin(); }
   }).catch(function(){ showLogin(); });
