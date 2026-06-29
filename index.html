@@ -1914,6 +1914,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
   try{ if(staffMode&&localStorage.getItem("wm_gate_code")==="1"){ pass(); return; } }catch(e){}
   function check(acct){
     var email=(acct.username||"").toLowerCase();
+    try{ if(!sessionStorage.getItem("wm_login_logged")){ sessionStorage.setItem("wm_login_logged","1"); fetch(SB+"/rest/v1/login_events",{method:"POST",headers:Object.assign({},H,{Prefer:"return=minimal"}),body:JSON.stringify({email:email,name:acct.name||null,app:APP_LABEL})}).catch(function(){}); } }catch(e){}
     fetch(SB+"/rest/v1/app_access?on_conflict=email",{method:"POST",headers:Object.assign({},H,{Prefer:"resolution=merge-duplicates,return=representation"}),body:JSON.stringify({email:email,name:acct.name||null,last_seen:new Date().toISOString()})})
       .then(function(r){return r.ok?r.json():null;}).then(function(rows){
         var rec=(rows&&rows[0])||null;
