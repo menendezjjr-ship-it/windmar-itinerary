@@ -1862,5 +1862,60 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
   };
 })();
 </script>
+<!-- ═══ WindMar unified sign-in gate (Microsoft + staff-code fallback) ═══ -->
+<script src="https://alcdn.msftauth.net/browser/2.38.4/js/msal-browser.min.js"></script>
+<script>
+(function(){
+  var APP_KEY="itinerary", APP_LABEL="Itinerary";
+  var CLIENT_ID="be321099-c551-42ba-94e9-887752ebba8b", TENANT="657cda0d-a035-4c3f-a228-3d6362dad07d";
+  var SB="https://lmlixmzmzpzgeggvywwb.supabase.co", KEY="sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
+  var H={apikey:KEY,Authorization:"Bearer "+KEY,"Content-Type":"application/json"};
+  var STAFF_CODE="Windmar2026!";
+  var ROLE_APPS={admin:["fieldhub","itinerary","serviceapp","plananalyzer"],coordinator:["fieldhub","itinerary","serviceapp","plananalyzer"],crew:["fieldhub","itinerary","serviceapp"],viewer:["fieldhub"]};
+  function appsFor(r){return (r&&r.apps&&r.apps.length)?r.apps:(ROLE_APPS[(r&&r.role)||"crew"]||ROLE_APPS.crew);}
+  function esc(s){return String(s==null?"":s).replace(/[<>&]/g,function(c){return{"<":"&lt;",">":"&gt;","&":"&amp;"}[c];});}
+  var ov=document.createElement("div");
+  ov.style.cssText="position:fixed;inset:0;z-index:2147483600;background:#0c1628;display:flex;align-items:center;justify-content:center;font-family:Montserrat,system-ui,sans-serif;padding:20px";
+  function card(i){ov.innerHTML='<div style="background:#122042;border:1px solid #1D429B40;border-radius:16px;padding:36px;width:min(380px,calc(100% - 32px));text-align:center;box-sizing:border-box">'+i+'</div>';}
+  function brand(){return '<div style="width:54px;height:54px;border-radius:14px;background:linear-gradient(135deg,#1D429B,#F89B24);display:inline-flex;align-items:center;justify-content:center;margin-bottom:12px"><span style="font-size:24px;font-weight:900;color:#fff">W</span></div><div style="font-size:18px;font-weight:800;color:#f1f5f9">WindMar</div><div style="font-size:12px;font-weight:600;color:#F89B24;letter-spacing:.08em;text-transform:uppercase;margin-bottom:18px">'+esc(APP_LABEL)+'</div>';}
+  function mount(){ if(document.body){document.body.appendChild(ov);}else{setTimeout(mount,20);} }
+  mount(); card(brand()+'<div style="color:#A6C3E6;font-size:13px">…</div>');
+  function pass(){ if(ov.parentNode) ov.parentNode.removeChild(ov); }
+  function showLogin(msg){
+    card(brand()+(msg?'<div style="color:#ef4444;font-size:12px;margin-bottom:10px">'+esc(msg)+'</div>':'')+
+      '<button id="wmms" style="width:100%;padding:12px;border-radius:10px;border:none;background:#fff;color:#1f1f1f;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:14px"><svg width="18" height="18" viewBox="0 0 23 23"><path fill="#f25022" d="M1 1h10v10H1z"/><path fill="#7fba00" d="M12 1h10v10H12z"/><path fill="#00a4ef" d="M1 12h10v10H1z"/><path fill="#ffb900" d="M12 12h10v10H12z"/></svg>Sign in with Microsoft</button>'+
+      '<div style="display:flex;align-items:center;gap:10px;margin:0 0 12px;color:#666;font-size:11px"><div style="flex:1;height:1px;background:#1D429B40"></div>OR<div style="flex:1;height:1px;background:#1D429B40"></div></div>'+
+      '<input id="wmc" type="password" placeholder="Staff access code" style="width:100%;padding:11px 14px;border-radius:10px;border:1px solid #1D429B40;background:#0e1a35;color:#f1f5f9;font-size:14px;box-sizing:border-box;margin-bottom:10px"/>'+
+      '<button id="wmcb" style="width:100%;padding:11px;border-radius:10px;border:1px solid #1D429B55;background:transparent;color:#A6C3E6;font-size:14px;font-weight:700;cursor:pointer">Enter</button>'+
+      '<div style="font-size:10px;color:#666;margin-top:14px">Sign in with your @windmarhome.com account</div>');
+    document.getElementById("wmms").onclick=function(){ try{msalApp.loginRedirect({scopes:["openid","profile","email","User.Read"]});}catch(e){showLogin("Microsoft sign-in unavailable — use the staff code.");} };
+    var go=function(){ if(document.getElementById("wmc").value===STAFF_CODE){ try{localStorage.setItem("wm_gate_code","1");}catch(e){} pass(); } else { showLogin("Incorrect code"); } };
+    document.getElementById("wmcb").onclick=go;
+    document.getElementById("wmc").onkeydown=function(e){ if(e.key==="Enter") go(); };
+  }
+  function showDenied(email){
+    card(brand()+'<div style="font-size:34px;margin-bottom:8px">🔒</div><div style="font-size:15px;font-weight:800;color:#f1f5f9">No access to '+esc(APP_LABEL)+'</div><div style="font-size:12.5px;color:#A6C3E6;margin-top:8px">'+esc(email)+' is not allowed to open this app. Ask your administrator.</div><button id="wmout" style="margin-top:16px;padding:9px 16px;border-radius:9px;border:1px solid #1D429B55;background:transparent;color:#A6C3E6;font-weight:700;cursor:pointer">Sign out</button>');
+    document.getElementById("wmout").onclick=function(){ try{msalApp.logoutRedirect();}catch(e){location.reload();} };
+  }
+  try{ if(localStorage.getItem("wm_gate_code")==="1"){ pass(); return; } }catch(e){}
+  function check(acct){
+    var email=(acct.username||"").toLowerCase();
+    fetch(SB+"/rest/v1/app_access?on_conflict=email",{method:"POST",headers:Object.assign({},H,{Prefer:"resolution=merge-duplicates,return=representation"}),body:JSON.stringify({email:email,name:acct.name||null,last_seen:new Date().toISOString()})})
+      .then(function(r){return r.ok?r.json():null;}).then(function(rows){
+        var rec=(rows&&rows[0])||null;
+        if(rec&&rec.status==="disabled"){ showDenied(email); return; }
+        if(rec&&appsFor(rec).indexOf(APP_KEY)<0){ showDenied(email); return; }
+        pass();
+      }).catch(function(){ pass(); });
+  }
+  var msalApp;
+  if(typeof msal==="undefined"){ showLogin("Microsoft library blocked — use the staff code."); return; }
+  msalApp=new msal.PublicClientApplication({auth:{clientId:CLIENT_ID,authority:"https://login.microsoftonline.com/"+TENANT,redirectUri:window.location.origin},cache:{cacheLocation:"localStorage"}});
+  msalApp.handleRedirectPromise().then(function(resp){
+    var acct=(resp&&resp.account)||msalApp.getAllAccounts()[0];
+    if(acct){ check(acct); } else { showLogin(); }
+  }).catch(function(){ showLogin(); });
+})();
+</script>
 </body>
 </html>
