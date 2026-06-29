@@ -124,6 +124,27 @@
   .prioPulse{animation:wmPulse 1.5s infinite;}
   /* stage chips scroller hides scrollbar for a cleaner look */
   .chipbar::-webkit-scrollbar{height:0;}
+  img{max-width:100%;height:auto;}
+  /* ── Phones (≤640px): tighten chrome, protect touch + iOS ── */
+  @media (max-width:640px){
+    main{ padding:14px 11px 76px !important; }
+    header > div{ padding:10px 12px !important; gap:10px !important; }
+    nav .scroll{ padding:0 8px !important; }
+    /* iOS Safari zooms in when a focused input is <16px — force 16px on phones */
+    input, select, textarea, .input{ font-size:16px !important; }
+    /* keep micro pills/labels legible */
+    .pill{ font-size:10px !important; }
+    /* comfortable, thumb-sized tap targets */
+    .btn3d{ min-height:40px; display:inline-flex; align-items:center; justify-content:center; }
+    .tabbtn{ padding:14px 12px !important; }
+    h2{ font-size:20px !important; }
+    h3{ font-size:18px !important; }
+  }
+  /* ── Tablets (641–1024px): a hair more breathing room ── */
+  @media (min-width:641px) and (max-width:1024px){
+    main{ padding:18px 16px 76px !important; }
+    input, select, textarea, .input{ font-size:15px; }
+  }
 </style>
 </head>
 <body>
