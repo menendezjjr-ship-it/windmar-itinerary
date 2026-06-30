@@ -122,6 +122,8 @@
   /* priority (needs stage update) pulse for crew updates */
   @keyframes wmPulse{0%{box-shadow:0 0 0 0 rgba(239,68,68,.55);}70%{box-shadow:0 0 0 8px rgba(239,68,68,0);}100%{box-shadow:0 0 0 0 rgba(239,68,68,0);}}
   .prioPulse{animation:wmPulse 1.5s infinite;}
+  /* On background/silent re-renders, skip entry animations so the app doesn't blink */
+  #root.noanim .fade, #root.noanim .rise, #root.noanim .stagger>*, #root.noanim .tabbtn.active{ animation:none !important; }
   /* stage chips scroller hides scrollbar for a cleaner look */
   .chipbar::-webkit-scrollbar{height:0;}
   img{max-width:100%;height:auto;}
@@ -499,7 +501,7 @@ async function loadOpsCal(silent){
     else if(j&&j.configured){ S.cal.records=[]; S.cal.status="error"; S.cal.err=j.error||"error"; }
     else { S.cal.records=[]; S.cal.status="unconfigured"; }
   }catch(e){ S.cal.records=[]; S.cal.status="error"; S.cal.err=String(e); }
-  if(!silent || S.tab==="calendar" || (S.tab==="itinerary"&&S.itinView==="brigada")) render();
+  if(!silent || S.tab==="calendar" || (S.tab==="itinerary"&&S.itinView==="brigada")) render(silent);
 }
 function calChip(r){
   const col=teamColor(r.team), isS=r.type==="service", hot=isS&&calHot(r.priority);
@@ -633,7 +635,7 @@ async function loadJobs(silent){
       S.live={status:"unconfigured",ok:false,jobs:[],updated:null,err:""};
     }
   }catch(e){ S.live={status:"error",ok:false,jobs:[],updated:null,err:String(e)}; }
-  if(!silent || S.tab==="itinerary") render();
+  if(!silent || S.tab==="itinerary") render(silent);
 }
 // Active jobs = live Zoho when available, else the built-in demo set.
 function activeJobs(){ return (S.live&&S.live.ok&&S.live.jobs&&S.live.jobs.length)?S.live.jobs:JOBS; }
@@ -718,7 +720,7 @@ async function loadProjects(silent,fresh){
     } else if(j&&j.configured){ S.proj.status="error"; S.proj.ok=false; S.proj.list=[]; S.proj.err=j.error||"error"; }
     else { S.proj.status="unconfigured"; S.proj.ok=false; S.proj.list=[]; }
   }catch(e){ S.proj.status="error"; S.proj.ok=false; S.proj.err=String(e); }
-  if(!silent || S.tab==="projects" || S.tab==="itinerary") render();
+  if(!silent || S.tab==="projects" || S.tab==="itinerary") render(silent);
 }
 // Notify when a project ENTERS Engineering. Seeds silently on first load so the
 // current backlog doesn't all fire; persists across reloads via localStorage.
@@ -1411,7 +1413,7 @@ async function loadSiteCapture(q,silent){
     else if(j&&j.configured){ S.sc.results=[]; S.sc.scState="error"; S.sc.err=j.error||("HTTP "+j.status); }
     else { S.sc.results=[]; S.sc.scState="sample"; }
   }catch(e){ S.sc.results=[]; S.sc.scState="sample"; }
-  if(!silent || S.tab==="sitecapture") render();
+  if(!silent || S.tab==="sitecapture") render(silent);
 }
 async function loadSCTemplates(){
   try{
@@ -1689,11 +1691,13 @@ function initCrewMap(){
   if(pts.length>1){ try{ m.fitBounds(pts,{padding:[40,40]}); }catch(e){} }
   setTimeout(function(){ try{m.invalidateSize();}catch(e){} },140);
 }
-function render(){
+function render(noAnim){
   document.documentElement.setAttribute("data-theme",S.theme);
   const ae=document.activeElement, aeId=ae&&ae.id, caret=ae&&ae.selectionStart;
   const active=TABS.find(x=>x.id===S.tab);
-  document.getElementById("root").innerHTML=`
+  const rootEl=document.getElementById("root");
+  rootEl.classList.toggle("noanim",!!noAnim); // background/silent refresh → skip entry animations (no blink)
+  rootEl.innerHTML=`
     <header style="border-bottom:3px solid var(--wh-orange);background:var(--wh-blue)">
       <div style="max-width:1180px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <div class="logoPlate"><img src="data:image/png;base64,${LOGO_B64}" alt="WindMar Solar+Roofing"/></div>
@@ -1879,7 +1883,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
           var fresh=rows.filter(function(r){return !seenSet[r.id];});
           if(fresh.length){localStorage.setItem(KEY,JSON.stringify(rows.map(function(r){return r.id;}).concat(seen).slice(0,300)));fresh.reverse().forEach(toast);}
         }
-        if(changed&&S.tab==='itinerary'&&typeof render==='function'){try{render();}catch(e){}}
+        if(changed&&S.tab==='itinerary'&&typeof render==='function'){try{render(true);}catch(e){}}
       }).catch(function(){});
   }
   poll();setInterval(poll,25000);window.addEventListener('focus',poll);
