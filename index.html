@@ -1452,54 +1452,75 @@ const ROSTER_BY_EMAIL={}; const ROSTER_NAMES=[];
 Object.keys(CREW_ROSTER).forEach(cr=>CREW_ROSTER[cr].forEach(p=>{ if(p.e)ROSTER_BY_EMAIL[p.e.toLowerCase()]=p.n; ROSTER_NAMES.push(p.n); }));
 function rosterName(v){ if(!v)return ""; const s=String(v).trim(); const m=ROSTER_BY_EMAIL[s.toLowerCase()]; if(m)return m; const hit=ROSTER_NAMES.find(n=>n.toLowerCase()===s.toLowerCase()); return hit||s; }
 function crewPeople(team){ const arr=CREW_ROSTER[team]; return arr?arr.map(p=>p.n).join(", "):""; }
+const PERSON_TO_CREW={}; Object.keys(CREW_ROSTER).forEach(cr=>CREW_ROSTER[cr].forEach(p=>{ PERSON_TO_CREW[p.n.toLowerCase()]=cr; }));
+// Resolve any created_by (email / display name / variant) to ONE canonical person name.
+function canonName(v){ if(!v)return ""; const s=String(v).trim(); if(!s||/^field hub$/i.test(s))return ""; const low=s.toLowerCase();
+  if(ROSTER_BY_EMAIL[low])return ROSTER_BY_EMAIL[low];
+  let hit=ROSTER_NAMES.find(n=>n.toLowerCase()===low); if(hit)return hit;
+  hit=ROSTER_NAMES.find(n=>low.indexOf(n.toLowerCase())>=0); if(hit)return hit;            // "Leonardo Torres Trujillo" → "Leonardo Torres"
+  const tk=low.replace(/[^a-z\s]/g," ").split(/\s+/).filter(Boolean);
+  hit=ROSTER_NAMES.find(n=>{const nt=n.toLowerCase().split(/\s+/);return tk.length&&nt[0]===tk[0]&&nt[nt.length-1]===tk[tk.length-1];}); if(hit)return hit;
+  return s.replace(/\s*[-–].*$/,"").trim();                                                  // "Douglas Gomes - Holi Solar" → "Douglas Gomes"
+}
+// Resolve a record to ONE canonical crew (folds person-names that landed in the team field).
+function canonCrew(e){ const t=((e&&e.team)||"").trim();
+  if(CREW_ROSTER[t])return t;
+  if(t&&PERSON_TO_CREW[t.toLowerCase()])return PERSON_TO_CREW[t.toLowerCase()];
+  if(t){ const cn=canonName(t); if(cn&&PERSON_TO_CREW[cn.toLowerCase()])return PERSON_TO_CREW[cn.toLowerCase()]; }
+  const cb=canonName(e&&e.created_by); if(cb&&PERSON_TO_CREW[cb.toLowerCase()])return PERSON_TO_CREW[cb.toLowerCase()];
+  return t||"";
+}
 function crewRecordsHTML(){
   const es=S.lang==="es", R=S.crewRec, list=R.list||[];
-  const noUser=es?"Sin usuario":"No user";
-  const crewOf=(e)=>e.team||(es?"Sin cuadrilla":"Unassigned");
-  const userOf=(e)=>{ const cb=(e.created_by||"").trim(); if(cb&&cb.toLowerCase()!=="field hub") return rosterName(cb); return crewPeople(crewOf(e))||noUser; };
+  const crewOf=(e)=>canonCrew(e)||(es?"Otra":"Other");
+  const personOf=(e)=>canonName(e&&e.created_by); // "" when unknown
   const crews=[...new Set(list.map(crewOf))].sort((a,b)=>a.localeCompare(b));
-  const users=[...new Set(list.map(userOf))].sort((a,b)=>a.localeCompare(b));
+  const people=[...new Set(list.map(personOf).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
   const q=(R.q||"").trim().toLowerCase();
   const filtered=list.filter(e=>{
     if(R.crew!=="all"&&crewOf(e)!==R.crew) return false;
-    if(R.user!=="all"&&userOf(e)!==R.user) return false;
+    if(R.user!=="all"&&personOf(e)!==R.user) return false;
     if(q){ const hay=[e.dl_number,e.customer,e.team,e.status,e.note,e.created_by].filter(Boolean).join(" ").toLowerCase(); if(hay.indexOf(q)<0) return false; }
     return true;
   });
-  const stamp=(iso)=>{ if(!iso)return ""; const d=new Date(iso); return d.toLocaleString(es?"es":"en-US",{year:"numeric",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}); };
-  const dl=(s)=>String(s||"").replace(/[^0-9]/g,"");
-  const zurl=(e)=>"https://crm.zoho.com/crm/org666151142/tab/Potentials/search?searchword="+encodeURIComponent(e.dl_number||e.customer||"");
   const dealByDL={}; (S.proj.list||[]).forEach(p=>{ if(p.num) dealByDL[String(p.num).toUpperCase().replace(/\s+/g,"")]=p.id; });
   const zohoFor=(e)=>{ const k=String(e.dl_number||"").toUpperCase().replace(/\s+/g,""); const id=dealByDL[k]||dealByDL["DL"+k.replace(/^DL/,"")]; return id?("https://crm.zoho.com/crm/org666151142/tab/Potentials/"+id):("https://crm.zoho.com/crm/org666151142/search?searchword="+encodeURIComponent(e.dl_number||e.customer||"")); };
-  const head=`<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:6px">
+  // Date grouping (Today / Yesterday / date) for an at-a-glance log.
+  const dayKey=(iso)=>{ const d=new Date(iso); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+  const todayK=dayKey(new Date()), yK=dayKey(new Date(Date.now()-864e5));
+  const dayLabel=(k)=>{ if(k===todayK)return es?"Hoy":"Today"; if(k===yK)return es?"Ayer":"Yesterday"; return new Date(k+"T12:00:00").toLocaleDateString(es?"es":"en-US",{weekday:"short",month:"short",day:"numeric"}); };
+  const timeOnly=(iso)=>iso?new Date(iso).toLocaleTimeString(es?"es":"en-US",{hour:"numeric",minute:"2-digit"}):"";
+  const head=`<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:4px">
     <div><div style="font-weight:900;font-size:22px">📋 ${es?"Registros de Cuadrilla":"Crew Records"}</div>
-      <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Historial permanente — aislado por usuario y cuadrilla, con fecha y hora.":"Permanent log — isolated per user & crew, with date & time stamps."}</div></div>
+      <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Historial permanente, por fecha. Filtra por cuadrilla o persona.":"Permanent log, by date. Filter by crew or person."}</div></div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span class="pill" style="background:${R.status==="live"?"var(--jc-DL)":"var(--wh-grey)"}">${R.status==="live"?(filtered.length+" "+(es?"registros":"records")):(R.status==="loading"?(es?"Cargando…":"Loading…"):"—")}</span>
       <button class="btn3d sm" data-action="recRefresh">⟳</button></div></div>
   <div style="margin:12px 0;display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-    <input id="recSearch" class="input" style="flex:1;min-width:240px" value="${esc(R.q||"")}" placeholder="${es?"Buscar por DL, cliente, nota…":"Search by DL, customer, note…"}"/></div>
-  <div style="font-size:10px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">👷 ${es?"Cuadrilla":"Crew"}</div>
-  <div class="scroll" style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:12px">
+    <input id="recSearch" class="input" style="flex:1;min-width:200px" value="${esc(R.q||"")}" placeholder="${es?"Buscar DL, cliente, nota…":"Search DL, customer, note…"}"/>
+    <select id="recUserSel" class="input" style="max-width:230px" title="${es?'Filtrar por persona':'Filter by person'}">
+      <option value="all" ${R.user==="all"?"selected":""}>👤 ${es?"Todas las personas":"All people"}</option>
+      ${people.map(p=>`<option value="${esc(p)}" ${R.user===p?"selected":""}>${esc(p)}</option>`).join("")}
+    </select></div>
+  <div class="scroll" style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:6px">
     <button class="btn3d ${R.crew==="all"?"":"ghost"} sm" data-action="recCrew" data-id="all">${es?"Todas":"All crews"} ${list.length}</button>
-    ${crews.map(c=>{const col=teamColor(c);const n=list.filter(e=>crewOf(e)===c).length;const on=R.crew===c;return `<button class="btn3d ${on?"":"ghost"} sm" data-action="recCrew" data-id="${esc(c)}" style="${on?("background:"+col+";color:"+textOn(col)):("border:1.5px solid "+col)}">${esc(c)} ${n}</button>`;}).join("")}</div>
-  <div style="font-size:10px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">👤 ${es?"Usuario":"User"}</div>
-  <div class="scroll" style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px">
-    <button class="btn3d ${R.user==="all"?"":"ghost"} sm" data-action="recUser" data-id="all">${es?"Todos":"All users"} ${list.length}</button>
-    ${users.map(u=>{const n=list.filter(e=>userOf(e)===u).length;const on=R.user===u;return `<button class="btn3d ${on?"":"ghost"} sm" data-action="recUser" data-id="${esc(u)}" style="${on?"background:var(--wh-blue)":""}">${esc(u)} ${n}</button>`;}).join("")}</div>`;
+    ${crews.map(c=>{const col=teamColor(c);const n=list.filter(e=>crewOf(e)===c).length;const on=R.crew===c;return `<button class="btn3d ${on?"":"ghost"} sm" data-action="recCrew" data-id="${esc(c)}" style="${on?("background:"+col+";color:"+textOn(col)):("border:1.5px solid "+col)}">${esc(c)} ${n}</button>`;}).join("")}</div>`;
   let body;
   if(R.status==="loading") body=`<div style="text-align:center;padding:40px;color:var(--text-dim)">⟳ ${es?"Cargando registros…":"Loading records…"}</div>`;
   else if(R.status==="error") body=`<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudieron cargar los registros.":"Couldn't load records."}</div>`;
   else if(!filtered.length) body=`<div style="text-align:center;padding:40px;color:var(--text-dim)">${es?"Sin registros":"No records"}.</div>`;
-  else body=`<div style="display:flex;flex-direction:column;gap:9px">${filtered.map(e=>{const c=crewRecColor(e.status);const who=[e.dl_number,e.customer].filter(Boolean).join(" ")||e.job_id||"Job";const note=e.note?String(e.note).trim():"";return `<div class="card" style="padding:13px 15px;border-left:5px solid ${c}">
-    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap">
-      <span style="font-weight:800;font-size:14.5px;color:${c}">${esc(e.status||"")}</span>
-      <span style="font-size:12px;color:var(--text-dim)">🕒 ${esc(stamp(e.created_at))}</span></div>
-    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-top:3px">
-      <span style="font-weight:700;font-size:13.5px">${esc(who)}</span>
-      <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="pill" style="background:var(--bg-2);border:1px solid var(--line);color:var(--text);font-size:10px">👤 ${esc(userOf(e))}</span><span class="pill" style="background:${teamColor(e.team||"")};color:${textOn(teamColor(e.team||""))};font-size:10px">👷 ${esc(crewOf(e))}</span></span></div>
-    ${note?`<div style="font-size:13px;color:var(--text);margin-top:8px;background:var(--bg-2);border:1px solid var(--line);border-left:3px solid ${c};border-radius:9px;padding:8px 11px;white-space:pre-wrap;word-break:break-word;line-height:1.45">📝 ${esc(note)}</div>`:""}
-    <div style="margin-top:9px"><a class="btn3d blue sm" href="${zohoFor(e)}" target="_blank" rel="noopener">🔗 ${es?"Abrir en Zoho":"Open in Zoho"}</a></div></div>`;}).join("")}</div>`;
+  else {
+    const groups=[], gmap={};
+    filtered.forEach(e=>{ const k=dayKey(e.created_at); if(!gmap[k]){gmap[k]=[];groups.push(k);} gmap[k].push(e); });
+    const card=(e)=>{ const c=crewRecColor(e.status); const who=[e.dl_number,e.customer].filter(Boolean).join(" ")||e.job_id||"Job"; const note=e.note?String(e.note).trim():""; const person=personOf(e); const crew=crewOf(e); const col=teamColor(e.team||crew||"");
+      return `<div class="card" style="padding:11px 13px;border-left:4px solid ${c}">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline"><span style="font-weight:800;font-size:14px;color:${c}">${esc(e.status||"")}</span><span style="font-size:11.5px;color:var(--text-dim);flex-shrink:0">${esc(timeOnly(e.created_at))}</span></div>
+        <div style="font-weight:700;font-size:13.5px;margin-top:2px">${esc(who)}</div>
+        <div style="font-size:11.5px;color:var(--text-dim);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span style="display:inline-flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:50%;background:${col};display:inline-block"></span>${esc(crew)}</span>${person?`<span>· 👤 ${esc(person)}</span>`:""}</div>
+        ${note?`<div style="font-size:12.5px;color:var(--text);margin-top:7px;background:var(--bg-2);border:1px solid var(--line);border-left:3px solid ${c};border-radius:8px;padding:7px 10px;white-space:pre-wrap;word-break:break-word;line-height:1.45">📝 ${esc(note)}</div>`:""}
+        <div style="margin-top:8px"><a class="btn3d blue sm" href="${zohoFor(e)}" target="_blank" rel="noopener">🔗 ${es?"Abrir en Zoho":"Open in Zoho"}</a></div></div>`; };
+    body=groups.map(k=>`<div style="margin:16px 0 8px;display:flex;align-items:center;gap:10px"><span style="font-weight:900;font-size:14px">${esc(dayLabel(k))}</span><span class="pill" style="background:var(--bg-2);border:1px solid var(--line);color:var(--text-dim);font-size:10px">${gmap[k].length}</span><div style="flex:1;height:1px;background:var(--line)"></div></div><div style="display:flex;flex-direction:column;gap:8px">${gmap[k].map(card).join("")}</div>`).join("");
+  }
   return `<div class="fade">${head}${body}</div>`;
 }
 function siteCaptureHTML(){
@@ -1803,6 +1824,7 @@ document.addEventListener("input",function(e){
   else if(e.target.hasAttribute&&e.target.hasAttribute("data-nf")){ S.sc.nf[e.target.getAttribute("data-nf")]=e.target.value; S.sc.created=null; render(); }
 });
 document.addEventListener("change",function(e){
+  if(e.target.id==="recUserSel"){ S.crewRec.user=e.target.value; render(); return; }
   if(e.target.id==="wxCity"){ S.wx.cityIdx=Number(e.target.value); S.wx.current=null; S.wx.days=[]; S.wx.live=false; loadWeather(); return; }
   if(e.target.id==="scType"){ S.sc.nfType=e.target.value; render(); return; }
   if(e.target.id==="scFile"&&e.target.files.length){
