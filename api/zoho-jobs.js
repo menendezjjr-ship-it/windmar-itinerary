@@ -138,6 +138,7 @@ export function mapInstall(r, todayISO) {
     crew: crew.id,
     crewLabel: crew.label,
     date,
+    days: r.Number_of_Days_Needed || 1, // multi-day jobs fill every day they span
     window: "All day",
     hhmm: "00:00",
     status,
