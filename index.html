@@ -575,7 +575,10 @@ function opsCalHTML(){
   const inView=(r)=>{ if(!r.startDate)return false; const d=new Date(r.startDate+"T12:00:00"); if(c.view==="week"||c.view==="grid")return d>=ws&&d<calAddDays(ws,7); return d.getMonth()+1===c.m&&d.getFullYear()===c.y; };
   const scoped=c.records.filter(r=>inView(r)&&(!c.teamFilter.length||c.teamFilter.indexOf(r.team)>=0));
   const installCount=scoped.filter(r=>r.type==="install").length, serviceCount=scoped.filter(r=>r.type==="service").length;
-  const visible=scoped.filter(r=>c.typeFilter==="all"||r.type===c.typeFilter);
+  const typed=scoped.filter(r=>c.typeFilter==="all"||r.type===c.typeFilter);
+  // De-dupe: same DL marked as BOTH install and service on the same day → keep install, drop the service copy.
+  const _instKeys=new Set(typed.filter(r=>r.type==="install"&&r.dlNumber&&r.startDate).map(r=>r.dlNumber+"|"+r.startDate));
+  const visible=typed.filter(r=>!(r.type==="service"&&r.dlNumber&&_instKeys.has(r.dlNumber+"|"+r.startDate)));
   const tpm={}; c.records.filter(r=>inView(r)&&(c.typeFilter==="all"||r.type===c.typeFilter)).forEach(r=>{tpm[r.team]=(tpm[r.team]||0)+1;});
   const teamsPresent=Object.keys(tpm).map(k=>[k,tpm[k]]).sort((a,b)=>b[1]-a[1]);
   const byDate={}; visible.forEach(r=>{ calSpan(r).forEach(isoD=>{ const dd=new Date(isoD+"T12:00:00"); if(dd.getMonth()+1===c.m&&dd.getFullYear()===c.y)(byDate[dd.getDate()]=byDate[dd.getDate()]||[]).push(r); }); });
