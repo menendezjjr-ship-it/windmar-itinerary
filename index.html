@@ -488,6 +488,32 @@ function calAddDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
 function calStartOfWeek(d){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());x.setDate(x.getDate()-x.getDay());return x;}
 function calHot(p){return /very high|high|urgent/i.test(p||"");}
 const calTypeBadge=(type)=>"display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:800;letter-spacing:.04em;padding:2px 7px;border-radius:5px;white-space:nowrap;"+(type==="service"?"background:rgba(248,155,36,.15);color:var(--wh-orange);border:1px solid rgba(248,155,36,.4);":"background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.4);");
+// Same DL can be entered as BOTH an install and a service on the same day (the
+// coordinator double-marks). Collapse to ONE per DL+date: keep the actionable one
+// (a scheduled job over an already-"Installed" one; else prefer service), and carry
+// the install's Plans/BOM/recordId onto the survivor so nothing is lost.
+function calPickBetter(a,b){
+  const aDone=a.cat==="completed", bDone=b.cat==="completed";
+  if(aDone!==bDone) return aDone?b:a;              // prefer not-done
+  if(a.type!==b.type) return a.type==="service"?a:b; // else prefer service
+  return a;
+}
+function dedupCalRecs(recs){
+  const byKey={}, order=[];
+  recs.forEach(r=>{
+    const dl=String(r.dlNumber||"").toUpperCase().trim();
+    if(!dl){ order.push(r); return; }
+    const key=dl+"|"+(r.startDate||"");
+    const cur=byKey[key];
+    if(!cur){ byKey[key]=r; order.push(r); return; }
+    const win=calPickBetter(cur,r), lose=win===cur?r:cur;
+    if(!win.plan&&lose.plan) win.plan=lose.plan;          // keep install docs
+    if(!win.bom&&lose.bom) win.bom=lose.bom;
+    if(!win.recordId&&lose.recordId) win.recordId=lose.recordId;
+    if(win!==cur){ const i=order.indexOf(cur); if(i>=0) order[i]=win; byKey[key]=win; }
+  });
+  return order;
+}
 function calRec(j){ return { type:j.kind, id:j.id, recordId:j.recordId||"", plan:j.plan||null, bom:j.bom||null, team:j.crewLabel||"Unassigned", startDate:j.date, daysNeeded:j.days||1, startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", phone:j.phone||"", cat:jobCat(j) }; }
 // Multi-day jobs: ISO dates a record occupies (start day + continuation days).
 function calSpan(r){ if(!r.startDate)return []; const n=Math.max(1,Math.min(21,parseInt(r.daysNeeded,10)||1)); const base=new Date(r.startDate+"T12:00:00"); const out=[]; for(let i=0;i<n;i++){const x=new Date(base);x.setDate(base.getDate()+i);out.push(calYMD(x));} return out; }
@@ -499,7 +525,7 @@ async function loadOpsCal(silent){
   try{
     const r=await fetch("/api/zoho-jobs?from="+from+"&to="+to,{cache:"no-store"});
     const j=await r.json();
-    if(j&&j.ok&&Array.isArray(j.jobs)){ S.cal.records=j.jobs.map(calRec); S.cal.status="live"; }
+    if(j&&j.ok&&Array.isArray(j.jobs)){ S.cal.records=dedupCalRecs(j.jobs.map(calRec)); S.cal.status="live"; }
     else if(j&&j.configured){ S.cal.records=[]; S.cal.status="error"; S.cal.err=j.error||"error"; }
     else { S.cal.records=[]; S.cal.status="unconfigured"; }
   }catch(e){ S.cal.records=[]; S.cal.status="error"; S.cal.err=String(e); }
