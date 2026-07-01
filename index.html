@@ -917,7 +917,7 @@ function attentionHTML(){
       ${col("⏳ "+(es?'Estancados >3 días':'Stuck >3 days'),stuck.length,"#DC2626",stuckCards)}
       ${col("🔍 "+(es?'Inspecciones':'Inspections'),inspNeed.length,"#0EA5E9",inspCards)}
       ${col("🕒 "+(es?'ETAs en camino (hoy)':'ETAs en route (today)'),etaJobs.length,"#06b6d4",etaCards)}
-      ${col("📐 "+(es?'Estimador / Plan Analyzer':'Estimator / Plan Analyzer'),planJobs.length,"#8B5CF6",planCards)}
+      ${col("📐 "+(es?'Actualizaciones del Estimador':'Project Estimator Updates'),planJobs.length,"#8B5CF6",planCards)}
     </div></div>`;
 }
 function notifPanelHTML(){
@@ -1465,7 +1465,7 @@ async function loadCrewRecords(){
   S.crewRec.status="loading"; render();
   try{
     const SB="https://lmlixmzmzpzgeggvywwb.supabase.co", K="sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
-    const r=await fetch(SB+"/rest/v1/job_status_events?source=eq.field-hub&order=created_at.desc&limit=1000",{headers:{apikey:K,Authorization:"Bearer "+K},cache:"no-store"});
+    const r=await fetch(SB+"/rest/v1/job_status_events?source=in.(field-hub,plan-analyzer)&order=created_at.desc&limit=1000",{headers:{apikey:K,Authorization:"Bearer "+K},cache:"no-store"});
     const rows=await r.json();
     S.crewRec.status="live"; S.crewRec.list=Array.isArray(rows)?rows:[];
   }catch(e){ S.crewRec.status="error"; S.crewRec.list=[]; }
@@ -1497,7 +1497,7 @@ function canonName(v){ if(!v)return ""; const s=String(v).trim(); if(!s||/^field
   return s.replace(/\s*[-–].*$/,"").trim();                                                  // "Douglas Gomes - Holi Solar" → "Douglas Gomes"
 }
 // Resolve a record to ONE canonical crew (folds person-names that landed in the team field).
-function canonCrew(e){ const t=((e&&e.team)||"").trim();
+function canonCrew(e){ if(((e&&e.source)||"")==="plan-analyzer") return S.lang==="es"?"📐 Estimador de Proyecto":"📐 Project Estimator Updates"; const t=((e&&e.team)||"").trim();
   if(CREW_ROSTER[t])return t;
   if(t&&PERSON_TO_CREW[t.toLowerCase()])return PERSON_TO_CREW[t.toLowerCase()];
   if(t){ const cn=canonName(t); if(cn&&PERSON_TO_CREW[cn.toLowerCase()])return PERSON_TO_CREW[cn.toLowerCase()]; }
