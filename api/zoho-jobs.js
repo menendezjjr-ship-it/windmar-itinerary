@@ -94,9 +94,23 @@ function splitDT(dt) {
 
 // Normalize a Zoho crew/team/tech label into a stable {id,label}.
 //  "In-House #2" and "In House #2" collapse to the same crew.
+// Zoho mixes OLD + NEW labels for the SAME crew (In House #2 = Elite Crew #2,
+// T2 - Leonardo Torres = Crew #1S, Holi = Crew H, …). Collapse to one canonical
+// crew so each shows once on the calendar with a single color.
+function canonTeam(raw) {
+  const s = (raw || "Unassigned").trim();
+  const n = s.toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
+  if (/elite crew #?3|in ?house #?3|william sierra|luis vargas/.test(n)) return "Elite Crew #3";
+  if (/elite crew #?2|in ?house #?2|tailor herrera|maykel pimentel/.test(n)) return "Elite Crew #2";
+  if (/crew #?1s|leonardo torres/.test(n)) return "Crew #1S";
+  if (/crew #?2s|david radke/.test(n)) return "Crew #2S";
+  if (/crew #?3s|luis morales/.test(n)) return "Crew #3S";
+  if (/crew h|holi/.test(n)) return "Crew H";
+  if (/roofing/.test(n)) return "Windmar Roofing";
+  return s.replace(/^t\d+\s*[-–]\s*/i, "").trim() || "Unassigned"; // strip stray "T2 - " tech prefix
+}
 function normCrew(raw) {
-  let label = (raw || "Unassigned").trim();
-  label = label.replace(/in[-\s]?house/i, "In House");
+  const label = canonTeam(raw);
   const id = "z-" + label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
   return { id, label };
 }
