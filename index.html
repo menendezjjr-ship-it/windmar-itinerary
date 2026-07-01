@@ -374,7 +374,7 @@ export async function POST(req){
    APP STATE
    ============================================================================ */
 const S={
-  lang:"en", theme:"dark", tab:"itinerary", dayOffset:0, selectedJob:null, itinView:"board", boardFilter:"all",
+  lang:"en", theme:"dark", tab:(function(){try{return localStorage.getItem("wm_itin_tab")||"itinerary";}catch(e){return "itinerary";}})(), dayOffset:0, selectedJob:null, itinView:"board", boardFilter:"all",
   live:{status:"idle",ok:false,jobs:[],updated:null,err:""},
   proj:{status:"idle",ok:false,list:[],updated:null,err:"",selected:null,q:"",stageFilter:"all",alerts:[],notify:false,notes:{id:null,status:"idle",list:[]},noteFrom:null,atts:{id:null,status:"idle",groups:[]}},
   notif:{items:[],unread:0,open:false}, attnOpen:true,
@@ -1725,7 +1725,10 @@ function initCrewMap(){
   if(pts.length>1){ try{ m.fitBounds(pts,{padding:[40,40]}); }catch(e){} }
   setTimeout(function(){ try{m.invalidateSize();}catch(e){} },140);
 }
-function render(noAnim){
+// Crash guard — a fatal render error shows a recovery card + Reload instead of a blank page.
+function wmCrash(){ if(document.getElementById("__wmc"))return; try{ var d=document.createElement("div"); d.id="__wmc"; d.style.cssText="position:fixed;inset:0;z-index:99999;background:#0a1024;color:#f1f5f9;display:flex;align-items:center;justify-content:center;padding:24px;font-family:system-ui,sans-serif"; d.innerHTML='<div style="max-width:420px;text-align:center;background:#122042;border:1px solid #1D429B30;border-radius:16px;padding:28px"><div style="font-size:40px;margin-bottom:8px">🔧</div><div style="font-size:18px;font-weight:800;margin-bottom:8px">Something hiccuped</div><div style="font-size:13.5px;color:#A6C3E6;margin-bottom:20px;line-height:1.5">The app hit a snag but your work was saved. Tap reload to pick up where you left off.</div><button onclick="location.reload()" style="padding:12px 22px;border-radius:10px;border:none;cursor:pointer;background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff;font-weight:800;font-size:14px">Reload</button></div>'; document.body.appendChild(d);}catch(e){} }
+function render(noAnim){ try{ return _render(noAnim); }catch(_e){ try{console.error(_e);}catch(__){} wmCrash(); } }
+function _render(noAnim){
   document.documentElement.setAttribute("data-theme",S.theme);
   const ae=document.activeElement, aeId=ae&&ae.id, caret=ae&&ae.selectionStart;
   const active=TABS.find(x=>x.id===S.tab);
@@ -1768,7 +1771,7 @@ document.addEventListener("click",e=>{
     case "notifOpen": S.notif.open=false; S.tab="projects"; S.proj.selected=id; S.proj.noteFrom=null; S.proj.stageFilter="all"; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
-    case "setTab": S.tab=id; if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); render(); break;
+    case "setTab": S.tab=id; try{localStorage.setItem("wm_itin_tab",id);}catch(e){} if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); render(); break;
     case "jobsRefresh": loadJobs(); break;
     case "projRefresh": loadProjects(false,true); break;
     case "selectProject": S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
