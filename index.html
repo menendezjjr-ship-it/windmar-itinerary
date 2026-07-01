@@ -74,8 +74,10 @@
   @keyframes fade{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
   .weatherAlert{background:var(--warn-bg);border:2px solid var(--warn);border-radius:12px;}
   table{border-collapse:collapse;}
-  .logoPlate{background:#fff;border-radius:12px;padding:6px 12px;display:inline-flex;align-items:center;box-shadow:0 4px 0 var(--wh-blue-dark);}
-  .logoPlate img{display:block;height:34px;}
+  .logoPlate{background:#fff;border-radius:12px;padding:6px 12px;display:inline-flex;align-items:center;box-shadow:0 4px 0 var(--wh-blue-dark);transition:transform .2s ease,box-shadow .2s ease;}
+  .logoPlate:hover{transform:scale(1.07) translateY(-1px);box-shadow:0 6px 0 var(--wh-blue-dark);}
+  .logoPlate img{display:block;height:34px;animation:hdrFloat 4.5s ease-in-out infinite;transform-origin:center;}
+  @keyframes hdrFloat{0%,100%{transform:translateY(0) rotate(-1.5deg) scale(1)}50%{transform:translateY(-3px) rotate(1.5deg) scale(1.04)}}
   /* radar */
   .radar{position:relative;height:260px;border-radius:16px;overflow:hidden;background:
     radial-gradient(circle at 50% 55%, #0c2a1e 0%, #0a1a3a 70%);border:1px solid var(--line);}
