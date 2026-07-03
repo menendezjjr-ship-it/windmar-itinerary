@@ -6,18 +6,23 @@ export default async function handler(req, res) {
   const q = String(req.query.q || "").trim();
   if (!q) return res.status(400).json({ ok: false, error: "q required" });
   const withFL = (s) => (/\bfl\b|florida/i.test(s) ? s : s + ", Florida");
-  // Try the full address first, then a looser version (drop the leading house number).
+  const inFL = (la, lo) => la >= 24.3 && la <= 31.1 && lo >= -87.7 && lo <= -79.8; // reject wrong-state matches
+  // Try full address → drop the house number → the ZIP (if present). ZIP resolves the
+  // right area even when a new-development street isn't in the map data yet.
   const tries = [withFL(q)];
   const noNum = q.replace(/^\s*\d+\s+/, "").trim();
   if (noNum && noNum !== q) tries.push(withFL(noNum));
+  const zip = (q.match(/\b(3[0-4]\d{3})\b/) || [])[1]; // FL ZIPs 32xxx–34xxx
+  if (zip) tries.push(zip + ", Florida");
   try {
     for (const query of tries) {
       const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&addressdetails=0&q=" + encodeURIComponent(query);
       const r = await fetch(url, { headers: { "User-Agent": "WindMar-Itinerary/1.0 (ops@windmarhome.com)", "Accept": "application/json", "Accept-Language": "en" } });
       if (!r.ok) continue;
       const j = await r.json();
-      if (Array.isArray(j) && j[0] && isFinite(+j[0].lat) && isFinite(+j[0].lon)) {
-        return res.status(200).json({ ok: true, lat: +j[0].lat, lon: +j[0].lon, label: j[0].display_name || q });
+      if (Array.isArray(j) && j[0]) {
+        const la = +j[0].lat, lo = +j[0].lon;
+        if (isFinite(la) && isFinite(lo) && inFL(la, lo)) return res.status(200).json({ ok: true, lat: la, lon: lo, label: j[0].display_name || query });
       }
     }
     return res.status(200).json({ ok: false, error: "no match" });

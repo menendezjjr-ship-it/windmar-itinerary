@@ -182,7 +182,7 @@ const I18N = {
   cr_active:"Active crews", cr_contacts:"Contacts", cr_enterJob:"Pick a job to route to",
   cr_closest:"Closest available crew", cr_away:"away", cr_eta:"ETA", cr_min:"min",
   cr_lastPing:"last ping", cr_geocoded:"GEOCODED", cr_city:"CITY-LEVEL", cr_approx:"APPROX",
-  cr_onJob:"On job", cr_avail:"Available", cr_enroute:"En route", cr_idle:"Idle", cr_target:"Target address or FL city…", cr_noGeo:"couldn’t geocode — try a Florida city name", cr_supervisors:"Supervisors",
+  cr_onJob:"On job", cr_avail:"Available", cr_enroute:"En route", cr_idle:"Idle", cr_target:"Target address or FL city…", cr_noGeo:"couldn’t find it — add the city or ZIP code (e.g. St Cloud, or 34771)", cr_supervisors:"Supervisors",
   // Weather (mirrors live app "Weather & Safety")
   wx_title:"Weather & Safety", wx_sub:"Real-time conditions and safety protocols for Florida job sites",
   wx_radar:"Rain Forecast — Florida (press ▶ to see upcoming days)", wx_radarNote:"RainViewer tiles render here in production (NEXRAD composite, 10-min loop).",
@@ -230,7 +230,7 @@ const I18N = {
   cr_active:"Cuadrillas activas", cr_contacts:"Contactos", cr_enterJob:"Elige un trabajo a rutear",
   cr_closest:"Cuadrilla disponible más cercana", cr_away:"de distancia", cr_eta:"Tiempo est.", cr_min:"min",
   cr_lastPing:"último ping", cr_geocoded:"GEOCODED", cr_city:"CITY-LEVEL", cr_approx:"APPROX",
-  cr_onJob:"En trabajo", cr_avail:"Disponible", cr_enroute:"En camino", cr_idle:"Inactivo", cr_target:"Dirección o ciudad de FL…", cr_noGeo:"no se pudo geocodificar — prueba una ciudad de Florida", cr_supervisors:"Supervisores",
+  cr_onJob:"En trabajo", cr_avail:"Disponible", cr_enroute:"En camino", cr_idle:"Inactivo", cr_target:"Dirección o ciudad de FL…", cr_noGeo:"no se encontró — agrega la ciudad o el código postal (ej. St Cloud, o 34771)", cr_supervisors:"Supervisores",
   wx_title:"Clima y Seguridad", wx_sub:"Condiciones en tiempo real y protocolos de seguridad para sitios en Florida",
   wx_radar:"Pronóstico de Lluvia — Florida (presiona ▶ para ver los próximos días)", wx_radarNote:"Las capas de RainViewer se muestran aquí en producción (compuesto NEXRAD, ciclo de 10 min).",
   wx_7day:"Pronóstico de 7 Días", wx_safety:"Consejos de Seguridad", wx_alerts:"Alertas activas hoy",
@@ -293,7 +293,7 @@ const SUPERVISORS=[
   {name:"Jose Baldaguez",role:"Warehouse Manager",initials:"JB",color:"#06B6D4",phone:"863-555-2004"},
   {name:"Joalismar Willim",role:"Safety Representative",initials:"JW",color:"#A855F7",phone:"863-555-2005"},
 ];
-const FL_CITIES={"orlando":{lat:28.5383,lon:-81.3792},"kissimmee":{lat:28.2920,lon:-81.4076},"lakeland":{lat:28.0395,lon:-81.9498},"winter haven":{lat:28.0222,lon:-81.7329},"tampa":{lat:27.9506,lon:-82.4572},"okeechobee":{lat:27.2439,lon:-80.8298},"vero beach":{lat:27.6386,lon:-80.3973},"pine castle":{lat:28.4626,lon:-81.3853},"union park":{lat:28.5700,lon:-81.2700},"meadow woods":{lat:28.3800,lon:-81.4200},"lake nona":{lat:28.3700,lon:-81.2700},"sanford":{lat:28.8003,lon:-81.2731},"titusville":{lat:28.6122,lon:-80.8076},"melbourne":{lat:28.0836,lon:-80.6081},"sebring":{lat:27.4956,lon:-81.4409},"saint petersburg":{lat:27.7676,lon:-82.6403},"st petersburg":{lat:27.7676,lon:-82.6403},"ocala":{lat:29.1872,lon:-82.1401},"bartow":{lat:27.8964,lon:-81.8431}};
+const FL_CITIES={"orlando":{lat:28.5383,lon:-81.3792},"kissimmee":{lat:28.2920,lon:-81.4076},"lakeland":{lat:28.0395,lon:-81.9498},"winter haven":{lat:28.0222,lon:-81.7329},"tampa":{lat:27.9506,lon:-82.4572},"okeechobee":{lat:27.2439,lon:-80.8298},"vero beach":{lat:27.6386,lon:-80.3973},"pine castle":{lat:28.4626,lon:-81.3853},"union park":{lat:28.5700,lon:-81.2700},"meadow woods":{lat:28.3800,lon:-81.4200},"lake nona":{lat:28.3700,lon:-81.2700},"sanford":{lat:28.8003,lon:-81.2731},"titusville":{lat:28.6122,lon:-80.8076},"melbourne":{lat:28.0836,lon:-80.6081},"sebring":{lat:27.4956,lon:-81.4409},"saint petersburg":{lat:27.7676,lon:-82.6403},"st petersburg":{lat:27.7676,lon:-82.6403},"ocala":{lat:29.1872,lon:-82.1401},"bartow":{lat:27.8964,lon:-81.8431},"saint cloud":{lat:28.2489,lon:-81.2812},"st cloud":{lat:28.2489,lon:-81.2812},"kindred":{lat:28.2760,lon:-81.2140},"narcoossee":{lat:28.3000,lon:-81.1800},"harmony":{lat:28.2300,lon:-81.1450},"celebration":{lat:28.3255,lon:-81.5330},"clermont":{lat:28.5494,lon:-81.7729},"davenport":{lat:28.1614,lon:-81.6018},"haines city":{lat:28.1147,lon:-81.6206},"poinciana":{lat:28.1236,lon:-81.4915},"four corners":{lat:28.3200,lon:-81.6300},"deltona":{lat:28.9005,lon:-81.2637},"apopka":{lat:28.6934,lon:-81.5322},"winter garden":{lat:28.5653,lon:-81.5862},"ocoee":{lat:28.5692,lon:-81.5440},"clarcona":{lat:28.6200,lon:-81.4900}};
 
 /* ---- jobs use real WindMar codes (DL/RDL/RL/S/MSP) ---- */
 let JOBS=[
