@@ -623,14 +623,24 @@ function opsCalHTML(){
   const byTeam={}; visible.forEach(r=>{(byTeam[r.team]=byTeam[r.team]||[]).push(r);});
   const listKeys=Object.keys(byTeam).sort((a,b)=>byTeam[b].length-byTeam[a].length);
   const listView=`<div style="display:flex;flex-direction:column;gap:12px">${listKeys.length?listKeys.map(team=>{const list=byTeam[team].sort((a,b)=>(a.startDate||"").localeCompare(b.startDate||"")||(a.startTime||"").localeCompare(b.startTime||""));const col=teamColor(team);return `<div class="card" style="border-radius:12px;overflow:hidden"><div style="padding:10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;background:${col}18"><span style="width:12px;height:12px;border-radius:3px;background:${col}"></span><span style="font-weight:700;font-size:14px">${esc(team)}</span><span style="color:var(--text-dim);font-size:12px;margin-left:auto">${list.length} ${list.length!==1?(S.lang==='es'?'trabajos':'jobs'):(S.lang==='es'?'trabajo':'job')}</span></div><div>${list.map(calRow).join("")}</div></div>`;}).join(""):`<div style="text-align:center;padding:40px;color:var(--text-dim)">${S.lang==='es'?'Sin trabajos programados':'No jobs scheduled'}</div>`}</div>`;
-  // Job Map view — pins for this week's jobs (geocoded, cached). Data staged for the render hook.
+  // Job Map view — pins for the week's jobs (or a single day), geocoded + cached. Staged for the render hook.
   const es2=S.lang==="es";
-  c._mapItems=visible.map(r=>({address:r.address,dlNumber:r.dlNumber,customerName:r.customerName,team:r.team,type:r.type,id:r.id,startDate:r.startDate}));
-  c._mapKey="map|"+(c.weekStartISO||"")+"|"+c.typeFilter+"|"+c.teamFilter.join(",");
+  const mapSpan=c.mapSpan||"week";
+  const weekISOs=gDays.map(calYMD);
+  let mapDay=c.mapDay; if(!mapDay||weekISOs.indexOf(mapDay)<0) mapDay=weekISOs.indexOf(calYMD(today))>=0?calYMD(today):weekISOs[0];
+  const mapSource=mapSpan==="day"?visible.filter(r=>calSpan(r).indexOf(mapDay)>=0):visible;
+  c._mapItems=mapSource.map(r=>({address:r.address,dlNumber:r.dlNumber,customerName:r.customerName,team:r.team,type:r.type,id:r.id,startDate:r.startDate}));
+  c._mapKey="map|"+(c.weekStartISO||"")+"|"+mapSpan+"|"+(mapSpan==="day"?mapDay:"")+"|"+c.typeFilter+"|"+c.teamFilter.join(",");
   const mpm=c.pinState||{status:"idle"};
-  const mapView = mpm.status==="geocoding"
+  const spanToggle=`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+    <div style="display:flex;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:2px">${[["week","Week","Semana"],["day","Day","Día"]].map(v=>{const on=mapSpan===v[0];return `<button data-action="calMapSpan" data-id="${v[0]}" style="padding:6px 13px;border-radius:7px;border:none;cursor:pointer;font-size:12px;font-weight:${on?700:500};background:${on?'linear-gradient(135deg,var(--wh-blue),var(--wh-orange))':'transparent'};color:${on?'#fff':'var(--text-dim)'}">${es2?v[2]:v[1]}</button>`;}).join("")}</div>
+    ${mapSpan==="day"?`<div style="display:flex;gap:4px;flex-wrap:wrap">${gDays.map(d=>{const iso=calYMD(d);const on=iso===mapDay;const td=iso===calYMD(today);return `<button data-action="calMapDay" data-id="${iso}" style="padding:5px 9px;border-radius:8px;border:1px solid ${on?'var(--wh-orange)':'var(--line)'};cursor:pointer;font-size:11px;font-weight:${on?800:600};background:${on?'var(--wh-orange)':'var(--panel)'};color:${on?'#fff':(td?'var(--wh-orange)':'var(--text-dim)')}">${D[d.getDay()]} ${d.getDate()}</button>`;}).join("")}</div>`:""}
+  </div>`;
+  const mapScopeLbl=mapSpan==="day"?(es2?"este día":"this day"):(es2?"esta semana":"this week");
+  const mapView = spanToggle + (mpm.status==="geocoding"
     ? `<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">🗺 ${es2?"Ubicando trabajos":"Locating jobs"} ${mpm.done||0}/${mpm.total||0}…<div style="font-size:11px;margin-top:6px">${es2?"(en caché — la próxima vez es instantáneo)":"(cached — instant next time)"}</div></div>`
-    : `<div class="card" style="border-radius:12px;overflow:hidden"><div id="calPinMap" style="height:560px"></div></div><div style="font-size:11.5px;color:var(--text-dim);margin-top:6px">${(mpm.pins||[]).length} ${es2?"de":"of"} ${c._mapItems.length} ${es2?"trabajos ubicados · pin por cuadrilla · 🔧=servicio":"jobs mapped · pinned by crew · 🔧=service"}</div>`;
+    : (c._mapItems.length? `<div class="card" style="border-radius:12px;overflow:hidden"><div id="calPinMap" style="height:560px"></div></div><div style="font-size:11.5px;color:var(--text-dim);margin-top:6px">${(mpm.pins||[]).length} ${es2?"de":"of"} ${c._mapItems.length} ${es2?"trabajos ubicados ("+mapScopeLbl+") · pin por cuadrilla · 🔧=servicio":"jobs mapped ("+mapScopeLbl+") · pinned by crew · 🔧=service"}</div>`
+      : `<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">${es2?"Sin trabajos para "+mapScopeLbl:"No jobs for "+mapScopeLbl}</div>`));
   const view=c.status==="loading"?`<div style="text-align:center;padding:50px;color:var(--text-dim)">⟳ ${S.lang==='es'?'Cargando…':'Loading…'}</div>`:c.status==="error"?`<div class="card" style="padding:18px;color:var(--warn)">API error: ${esc(c.err||"")}</div>`:c.view==="month"?monthGrid:c.view==="week"?weekView:c.view==="grid"?gridView:c.view==="map"?mapView:listView;
   const navLabel=(c.view==="week"||c.view==="grid"||c.view==="map")?(M[ws.getMonth()].slice(0,3)+" "+ws.getDate()+" - "+(ws.getMonth()!==we.getMonth()?M[we.getMonth()].slice(0,3)+" ":"")+we.getDate()+", "+we.getFullYear()):(M[c.m-1]+" "+c.y);
   const dayModal=c.dayPanel!=null?calModal((function(){const recs=byDate[c.dayPanel]||[];return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><h3 style="margin:0;font-size:18px;font-weight:700">${M[c.m-1]} ${c.dayPanel}, ${c.y} <span style="color:var(--text-dim);font-weight:500;font-size:14px">· ${recs.length} ${recs.length!==1?'jobs':'job'}</span></h3><button class="btn3d grey sm" data-action="calClose">✕</button></div><div style="display:flex;flex-direction:column;gap:8px">${recs.map(calRow).join("")}</div>`;})()):"";
@@ -1746,10 +1756,15 @@ async function geocodeOne(addr){ const k=geoKey(addr); if(!k)return null; if(k i
 }
 async function geocodeInto(st, items, onTick){
   st.total=items.length; st.done=0; st.pins=[]; st.status="geocoding";
-  for(const it of items){ const g=await geocodeOne(it.address); st.done++; if(g){ st.pins.push(Object.assign({},it,{lat:g.lat,lon:g.lon})); }
-    if(st.done%6===0){ try{localStorage.setItem("wm_geo_cache",JSON.stringify(GEO_CACHE));}catch(e){} onTick&&onTick(); }
-    await new Promise(r=>setTimeout(r,130));
+  let i=0; const CC=Math.min(5, items.length||1); // small concurrent pool — cache hits are instant, misses hit Census
+  async function worker(){
+    while(i<items.length){ const it=items[i++]; const g=await geocodeOne(it.address); st.done++;
+      if(g){ st.pins.push(Object.assign({},it,{lat:g.lat,lon:g.lon})); }
+      if(st.done%8===0){ try{localStorage.setItem("wm_geo_cache",JSON.stringify(GEO_CACHE));}catch(e){} onTick&&onTick(); }
+    }
   }
+  const pool=[]; for(let w=0;w<CC;w++) pool.push(worker());
+  await Promise.all(pool);
   try{localStorage.setItem("wm_geo_cache",JSON.stringify(GEO_CACHE));}catch(e){}
   st.status="ready"; onTick&&onTick();
 }
@@ -1769,16 +1784,18 @@ function initPinMap(elId, pins, mapVar, opts){
   if(pts.length>1){ try{ m.fitBounds(pts,{padding:[36,36]}); }catch(e){} } else if(pts.length===1){ m.setView(pts[0],11); }
   setTimeout(function(){ try{m.invalidateSize();}catch(e){} },150);
 }
+// Get-Directions button for map popups — deep-links to Google Maps (native app on mobile) for the exact coords.
+function dirLink(p){ if(p==null||p.lat==null) return ""; const dest=p.lat+","+p.lon; const es=S.lang==="es";
+  return `<a href="https://www.google.com/maps/dir/?api=1&destination=${dest}" target="_blank" rel="noopener" style="display:inline-block;margin-top:7px;padding:5px 10px;border-radius:8px;background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff;font-weight:800;font-size:12px;text-decoration:none">🧭 ${es?"Cómo llegar":"Get Directions"}</a>`; }
 /* ── TAB: INSTALL MAP (all completed installs pinned) ── */
 async function loadInstallMap(){
   S.instMap.status="loading"; S.instMap.pinState={status:"idle"}; render();
   try{
-    const to=new Date(), from=new Date(Date.now()-210*864e5);
-    const f=(d)=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
-    const j=await (await fetch("/api/zoho-jobs?from="+f(from)+"&to="+f(to)+"&t="+Date.now(),{cache:"no-store"})).json();
+    const to=new Date(), f=(d)=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+    const j=await (await fetch("/api/zoho-jobs?from=2015-01-01&to="+f(to)+"&only=install&t="+Date.now(),{cache:"no-store"})).json();
     const seen={}, items=[];
-    (j.jobs||[]).filter(x=>x.kind==="install"&&x.cat==="completed"&&x.address).forEach(x=>{ const k=x.num||x.id; if(seen[k])return; seen[k]=1; items.push({address:x.address,dlNumber:x.num,customerName:x.project,team:x.crewLabel,date:x.date,id:x.id}); });
-    S.instMap.items=items.slice(0,200); S.instMap.status="live"; S.instMap.pinState={status:"geocoding",done:0,total:S.instMap.items.length,pins:[]}; render();
+    (j.jobs||[]).filter(x=>x.kind==="install"&&x.cat==="completed"&&x.address).forEach(x=>{ const k=x.num||x.id; if(seen[k])return; seen[k]=1; items.push({address:x.address,dlNumber:x.num,customerName:x.project,team:x.crewLabel,date:x.date,id:x.id,scope:x.scope}); });
+    S.instMap.items=items.slice(0,1500); S.instMap.status="live"; S.instMap.pinState={status:"geocoding",done:0,total:S.instMap.items.length,pins:[]}; render();
     geocodeInto(S.instMap.pinState, S.instMap.items, ()=>{ if(S.tab==="instmap") render(true); });
   }catch(e){ S.instMap.status="error"; render(); }
 }
@@ -1786,7 +1803,7 @@ function instMapHTML(){
   const es=S.lang==="es", M=S.instMap, pm=M.pinState||{status:"idle"};
   const head=`<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:10px">
     <div><div style="font-weight:900;font-size:22px">🗺 ${es?"Mapa de Instalaciones":"Install Map"}</div>
-      <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Instalaciones completadas (últimos ~7 meses) en un mapa en vivo.":"Completed installs (last ~7 months) on a live map."}</div></div>
+      <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Todas las instalaciones completadas en un mapa en vivo.":"Every completed install on a live map."}</div></div>
     <div style="display:flex;gap:8px;align-items:center"><span class="pill" style="background:var(--jc-DL)">${(pm.pins||[]).length} ${es?"ubicadas":"mapped"}</span><button class="btn3d sm" data-action="instMapRefresh">⟳</button></div></div>`;
   let body;
   if(M.status==="loading") body=`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">⟳ ${es?"Cargando instalaciones…":"Loading installs…"}</div>`;
@@ -1829,11 +1846,11 @@ function _render(noAnim){
       S.cal.pinState={status:"geocoding",key:S.cal._mapKey,done:0,total:(S.cal._mapItems||[]).length,pins:[]};
       setTimeout(()=>geocodeInto(S.cal.pinState,S.cal._mapItems||[],()=>{ if(S.tab==="calendar"&&S.cal.view==="map") render(true); }),0);
     } else if(pm.status==="ready"){
-      setTimeout(()=>initPinMap("calPinMap",pm.pins,"_calPinMap",{color:(p)=>p.type==="service"?"#06b6d4":teamColor(p.team),radius:7,onClick:(p)=>{S.cal.selected=p.id;render();},popup:(p)=>`<b>${esc(p.dlNumber||"")}</b> ${esc(p.customerName||"")}<br>${esc(p.address||"")}<br><span style="color:#888">${p.type==="service"?"🔧 ":""}${esc(p.team||"")}${p.startDate?" · "+esc(p.startDate):""}</span>`}),0);
+      setTimeout(()=>initPinMap("calPinMap",pm.pins,"_calPinMap",{color:(p)=>p.type==="service"?"#06b6d4":teamColor(p.team),radius:7,onClick:(p)=>{S.cal.selected=p.id;render();},popup:(p)=>`<b>${esc(p.dlNumber||"")}</b> ${esc(p.customerName||"")}<br>${esc(p.address||"")}<br><span style="color:#888">${p.type==="service"?"🔧 ":""}${esc(p.team||"")}${p.startDate?" · "+esc(p.startDate):""}</span>${dirLink(p)}`}),0);
     }
   }
   // Install Map tab
-  if(S.tab==="instmap"){ const pm=S.instMap.pinState; if(pm&&pm.status==="ready"){ setTimeout(()=>initPinMap("instPinMap",pm.pins,"_instPinMap",{showHQ:true,radius:6,color:()=>"#22c55e",popup:(p)=>`<b>${esc(p.dlNumber||"")}</b> ${esc(p.customerName||"")}<br>${esc(p.address||"")}${p.date?"<br><span style=\"color:#888\">"+esc(p.date)+"</span>":""}`}),0); } }
+  if(S.tab==="instmap"){ const pm=S.instMap.pinState; if(pm&&pm.status==="ready"){ const es=S.lang==="es"; setTimeout(()=>initPinMap("instPinMap",pm.pins,"_instPinMap",{showHQ:true,radius:6,color:()=>"#22c55e",popup:(p)=>`<b>${esc(p.dlNumber||"")}</b> ${esc(p.customerName||"")}<br>${esc(p.address||"")}${p.scope?"<br><span style=\"color:#555\">"+esc(p.scope)+"</span>":""}<br><span style="color:#888">${(es?"Instalado":"Installed")}${p.date?": "+esc(p.date):""}${p.team?" · "+esc(p.team):""}</span>${dirLink(p)}`}),0); } }
 }
 
 /* ---------- EVENTS ---------- */
@@ -1871,6 +1888,8 @@ document.addEventListener("click",e=>{
     case "calView": S.cal.view=id; if((id==="week"||id==="grid"||id==="map")&&!S.cal.weekStartISO) S.cal.weekStartISO=calYMD(calStartOfWeek(new Date())); loadOpsCal(); break;
     case "calPrev": if(S.cal.view==="week"||S.cal.view==="grid"||S.cal.view==="map"){ const w=new Date((S.cal.weekStartISO||calYMD(calStartOfWeek(new Date())))+"T00:00:00"); S.cal.weekStartISO=calYMD(calAddDays(w,-7)); } else { if(S.cal.m===1){S.cal.m=12;S.cal.y--;}else S.cal.m--; } S.cal.dayPanel=null; loadOpsCal(); break;
     case "calNext": if(S.cal.view==="week"||S.cal.view==="grid"||S.cal.view==="map"){ const w=new Date((S.cal.weekStartISO||calYMD(calStartOfWeek(new Date())))+"T00:00:00"); S.cal.weekStartISO=calYMD(calAddDays(w,7)); } else { if(S.cal.m===12){S.cal.m=1;S.cal.y++;}else S.cal.m++; } S.cal.dayPanel=null; loadOpsCal(); break;
+    case "calMapSpan": S.cal.mapSpan=id; render(); break;
+    case "calMapDay": S.cal.mapDay=id; render(); break;
     case "calType": S.cal.typeFilter=id; render(); break;
     case "calTeam": { const i=S.cal.teamFilter.indexOf(id); if(i>=0)S.cal.teamFilter.splice(i,1); else S.cal.teamFilter.push(id); render(); break; }
     case "calClearTeams": S.cal.teamFilter=[]; render(); break;

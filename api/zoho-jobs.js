@@ -220,9 +220,10 @@ export default async function handler(req, res) {
 
   try {
     const token = await getAccessToken();
+    const only = String(req.query.only || ""); // only=install → skip service tickets (Install Map's all-time pull)
     const [installs, services] = await Promise.all([
-      searchAll("Installation", `(Installation_Start_Date:between:${from},${to})`, INSTALL_FIELDS, token),
-      searchAll("Service_Ticket", `(Scheduled_Visit_1:between:${from}T00:00:00${TZ},${to}T23:59:59${TZ})`, SERVICE_FIELDS, token),
+      only === "service" ? Promise.resolve([]) : searchAll("Installation", `(Installation_Start_Date:between:${from},${to})`, INSTALL_FIELDS, token),
+      only === "install" ? Promise.resolve([]) : searchAll("Service_Ticket", `(Scheduled_Visit_1:between:${from}T00:00:00${TZ},${to}T23:59:59${TZ})`, SERVICE_FIELDS, token),
     ]);
     const jobs = [
       ...installs.map((r) => mapInstall(r, todayISO)),
