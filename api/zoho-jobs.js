@@ -203,6 +203,7 @@ export function mapService(r, todayISO) {
     phone: "",
     geo: null,
     scope: (svc || "Service").replace(/\(\d+\)\s*/g, "").trim(),
+    desc: (r.Service_Description || "").trim(), // full work-order description for the ticket
   };
 }
 
