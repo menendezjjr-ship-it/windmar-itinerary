@@ -1750,17 +1750,17 @@ function initCrewMap(){
 // ── Address→lat/lon cache (localStorage) + reusable pin map (Job Map / Install Map) ──
 let GEO_CACHE={}; try{ GEO_CACHE=JSON.parse(localStorage.getItem("wm_geo_cache")||"{}"); }catch(e){}
 function geoKey(a){ return String(a||"").toLowerCase().replace(/\s+/g," ").trim(); }
-async function geocodeOne(addr){ const k=geoKey(addr); if(!k)return null; if(k in GEO_CACHE) return GEO_CACHE[k];
-  try{ const j=await (await fetch("/api/geocode?q="+encodeURIComponent(addr),{cache:"no-store"})).json(); GEO_CACHE[k]=(j&&j.ok)?{lat:j.lat,lon:j.lon}:null; }catch(e){ GEO_CACHE[k]=null; }
+async function geocodeOne(addr, bulk){ const k=geoKey(addr); if(!k)return null; if(k in GEO_CACHE) return GEO_CACHE[k];
+  try{ const j=await (await fetch("/api/geocode?q="+encodeURIComponent(addr)+(bulk?"&nofallback=1":""),{cache:"no-store"})).json(); GEO_CACHE[k]=(j&&j.ok)?{lat:j.lat,lon:j.lon}:null; }catch(e){ GEO_CACHE[k]=null; }
   return GEO_CACHE[k];
 }
-async function geocodeInto(st, items, onTick){
+async function geocodeInto(st, items, onTick, opts){ opts=opts||{};
   st.total=items.length; st.done=0; st.pins=[]; st.status="geocoding";
-  let i=0; const CC=Math.min(5, items.length||1); // small concurrent pool — cache hits are instant, misses hit Census
+  let i=0; const CC=Math.min(opts.bulk?8:5, items.length||1); // concurrent pool — cache hits instant; misses hit Census
   async function worker(){
-    while(i<items.length){ const it=items[i++]; const g=await geocodeOne(it.address); st.done++;
+    while(i<items.length){ const it=items[i++]; const g=await geocodeOne(it.address, opts.bulk); st.done++;
       if(g){ st.pins.push(Object.assign({},it,{lat:g.lat,lon:g.lon})); }
-      if(st.done%8===0){ try{localStorage.setItem("wm_geo_cache",JSON.stringify(GEO_CACHE));}catch(e){} onTick&&onTick(); }
+      if(st.done%12===0){ try{localStorage.setItem("wm_geo_cache",JSON.stringify(GEO_CACHE));}catch(e){} onTick&&onTick(); }
     }
   }
   const pool=[]; for(let w=0;w<CC;w++) pool.push(worker());
@@ -1792,11 +1792,14 @@ async function loadInstallMap(){
   S.instMap.status="loading"; S.instMap.pinState={status:"idle"}; render();
   try{
     const to=new Date(), f=(d)=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
-    const j=await (await fetch("/api/zoho-jobs?from=2015-01-01&to="+f(to)+"&only=install&t="+Date.now(),{cache:"no-store"})).json();
+    // 2-year windows keep each Zoho query under its 2000-record pagination cap; merged for true all-time coverage.
+    const yNow=to.getFullYear(), wins=[]; for(let y=yNow;y>=yNow-8;y-=2){ wins.push([(y-1)+"-01-01",(y===yNow?f(to):y+"-12-31")]); }
+    const results=await Promise.all(wins.map(([a,b])=>fetch("/api/zoho-jobs?from="+a+"&to="+b+"&only=install&t="+Date.now(),{cache:"no-store"}).then(r=>r.json()).catch(()=>({jobs:[]}))));
     const seen={}, items=[];
-    (j.jobs||[]).filter(x=>x.kind==="install"&&x.cat==="completed"&&x.address).forEach(x=>{ const k=x.num||x.id; if(seen[k])return; seen[k]=1; items.push({address:x.address,dlNumber:x.num,customerName:x.project,team:x.crewLabel,date:x.date,id:x.id,scope:x.scope}); });
-    S.instMap.items=items.slice(0,1500); S.instMap.status="live"; S.instMap.pinState={status:"geocoding",done:0,total:S.instMap.items.length,pins:[]}; render();
-    geocodeInto(S.instMap.pinState, S.instMap.items, ()=>{ if(S.tab==="instmap") render(true); });
+    results.forEach(j=>(j.jobs||[]).filter(x=>x.kind==="install"&&x.cat==="completed"&&x.address).forEach(x=>{ const k=x.num||x.id; if(seen[k])return; seen[k]=1; items.push({address:x.address,dlNumber:x.num,customerName:x.project,team:x.crewLabel,date:x.date,id:x.id,scope:x.scope}); }));
+    items.sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))); // most-recent first
+    S.instMap.total=items.length; S.instMap.items=items.slice(0,2600); S.instMap.status="live"; S.instMap.pinState={status:"geocoding",done:0,total:S.instMap.items.length,pins:[]}; render();
+    geocodeInto(S.instMap.pinState, S.instMap.items, ()=>{ if(S.tab==="instmap") render(true); }, {bulk:true});
   }catch(e){ S.instMap.status="error"; render(); }
 }
 function instMapHTML(){

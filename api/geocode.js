@@ -35,6 +35,7 @@ export default async function handler(req, res) {
   res.setHeader("Cache-Control", "s-maxage=2592000, stale-while-revalidate=2592000"); // geocodes are stable → cache 30d
   const q = String(req.query.q || "").trim();
   if (!q) return res.status(400).json({ ok: false, error: "q required" });
-  const hit = (await census(withFL(clean(q)))) || (await nominatim(q));
+  const noFb = /^(1|true|yes)$/i.test(String(req.query.nofallback || "")); // bulk callers skip OSM to respect Nominatim rate limits
+  const hit = (await census(withFL(clean(q)))) || (noFb ? null : await nominatim(q));
   return res.status(200).json(hit || { ok: false, error: "no match" });
 }
