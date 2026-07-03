@@ -1320,6 +1320,8 @@ function crewsHTML(){
         <div style="text-align:right"><div style="font-weight:900;font-size:20px;color:var(--wh-orange)">${dr.d.toFixed(1)} mi</div>
           <div style="font-size:12px;color:var(--text-dim)">${t("cr_eta")} ~${Math.round(dr.d/0.5)} ${t("cr_min")}</div></div>
         <button class="btn3d green sm" data-action="callCrew" data-id="${dr.crew.id}">📞</button></div></div>`;
+  } else if(dr&&dr.loading){
+    dispatchCard=`<div class="card" style="padding:12px;margin-top:12px;color:var(--text-dim)">⟳ ${S.lang==='es'?'Localizando':'Locating'} "${esc(dr.q)}"…</div>`;
   } else if(dr&&dr.error){
     dispatchCard=`<div class="card" style="padding:12px;margin-top:12px;color:var(--warn)">⚠ "${esc(dr.q)}" — ${t("cr_noGeo")}</div>`;
   }
@@ -1807,7 +1809,23 @@ document.addEventListener("click",e=>{
     case "crewToggleDist": S.crews.showDist=!S.crews.showDist; render(); break;
     case "crewFit": render(); break;
     case "crewRefresh": { if(S.crews.fleetState==="live"){ loadFleet(); } else { const now=new Date(); CREWS.forEach((c,i)=>{ c.ping=new Date(now.getTime()-i*15000).toLocaleTimeString(); if(c.mph>0){ c.gps={lat:c.gps.lat+(Math.random()-0.5)*0.02,lon:c.gps.lon+(Math.random()-0.5)*0.02}; c.mph=Math.max(15,Math.round(c.mph+(Math.random()-0.5)*10)); } }); render(); } break; }
-    case "crewCalc": { const inp=document.getElementById("dispatchTarget"); const raw=(inp?inp.value:"").trim(); const q=raw.toLowerCase(); S.crews.q=raw; let target=null,label=""; if(q){ const job=JOBS.find(j=>j.id.toLowerCase()===q); if(job){ target={lat:job.geo.lat,lon:job.geo.lon}; label=job.id+" · "+job.project; } else { for(const k in FL_CITIES){ if(q.indexOf(k)>=0){ target=FL_CITIES[k]; label=raw; break; } } } } if(target){ let best=null,bd=Infinity; activeSource().forEach(c=>{const d=miles(c.gps,target); if(d<bd){bd=d;best=c;}}); S.crews.dispatchResult={target:{lat:target.lat,lon:target.lon,label:label||raw},crew:best,d:bd}; } else { S.crews.dispatchResult={error:true,q:raw}; } render(); break; }
+    case "crewCalc": {
+      const inp=document.getElementById("dispatchTarget"); const raw=(inp?inp.value:"").trim(); S.crews.q=raw;
+      if(!raw){ S.crews.dispatchResult=null; render(); break; }
+      const q=raw.toLowerCase();
+      const pickClosest=(target,label)=>{ let best=null,bd=Infinity; activeSource().forEach(c=>{const d=miles(c.gps,target); if(d<bd){bd=d;best=c;}}); S.crews.dispatchResult={target:{lat:target.lat,lon:target.lon,label:label||raw},crew:best,d:bd}; render(); };
+      // 1) exact job DL, 2) known FL city (instant), 3) real geocode of the full address
+      const job=JOBS.find(j=>j.id.toLowerCase()===q);
+      if(job&&job.geo){ pickClosest({lat:job.geo.lat,lon:job.geo.lon}, job.id+" · "+job.project); break; }
+      let cityHit=null; for(const k in FL_CITIES){ if(q.indexOf(k)>=0){ cityHit=FL_CITIES[k]; break; } }
+      if(cityHit){ pickClosest(cityHit, raw); break; }
+      S.crews.dispatchResult={loading:true,q:raw}; render();
+      fetch("/api/geocode?q="+encodeURIComponent(raw),{cache:"no-store"}).then(r=>r.json()).then(j=>{
+        if(j&&j.ok&&isFinite(j.lat)&&isFinite(j.lon)){ pickClosest({lat:j.lat,lon:j.lon}, raw); }
+        else { S.crews.dispatchResult={error:true,q:raw}; render(); }
+      }).catch(()=>{ S.crews.dispatchResult={error:true,q:raw}; render(); });
+      break;
+    }
     case "zohoSync": S.zoho.syncing=true; render(); setTimeout(function(){S.zoho.syncing=false;S.zoho.lastSync=new Date();render();},1300); break;
     case "zohoToggleCode": S.zoho.showCode=!S.zoho.showCode; render(); break;
     case "wxRefresh": loadWeather(); break;
