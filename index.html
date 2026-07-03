@@ -1778,12 +1778,15 @@ function initPinMap(elId, pins, mapVar, opts){
   (pins||[]).forEach(p=>{ const col=opts.color?opts.color(p):"#1D429B";
     const mk=L.circleMarker([p.lat,p.lon],{radius:opts.radius||7,color:"#fff",weight:2,fillColor:col,fillOpacity:.95}).addTo(m);
     if(opts.popup) mk.bindPopup(opts.popup(p),{maxWidth:250});
+    if(opts.tooltip) mk.bindTooltip(opts.tooltip(p),{direction:"top",offset:[0,-4],opacity:.97,className:"pinTip"}); // hover preview
     if(opts.onClick) mk.on("click",()=>opts.onClick(p));
     pts.push([p.lat,p.lon]);
   });
   if(pts.length>1){ try{ m.fitBounds(pts,{padding:[36,36]}); }catch(e){} } else if(pts.length===1){ m.setView(pts[0],11); }
   setTimeout(function(){ try{m.invalidateSize();}catch(e){} },150);
 }
+// City from a free-form address (global; opsCalHTML has its own local copy for the grid).
+function cityFromAddr(a){ if(!a)return ""; const p=String(a).split(","); let c=p.length>=2?p[1]:p[0]; return c.replace(/\bFL\b/ig,"").replace(/\d{5}(-\d{4})?/g,"").replace(/[,\s]+$/,"").trim(); }
 // Get-Directions button for map popups — deep-links to Google Maps (native app on mobile) for the exact coords.
 function dirLink(p){ if(p==null||p.lat==null) return ""; const dest=p.lat+","+p.lon; const es=S.lang==="es";
   return `<a href="https://www.google.com/maps/dir/?api=1&destination=${dest}" target="_blank" rel="noopener" style="display:inline-block;margin-top:7px;padding:5px 10px;border-radius:8px;background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff;font-weight:800;font-size:12px;text-decoration:none">🧭 ${es?"Cómo llegar":"Get Directions"}</a>`; }
@@ -1853,7 +1856,7 @@ function _render(noAnim){
     }
   }
   // Install Map tab
-  if(S.tab==="instmap"){ const pm=S.instMap.pinState; if(pm&&pm.status==="ready"){ const es=S.lang==="es"; setTimeout(()=>initPinMap("instPinMap",pm.pins,"_instPinMap",{showHQ:true,radius:6,color:()=>"#22c55e",popup:(p)=>`<b>${esc(p.dlNumber||"")}</b> ${esc(p.customerName||"")}<br>${esc(p.address||"")}${p.scope?"<br><span style=\"color:#555\">"+esc(p.scope)+"</span>":""}<br><span style="color:#888">${(es?"Instalado":"Installed")}${p.date?": "+esc(p.date):""}${p.team?" · "+esc(p.team):""}</span>${dirLink(p)}`}),0); } }
+  if(S.tab==="instmap"){ const pm=S.instMap.pinState; if(pm&&pm.status==="ready"){ const es=S.lang==="es"; setTimeout(()=>initPinMap("instPinMap",pm.pins,"_instPinMap",{showHQ:true,radius:6,color:()=>"#22c55e",tooltip:(p)=>`<b>${esc(p.dlNumber||"")}</b> ${esc(p.customerName||"")}<br>${esc(cityFromAddr(p.address)||p.address||"")}${p.date?" · "+esc(p.date):""}`,popup:(p)=>`<b>${esc(p.dlNumber||"")}</b> ${esc(p.customerName||"")}<br>${esc(p.address||"")}${p.scope?"<br><span style=\"color:#555\">"+esc(p.scope)+"</span>":""}<br><span style="color:#888">${(es?"Instalado":"Installed")}${p.date?": "+esc(p.date):""}${p.team?" · "+esc(p.team):""}</span>${dirLink(p)}`}),0); } }
 }
 
 /* ---------- EVENTS ---------- */
