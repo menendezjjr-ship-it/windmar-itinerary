@@ -637,10 +637,10 @@ function opsCalHTML(){
     ${mapSpan==="day"?`<div style="display:flex;gap:4px;flex-wrap:wrap">${gDays.map(d=>{const iso=calYMD(d);const on=iso===mapDay;const td=iso===calYMD(today);return `<button data-action="calMapDay" data-id="${iso}" style="padding:5px 9px;border-radius:8px;border:1px solid ${on?'var(--wh-orange)':'var(--line)'};cursor:pointer;font-size:11px;font-weight:${on?800:600};background:${on?'var(--wh-orange)':'var(--panel)'};color:${on?'#fff':(td?'var(--wh-orange)':'var(--text-dim)')}">${D[d.getDay()]} ${d.getDate()}</button>`;}).join("")}</div>`:""}
   </div>`;
   const mapScopeLbl=mapSpan==="day"?(es2?"este día":"this day"):(es2?"esta semana":"this week");
-  const mapView = spanToggle + (mpm.status==="geocoding"
-    ? `<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">🗺 ${es2?"Ubicando trabajos":"Locating jobs"} ${mpm.done||0}/${mpm.total||0}…<div style="font-size:11px;margin-top:6px">${es2?"(en caché — la próxima vez es instantáneo)":"(cached — instant next time)"}</div></div>`
-    : (c._mapItems.length? `<div class="card" style="border-radius:12px;overflow:hidden"><div id="calPinMap" style="height:560px"></div></div><div style="font-size:11.5px;color:var(--text-dim);margin-top:6px">${(mpm.pins||[]).length} ${es2?"de":"of"} ${c._mapItems.length} ${es2?"trabajos ubicados ("+mapScopeLbl+") · pin por cuadrilla · 🔧=servicio":"jobs mapped ("+mapScopeLbl+") · pinned by crew · 🔧=service"}</div>`
-      : `<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">${es2?"Sin trabajos para "+mapScopeLbl:"No jobs for "+mapScopeLbl}</div>`));
+  const mapView = spanToggle + (
+    !c._mapItems.length ? `<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">${es2?"Sin trabajos para "+mapScopeLbl:"No jobs for "+mapScopeLbl}</div>`
+    : mpm.status==="ready" ? `<div class="card" style="border-radius:12px;overflow:hidden"><div id="calPinMap" style="height:560px"></div></div><div style="font-size:11.5px;color:var(--text-dim);margin-top:6px">${(mpm.pins||[]).length} ${es2?"de":"of"} ${c._mapItems.length} ${es2?"trabajos ubicados ("+mapScopeLbl+") · pin por cuadrilla · 🔧=servicio":"jobs mapped ("+mapScopeLbl+") · pinned by crew · 🔧=service"}</div>`
+    : `<div class="card" style="padding:44px;text-align:center;color:var(--text-dim)"><div style="font-size:26px;margin-bottom:8px">🗺</div>${es2?"Ubicando trabajos":"Locating jobs"} ${mpm.total?((mpm.done||0)+"/"+mpm.total):"…"}<div style="font-size:11px;margin-top:6px">${es2?"(en caché — la próxima vez es instantáneo)":"(cached — instant next time)"}</div></div>`);
   const view=c.status==="loading"?`<div style="text-align:center;padding:50px;color:var(--text-dim)">⟳ ${S.lang==='es'?'Cargando…':'Loading…'}</div>`:c.status==="error"?`<div class="card" style="padding:18px;color:var(--warn)">API error: ${esc(c.err||"")}</div>`:c.view==="month"?monthGrid:c.view==="week"?weekView:c.view==="grid"?gridView:c.view==="map"?mapView:listView;
   const navLabel=(c.view==="week"||c.view==="grid"||c.view==="map")?(M[ws.getMonth()].slice(0,3)+" "+ws.getDate()+" - "+(ws.getMonth()!==we.getMonth()?M[we.getMonth()].slice(0,3)+" ":"")+we.getDate()+", "+we.getFullYear()):(M[c.m-1]+" "+c.y);
   const dayModal=c.dayPanel!=null?calModal((function(){const recs=byDate[c.dayPanel]||[];return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><h3 style="margin:0;font-size:18px;font-weight:700">${M[c.m-1]} ${c.dayPanel}, ${c.y} <span style="color:var(--text-dim);font-weight:500;font-size:14px">· ${recs.length} ${recs.length!==1?'jobs':'job'}</span></h3><button class="btn3d grey sm" data-action="calClose">✕</button></div><div style="display:flex;flex-direction:column;gap:8px">${recs.map(calRow).join("")}</div>`;})()):"";
@@ -1756,7 +1756,7 @@ async function geocodeOne(addr, bulk){ const k=geoKey(addr); if(!k)return null; 
 }
 async function geocodeInto(st, items, onTick, opts){ opts=opts||{};
   st.total=items.length; st.done=0; st.pins=[]; st.status="geocoding";
-  let i=0; const CC=Math.min(opts.bulk?8:5, items.length||1); // concurrent pool — cache hits instant; misses hit Census
+  let i=0; const CC=Math.min(opts.cc||(opts.bulk?12:12), items.length||1); // concurrent pool — cache hits instant; misses hit Census
   async function worker(){
     while(i<items.length){ const it=items[i++]; const g=await geocodeOne(it.address, opts.bulk); st.done++;
       if(g){ st.pins.push(Object.assign({},it,{lat:g.lat,lon:g.lon})); }
