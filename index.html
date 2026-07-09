@@ -1504,15 +1504,20 @@ async function loadSCDetail(id){
   }catch(e){ S.sc.detailMedia={id:id,status:"error",media:[]}; }
   render();
 }
-async function loadSiteCapture(q,silent){
-  if(!silent){ S.sc.scState="loading"; render(); }
+async function loadSiteCapture(q,silent,_try){
+  _try=_try||0;
+  if(!silent && !_try){ S.sc.scState="loading"; render(); }
+  let good=false;
   try{
-    const r=await fetch("/api/sitecapture?q="+encodeURIComponent(q||""),{cache:"no-store"});
+    const r=await fetch("/api/sitecapture?q="+encodeURIComponent(q||"")+"&t="+Date.now(),{cache:"no-store"});
     const j=await r.json();
-    if(j&&j.configured&&j.ok){ S.sc.results=j.projects||[]; S.sc.templates=j.templates||[]; S.sc.canCreate=!!j.canCreate; S.sc.searchOk=!!j.searchOk; S.sc.source=j.source||""; S.sc.scState="live"; }
-    else if(j&&j.configured){ S.sc.results=[]; S.sc.scState="error"; S.sc.err=j.error||("HTTP "+j.status); }
-    else { S.sc.results=[]; S.sc.scState="sample"; }
-  }catch(e){ S.sc.results=[]; S.sc.scState="sample"; }
+    if(j&&j.configured&&j.ok){ S.sc.results=j.projects||[]; S.sc.templates=j.templates||[]; S.sc.canCreate=!!j.canCreate; S.sc.searchOk=!!j.searchOk; S.sc.source=j.source||""; S.sc.scState="live"; good=true; }
+    else if(j&&j.configured){ S.sc.scState="error"; S.sc.err=j.error||("HTTP "+j.status); }
+    else { S.sc.scState="sample"; }
+  }catch(e){ S.sc.scState="sample"; }
+  // Transient upstream hiccup → retry up to 2x (short backoff) before showing sample/error.
+  if(!good && _try<2){ await new Promise(r=>setTimeout(r,700*(_try+1))); return loadSiteCapture(q,silent,_try+1); }
+  if(!good) S.sc.results=[];
   if(!silent || S.tab==="sitecapture") render(silent);
 }
 async function loadSCTemplates(){

@@ -8,6 +8,7 @@ const FIXED = process.env.SITECAPTURE_API_KEY || "zapier-api-4320";
 function b64(s) { return Buffer.from(s).toString("base64"); }
 // fetch with a hard timeout so a slow SiteCapture/proxy call fails fast (and we can fall back) instead of hanging.
 async function fetchT(u, opts, ms) { const c = new AbortController(); const t = setTimeout(() => c.abort(), ms || 8000); try { return await fetch(u, Object.assign({}, opts, { signal: c.signal })); } catch (e) { return null; } finally { clearTimeout(t); } }
+export const config = { maxDuration: 20 }; // headroom so a slow upstream can't 504 the whole call
 
 // Build the Basic-auth header from whichever credential env is set.
 function buildBasic() {
@@ -150,35 +151,23 @@ export default async function handler(req, res) {
     const q = (req.query.q || "").toString().slice(0, 80);
     const basic = buildBasic();
 
-    // READS: prefer the DIRECT SiteCapture API with THIS project's creds — one reliable hop,
-    // supports server-side search (search=&exact_text=false). Fall back to the WindMar
-    // service-app proxy only if the direct call is unavailable. This removes the fragile
-    // two-hop chain (itinerary → service-app → SiteCapture) that caused the intermittent
-    // "API error / local sample" flapping when either hop cold-started or timed out.
+    // READS hit BOTH sources IN PARALLEL — direct SiteCapture (this project's creds) + the
+    // service-app proxy — and take whichever succeeds (prefer direct, which also proves the
+    // create-creds). Parallel caps latency at ~one call (8s) instead of chaining two, and two
+    // independent sources make a transient upstream hiccup far less likely to fail the request.
+    // Failures are NEVER edge-cached (header below), so one miss can't poison the cache for 20s.
+    const directU = basic ? ("https://api.sitecapture.com/customer_api/2_0/projects?max=" + (q ? 100 : 40) + "&offset=0" + (q ? ("&search=" + encodeURIComponent(q) + "&exact_text=false") : "")) : null;
+    const proxyU = PROXY + "?path=projects&offset=0" + (q ? ("&q=" + encodeURIComponent(q)) : "");
+    const readArr = async (r) => { if (!r || !r.ok) return null; try { const b = await r.json(); return Array.isArray(b) ? b : (b.data || b.projects || b.results || []); } catch (e) { return null; } };
+    const [dArr, pArr] = await Promise.all([
+      directU ? fetchT(directU, { headers: { Authorization: basic, "API_KEY": FIXED, Accept: "application/json" } }, 8000).then(readArr) : Promise.resolve(null),
+      fetchT(proxyU, { headers: { Accept: "application/json" } }, 8000).then(readArr),
+    ]);
     let projects = [], ok = false, canCreate = false, via = "";
-    if (basic) {
-      const directU = "https://api.sitecapture.com/customer_api/2_0/projects?max=100&offset=0" + (q ? ("&search=" + encodeURIComponent(q) + "&exact_text=false") : "");
-      const r = await fetchT(directU, { headers: { Authorization: basic, "API_KEY": FIXED, Accept: "application/json" } }, 9000);
-      if (r && r.ok) {
-        try {
-          const body = await r.json();
-          const arr = Array.isArray(body) ? body : (body.data || body.projects || body.results || []);
-          projects = mapList(arr); ok = true; canCreate = true; via = "direct";
-        } catch (e) { /* fall through to proxy */ }
-      }
-    }
-    if (!ok) { // fallback: service-app proxy (holds its own working login; needs no local creds)
-      const pr = await fetchT(PROXY + "?path=projects&offset=0" + (q ? ("&q=" + encodeURIComponent(q)) : ""), { headers: { Accept: "application/json" } }, 9000);
-      if (pr && pr.ok) {
-        try {
-          const body = await pr.json();
-          const arr = Array.isArray(body) ? body : (body.data || body.projects || body.results || []);
-          projects = mapList(arr); ok = true; via = "proxy";
-          if (basic) canCreate = true; // creds exist; the direct read just hiccuped transiently
-        } catch (e) { /* leave ok=false */ }
-      }
-    }
+    if (dArr) { projects = mapList(dArr); ok = true; canCreate = true; via = "direct"; }
+    else if (pArr) { projects = mapList(pArr); ok = true; via = "proxy"; if (basic) canCreate = true; }
 
+    res.setHeader("Cache-Control", ok ? "s-maxage=15, stale-while-revalidate=120" : "no-store"); // never cache a failure
     return res.status(200).json({ configured: true, ok, source: via || "none", searchOk: ok, canCreate, count: projects.length, projects, templates: templatesOf(projects), note: canCreate ? "" : "Create a project needs valid SITECAPTURE_USER + SITECAPTURE_PASS on this Vercel project." });
   } catch (e) {
     return res.status(200).json({ configured: true, ok: false, error: String(e), projects: [] });
