@@ -2082,7 +2082,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
     try{if(typeof Notification!=='undefined'&&Notification.permission==='granted')new Notification('WindMar — '+ev.status,{body:who});}catch(e){}
   }
   function poll(){
-    fetch(SB_URL+'/rest/v1/job_status_events?select=*&order=created_at.desc&limit=50',{headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY}})
+    fetch(SB_URL+'/rest/v1/job_status_events?select=*&source=neq.app-health&order=created_at.desc&limit=50',{headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY}})
       .then(function(r){return r.ok?r.json():[];}).then(function(rows){
         if(!Array.isArray(rows))return;
         var prev=window.CREW_FEED||null;
