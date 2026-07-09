@@ -6,6 +6,8 @@
 const PROXY = process.env.SITECAPTURE_PROXY || "https://windmar-service-app.vercel.app/api/sitecapture";
 const FIXED = process.env.SITECAPTURE_API_KEY || "zapier-api-4320";
 function b64(s) { return Buffer.from(s).toString("base64"); }
+// fetch with a hard timeout so a slow SiteCapture/proxy call fails fast (and we can fall back) instead of hanging.
+async function fetchT(u, opts, ms) { const c = new AbortController(); const t = setTimeout(() => c.abort(), ms || 8000); try { return await fetch(u, Object.assign({}, opts, { signal: c.signal })); } catch (e) { return null; } finally { clearTimeout(t); } }
 
 // Build the Basic-auth header from whichever credential env is set.
 function buildBasic() {
@@ -134,26 +136,36 @@ export default async function handler(req, res) {
     const q = (req.query.q || "").toString().slice(0, 80);
     const basic = buildBasic();
 
-    // READS via the WindMar service-app proxy (holds the working login + supports search
-    // via `q`). CREATE needs this project's OWN login — validated by a tiny direct read.
-    // Both run in PARALLEL so the response returns in one round-trip, not two.
-    const proxyU = PROXY + "?path=projects&offset=0" + (q ? ("&q=" + encodeURIComponent(q)) : "");
-    const [pRes, cRes] = await Promise.all([
-      fetch(proxyU, { headers: { Accept: "application/json" } }).catch(() => null),
-      basic ? fetch("https://api.sitecapture.com/customer_api/2_0/projects?max=1", { headers: { Authorization: basic, "API_KEY": FIXED, Accept: "application/json" } }).catch(() => null) : Promise.resolve(null),
-    ]);
-    let projects = [], ok = false;
-    if (pRes && pRes.ok) {
-      try {
-        const body = await pRes.json();
-        const arr = Array.isArray(body) ? body : (body.data || body.projects || body.results || []);
-        projects = mapList(arr);
-        ok = true;
-      } catch (e) { /* leave ok=false */ }
+    // READS: prefer the DIRECT SiteCapture API with THIS project's creds — one reliable hop,
+    // supports server-side search (search=&exact_text=false). Fall back to the WindMar
+    // service-app proxy only if the direct call is unavailable. This removes the fragile
+    // two-hop chain (itinerary → service-app → SiteCapture) that caused the intermittent
+    // "API error / local sample" flapping when either hop cold-started or timed out.
+    let projects = [], ok = false, canCreate = false, via = "";
+    if (basic) {
+      const directU = "https://api.sitecapture.com/customer_api/2_0/projects?max=100&offset=0" + (q ? ("&search=" + encodeURIComponent(q) + "&exact_text=false") : "");
+      const r = await fetchT(directU, { headers: { Authorization: basic, "API_KEY": FIXED, Accept: "application/json" } }, 9000);
+      if (r && r.ok) {
+        try {
+          const body = await r.json();
+          const arr = Array.isArray(body) ? body : (body.data || body.projects || body.results || []);
+          projects = mapList(arr); ok = true; canCreate = true; via = "direct";
+        } catch (e) { /* fall through to proxy */ }
+      }
     }
-    const canCreate = !!(cRes && cRes.ok);
+    if (!ok) { // fallback: service-app proxy (holds its own working login; needs no local creds)
+      const pr = await fetchT(PROXY + "?path=projects&offset=0" + (q ? ("&q=" + encodeURIComponent(q)) : ""), { headers: { Accept: "application/json" } }, 9000);
+      if (pr && pr.ok) {
+        try {
+          const body = await pr.json();
+          const arr = Array.isArray(body) ? body : (body.data || body.projects || body.results || []);
+          projects = mapList(arr); ok = true; via = "proxy";
+          if (basic) canCreate = true; // creds exist; the direct read just hiccuped transiently
+        } catch (e) { /* leave ok=false */ }
+      }
+    }
 
-    return res.status(200).json({ configured: true, ok, source: "proxy", searchOk: ok, canCreate, count: projects.length, projects, templates: templatesOf(projects), note: canCreate ? "" : "Create a project needs valid SITECAPTURE_USER + SITECAPTURE_PASS on this Vercel project." });
+    return res.status(200).json({ configured: true, ok, source: via || "none", searchOk: ok, canCreate, count: projects.length, projects, templates: templatesOf(projects), note: canCreate ? "" : "Create a project needs valid SITECAPTURE_USER + SITECAPTURE_PASS on this Vercel project." });
   } catch (e) {
     return res.status(200).json({ configured: true, ok: false, error: String(e), projects: [] });
   }
