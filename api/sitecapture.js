@@ -15,17 +15,30 @@ function buildBasic() {
   if (process.env.Site_Capture_Key) { const k = process.env.Site_Capture_Key.trim(); return k.toLowerCase().startsWith("basic ") ? k : (k.indexOf(":") >= 0 ? "Basic " + b64(k) : "Basic " + k); }
   return null;
 }
+// SiteCapture's display_line2..5 order varies by template (some put the address on line2,
+// others put a visit-type label there and the address on line3). Detect each field by shape
+// instead of by fixed position so Address/Owner labels are always right.
+const _isDate = (s) => /^\s*\d{1,2}\/\d{1,2}\/\d{2,4}\s*$/.test(String(s || ""));
+const _isAddr = (s) => { s = String(s || ""); return /\d/.test(s) && (/,/.test(s) || /\b[A-Z]{2}\b/.test(s) || /\b(st|ave|rd|dr|ln|blvd|ct|way|cir|pl|ter|trl|hwy|road|street|avenue|drive|lane|court|circle|place|terrace|trail|highway)\b/i.test(s)); };
 function mapList(arr) {
-  return (arr || []).slice(0, 80).map((p) => ({
-    id: String(p.id || p.project_id || ""),
-    name: p.display_line1 || p.name || p.project_name || p.title || ("Project " + (p.id || "")),
-    address: p.display_line2 || p.address || p.site_address || "",
-    owner: p.display_line3 || p.assigned_user || p.owner || "",
-    status: (p.status || p.project_status || "").toString(),
-    template: p.template_name || p.template || "",
-    updated: p.display_line4 || p.last_updated || p.modified_date || "",
-    template_key: p.template_key || "",
-  }));
+  return (arr || []).slice(0, 80).map((p) => {
+    const lines = [p.display_line2, p.display_line3, p.display_line4, p.display_line5].map((x) => (x == null ? "" : String(x).trim())).filter(Boolean);
+    const nonDate = lines.filter((x) => !_isDate(x));
+    const address = p.address || p.site_address || nonDate.find(_isAddr) || "";              // most address-like line
+    let owner = p.assigned_user || p.owner || p.creator || "";                                 // prefer the structured assignee
+    if (!owner) owner = nonDate.find((x) => x !== address && !/\d/.test(x)) || "";             // else a name-like line
+    const updated = p.last_updated || p.modified_date || lines.find(_isDate) || "";
+    return {
+      id: String(p.id || p.project_id || ""),
+      name: p.display_line1 || p.name || p.project_name || p.title || ("Project " + (p.id || "")),
+      address,
+      owner,
+      status: (p.status || p.project_status || "").toString(),
+      template: p.template_name || p.template || "",
+      updated,
+      template_key: p.template_key || "",
+    };
+  });
 }
 function templatesOf(projects) {
   const t = {}; projects.forEach((p) => { if (p.template_key) t[p.template_key] = p.template || p.template_key; });
