@@ -27,7 +27,8 @@ function mapList(arr) {
     const address = p.address || p.site_address || nonDate.find(_isAddr) || "";              // most address-like line
     let owner = p.assigned_user || p.owner || p.creator || "";                                 // prefer the structured assignee
     if (!owner) owner = nonDate.find((x) => x !== address && !/\d/.test(x)) || "";             // else a name-like line
-    const updated = p.last_updated || p.modified_date || lines.find(_isDate) || "";
+    let updated = lines.find(_isDate) || p.last_updated || p.modified_date || ""; // prefer the clean m/d/y line
+    if (/^\d{4}-\d{2}-\d{2}T/.test(updated)) updated = updated.slice(5, 10).replace("-", "/") + "/" + updated.slice(0, 4); // ISO -> mm/dd/yyyy
     return {
       id: String(p.id || p.project_id || ""),
       name: p.display_line1 || p.name || p.project_name || p.title || ("Project " + (p.id || "")),
