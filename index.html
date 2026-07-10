@@ -378,7 +378,7 @@ const S={
   live:{status:"idle",ok:false,jobs:[],updated:null,err:""},
   proj:{status:"idle",ok:false,list:[],updated:null,err:"",selected:null,q:"",stageFilter:"all",alerts:[],notify:false,notes:{id:null,status:"idle",list:[]},noteFrom:null,atts:{id:null,status:"idle",groups:[]}},
   notif:{items:[],unread:0,open:false}, attnOpen:true,
-  cal:{status:"idle",records:[],y:new Date().getFullYear(),m:new Date().getMonth()+1,view:"grid",typeFilter:"all",teamFilter:[],selected:null,dayPanel:null,weekStartISO:null,err:""},
+  cal:{status:"idle",records:[],y:new Date().getFullYear(),m:new Date().getMonth()+1,view:"grid",typeFilter:"all",teamFilter:[],selected:null,dayPanel:null,weekStartISO:null,err:"",bomNotes:{}},
   crewRec:{status:"idle",list:[],crew:"all",user:"all",q:""},
   instMap:{status:"idle",items:[],pinState:{status:"idle"}},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
@@ -601,12 +601,30 @@ function calDetailHTML(r){
   const f=(l,v)=>v?`<div><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${l}</div><div style="font-size:14px;font-weight:500">${esc(v)}</div></div>`:"";
   const descBlock=(isS&&r.desc)?`<div style="grid-column:1/-1;margin-top:2px"><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">${S.lang==='es'?'Descripción del servicio':'Service Description'}</div><div style="font-size:13.5px;font-weight:500;line-height:1.55;white-space:pre-wrap;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px">${esc(r.desc)}</div></div>`:"";
   const body=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">${isS?(f(S.lang==='es'?'Programado':'Scheduled',(r.startDate||"")+(r.startTime?" · "+r.startTime:""))+f(S.lang==='es'?'Estado':'Status',r.status)+f(S.lang==='es'?'Prioridad':'Priority',r.priority)+f(S.lang==='es'?'Servicio':'Service',r.scope)):(f(S.lang==='es'?'Fecha':'Start Date',r.startDate)+f(S.lang==='es'?'Estado':'Status',r.status)+f(S.lang==='es'?'Alcance':'Scope',r.scope))}<div style="grid-column:1/-1">${f(S.lang==='es'?'Dirección':'Address',r.address)}</div>${descBlock}</div>`;
+  // 📋 Plan-Analyzer BOM / estimator notes for this install (async-loaded into S.cal.bomNotes on open).
+  const bomBlock=(function(){
+    if(isS) return ""; const es=S.lang==='es';
+    const key=String(r.dlNumber||"").trim().toUpperCase(); if(!key) return "";
+    const st=(S.cal.bomNotes||{})[key];
+    const hdr=`<div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">📋 ${es?'Notas BOM / Estimador':'BOM / Estimator Notes'}</div>`;
+    const wrap=(inner)=>`<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">${hdr}${inner}</div>`;
+    if(!st||st.status==="loading") return wrap(`<div style="font-size:12px;color:var(--text-dim)">⟳ ${es?'Cargando notas…':'Loading notes…'}</div>`);
+    const items=st.items||[]; if(!items.length) return ""; // no plan-analyzer notes → omit section entirely
+    const fmtD=(d)=>{ try{ return new Date(d).toLocaleDateString(es?'es':'en',{month:'short',day:'numeric',year:'numeric'}); }catch(e){ return esc(d||""); } };
+    const cc=(s)=>crewRecColor(s); const by=(x)=>x.created_by?" · "+esc(x.created_by):"";
+    const pill=(s)=>`<span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:10.5px;font-weight:800;background:${cc(s)}22;color:${cc(s)};border:1px solid ${cc(s)}55">${esc(s||(es?'Nota':'Note'))}</span>`;
+    const L=items[0];
+    const latest=`<div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:${L.note?'7px':'0'}">${pill(L.status)}<span style="font-size:11px;color:var(--text-dim)">${fmtD(L.created_at)}${by(L)}</span></div>${L.note?`<div style="font-size:13.5px;font-weight:500;line-height:1.5;white-space:pre-wrap">${esc(L.note)}</div>`:""}</div>`;
+    const rest=items.slice(1);
+    const hist=rest.length?`<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--wh-blue-light);font-weight:700;list-style:none">${es?'Historial':'History'} (${rest.length})</summary><div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">${rest.map(x=>`<div style="font-size:12px;color:var(--text-dim);line-height:1.45"><span style="color:var(--text);font-weight:600">${fmtD(x.created_at)}</span> · <span style="color:${cc(x.status)};font-weight:700">${esc(x.status||(es?'Nota':'Note'))}</span>${x.note?" · "+esc(x.note):""}</div>`).join("")}</div></details>`:"";
+    return wrap(latest+hist);
+  })();
   return `<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px"><div style="min-width:0">
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="${calTypeBadge(r.type)}">${isS?"🔧 SERVICE":"⚡ INSTALL"}</span><span style="font-size:11px;color:${col};font-weight:700;text-transform:uppercase;letter-spacing:.04em;display:inline-flex;align-items:center;gap:5px"><span style="width:9px;height:9px;border-radius:50%;background:${col}"></span>${esc(r.team)}</span></div>
     <h3 style="margin:0;font-size:20px;font-weight:700">${r.dlNumber?`<span style="color:var(--wh-orange)">${esc(r.dlNumber)} </span>`:""}${esc(r.customerName||"")}</h3>
     ${r.address?`<p style="margin:4px 0 0;color:var(--text-dim);font-size:13px">📍 <a href="https://maps.google.com/?q=${encodeURIComponent(r.address)}" target="_blank" style="color:var(--wh-blue-light)">${esc(r.address)}</a></p>`:""}
     ${r.phone?`<div style="margin-top:8px"><a class="btn3d green sm" href="tel:${esc(String(r.phone).replace(/[^0-9+]/g,""))}">📞 ${esc(r.phone)}</a></div>`:""}
-  </div><button class="btn3d grey sm" data-action="calClose">✕</button></div>${body}${(function(){
+  </div><button class="btn3d grey sm" data-action="calClose">✕</button></div>${body}${bomBlock}${(function(){
     const es=S.lang==='es'; const fileLink=(rid,fl)=>`/api/zoho-file?id=${encodeURIComponent(rid)}&aid=${encodeURIComponent(fl.aid)}&module=Installation&name=${encodeURIComponent(fl.name||"download")}`;
     const btns=[];
     if(r.recordId&&r.plan) btns.push(`<a class="btn3d green sm" href="${fileLink(r.recordId,r.plan)}" target="_blank" rel="noopener">📐 ${es?'Ver Planos':'View Plans'}</a>`);
@@ -1545,6 +1563,20 @@ async function loadCrewRecords(){
   render();
 }
 function crewRecColor(s){ s=(s||"").toLowerCase(); if(/insp/.test(s))return /complet|conclu/.test(s)?"#06b6d4":"#F89B24"; if(/complet|conclu/.test(s))return "#22c55e"; if(/resched|reprogram|reagend/.test(s))return "#ef4444"; return "#1D429B"; }
+// Plan-Analyzer BOM/estimator notes for one install DL (shown in the calendar job detail). Cached per DL in S.cal.bomNotes.
+async function loadBomNotes(dl){
+  const key=String(dl||"").trim().toUpperCase(); if(!key) return;
+  S.cal.bomNotes=S.cal.bomNotes||{};
+  const cur=S.cal.bomNotes[key]; if(cur&&(cur.status==="loading"||cur.status==="ready")) return; // already loaded / in-flight
+  S.cal.bomNotes[key]={status:"loading",items:[]}; render();
+  try{
+    const SB="https://lmlixmzmzpzgeggvywwb.supabase.co", K="sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
+    const r=await fetch(SB+"/rest/v1/job_status_events?source=eq.plan-analyzer&dl_number=ilike."+encodeURIComponent(key)+"&order=created_at.desc&select=status,note,created_at,created_by",{headers:{apikey:K,Authorization:"Bearer "+K},cache:"no-store"});
+    const rows=await r.json();
+    S.cal.bomNotes[key]={status:"ready",items:Array.isArray(rows)?rows.filter(x=>x&&(x.note||x.status)):[]};
+  }catch(e){ S.cal.bomNotes[key]={status:"ready",items:[]}; }
+  render();
+}
 // Crew roster — who is on each crew (names + login email for matching created_by).
 const CREW_ROSTER={
   "Elite Crew #2":[{n:"Tailor Herrera",r:"Crew Lead",e:"tailor.herrera@windmarhome.com"},{n:"Maykel Pimentel",r:"Sub Lead",e:"maykel.pimentel@windmarhome.com"}],
@@ -1950,7 +1982,7 @@ document.addEventListener("click",e=>{
     case "calType": S.cal.typeFilter=id; render(); break;
     case "calTeam": { const i=S.cal.teamFilter.indexOf(id); if(i>=0)S.cal.teamFilter.splice(i,1); else S.cal.teamFilter.push(id); render(); break; }
     case "calClearTeams": S.cal.teamFilter=[]; render(); break;
-    case "calSelectJob": S.cal.selected=id; render(); break;
+    case "calSelectJob": { S.cal.selected=id; const _jr=S.cal.records.find(x=>x.id===id); if(_jr&&_jr.type!=="service"&&_jr.dlNumber) loadBomNotes(_jr.dlNumber); render(); break; }
     case "calDay": S.cal.dayPanel=Number(id); render(); break;
     case "calClose": S.cal.selected=null; S.cal.dayPanel=null; render(); break;
     case "calRefresh": loadOpsCal(); break;
