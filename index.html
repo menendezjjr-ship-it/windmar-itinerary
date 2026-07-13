@@ -517,7 +517,14 @@ function dedupCalRecs(recs){
   });
   return order;
 }
-function calRec(j){ return { type:j.kind, id:j.id, recordId:j.recordId||"", plan:j.plan||null, bom:j.bom||null, team:j.crewLabel||"Unassigned", startDate:j.date, daysNeeded:j.days||1, startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", desc:j.desc||"", code:j.code||"", msp:!!j.msp, phone:j.phone||"", cat:jobCat(j) }; }
+// Minutes-since-midnight for chronological cell sorting (real 24h hhmm first; else parse "8:00 AM"). No time → bottom.
+function calTMin(r){ if(!r) return 1e9;
+  var h=String(r.hhmm||""); var hm=h.match(/^(\d{1,2}):(\d{2})/); if(hm){ return (+hm[1])*60+(+hm[2]); }
+  var s=String(r.startTime||"").trim(); if(!s) return 1e9;
+  var m=s.match(/(\d{1,2}):(\d{2})\s*([AaPp][Mm])?/); if(!m) return 1e9;
+  var hh=+m[1], mm=+m[2], ap=(m[3]||"").toUpperCase(); if(ap==="PM"&&hh!==12)hh+=12; if(ap==="AM"&&hh===12)hh=0; return hh*60+mm;
+}
+function calRec(j){ return { type:j.kind, id:j.id, recordId:j.recordId||"", plan:j.plan||null, bom:j.bom||null, team:j.crewLabel||"Unassigned", startDate:j.date, daysNeeded:j.days||1, hhmm:j.hhmm||"", startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", desc:j.desc||"", code:j.code||"", msp:!!j.msp, phone:j.phone||"", cat:jobCat(j) }; }
 // Multi-day jobs: ISO dates a record occupies (start day + continuation days).
 function calSpan(r){ if(!r.startDate)return []; const n=Math.max(1,Math.min(21,parseInt(r.daysNeeded,10)||1)); const base=new Date(r.startDate+"T12:00:00"); const out=[]; for(let i=0;i<n;i++){const x=new Date(base);x.setDate(base.getDate()+i);out.push(calYMD(x));} return out; }
 async function loadOpsCal(silent){
@@ -647,7 +654,7 @@ function opsCalHTML(){
   const tpm={}; c.records.filter(r=>inView(r)&&(c.typeFilter==="all"||r.type===c.typeFilter)).forEach(r=>{tpm[r.team]=(tpm[r.team]||0)+1;});
   const teamsPresent=Object.keys(tpm).map(k=>[k,tpm[k]]).sort((a,b)=>b[1]-a[1]);
   const byDate={}; visible.forEach(r=>{ calSpan(r).forEach(isoD=>{ const dd=new Date(isoD+"T12:00:00"); if(dd.getMonth()+1===c.m&&dd.getFullYear()===c.y)(byDate[dd.getDate()]=byDate[dd.getDate()]||[]).push(r); }); });
-  Object.keys(byDate).forEach(d=>byDate[d].sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||"")||a.type.localeCompare(b.type)));
+  Object.keys(byDate).forEach(d=>byDate[d].sort((a,b)=>(calTMin(a)-calTMin(b))||a.type.localeCompare(b.type)));
   const compact=window.innerWidth<768, maxChips=compact?2:3;
   // month grid
   const firstDay=new Date(c.y,c.m-1,1).getDay(), daysInMonth=new Date(c.y,c.m,0).getDate();
@@ -661,7 +668,7 @@ function opsCalHTML(){
   }
   const monthGrid=`<div class="card" style="border-radius:12px;overflow:hidden"><div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-bottom:1px solid var(--line)">${D.map(d=>`<div style="padding:${compact?'6px 4px':'10px 8px'};text-align:center;font-weight:600;font-size:${compact?10:12}px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em">${d}</div>`).join("")}</div><div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr))">${cells}</div></div>`;
   // week
-  let weekHTML=""; for(let i=0;i<7;i++){ const d=calAddDays(ws,i); const dIso=calYMD(d); const list=visible.filter(r=>calSpan(r).indexOf(dIso)>=0).sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||"")); const td=dIso===calYMD(today);
+  let weekHTML=""; for(let i=0;i<7;i++){ const d=calAddDays(ws,i); const dIso=calYMD(d); const list=visible.filter(r=>calSpan(r).indexOf(dIso)>=0).sort((a,b)=>(calTMin(a)-calTMin(b))); const td=dIso===calYMD(today);
     weekHTML+=`<div class="card" style="border-radius:12px;overflow:hidden;border:1px solid ${td?'var(--wh-orange)':'var(--line)'}"><div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:${td?'rgba(248,155,36,.10)':'rgba(255,255,255,.02)'};${list.length?'border-bottom:1px solid var(--line)':''}"><span style="font-weight:800;font-size:15px;color:${td?'var(--wh-orange)':'var(--text)'}">${D[d.getDay()]}</span><span style="color:var(--text-dim);font-size:13px">${M[d.getMonth()].slice(0,3)} ${d.getDate()}</span>${td?`<span style="font-size:9px;font-weight:800;color:var(--wh-orange)">${S.lang==='es'?'HOY':'TODAY'}</span>`:""}<span style="margin-left:auto;font-size:12px;font-weight:600;color:var(--text-dim)">${list.length} ${list.length!==1?(S.lang==='es'?'trabajos':'jobs'):(S.lang==='es'?'trabajo':'job')}</span></div>${list.map(r=>calRow(r,r.startDate!==dIso)).join("")}</div>`; }
   const weekView=`<div style="display:flex;flex-direction:column;gap:10px">${weekHTML}</div>`;
   // crew grid (weekly): crews down the side, days across the top, each cell = DL# + city
@@ -675,7 +682,7 @@ function opsCalHTML(){
     <div style="padding:10px 12px;border-bottom:2px solid var(--line);border-right:1px solid var(--line);font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);position:sticky;left:0;background:var(--panel);z-index:4">${es?'Cuadrilla':'Crew'}</div>
     ${gDays.map(d=>{const td=calYMD(d)===calYMD(today);return `<div style="padding:8px 6px;text-align:center;border-bottom:2px solid var(--line);border-right:1px solid var(--line);background:${td?'rgba(248,155,36,.12)':'var(--panel)'}"><div style="font-weight:800;font-size:12px;color:${td?'var(--wh-orange)':'var(--text)'}">${D[d.getDay()]}</div><div style="font-size:11px;color:var(--text-dim)">${M[d.getMonth()].slice(0,3)} ${d.getDate()}</div></div>`;}).join("")}</div>`;
   const gBody=gTeams.map(team=>{ const col=teamColor(team);
-    const cells=gDays.map(d=>{ const iso=calYMD(d); const td=iso===calYMD(today); const jobs=gByTeam[team].filter(r=>calSpan(r).indexOf(iso)>=0).sort((a,b)=>(a.startTime||"").localeCompare(b.startTime||""));
+    const cells=gDays.map(d=>{ const iso=calYMD(d); const td=iso===calYMD(today); const jobs=gByTeam[team].filter(r=>calSpan(r).indexOf(iso)>=0).sort((a,b)=>(calTMin(a)-calTMin(b)));
       return `<div style="padding:4px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);min-height:58px;background:${td?'rgba(248,155,36,.05)':'transparent'}">${jobs.map(j=>{const jc=jobTypeColor(j);const jcont=j.startDate!==iso;return `<div data-action="calSelectJob" data-id="${esc(j.id)}" data-jtip="${esc(j.id)}" style="background:${jc};color:${textOn(jc)};border-radius:6px;padding:3px 6px;margin-bottom:3px;cursor:pointer;font-size:10.5px;line-height:1.22;overflow:hidden">${jcont?'<span style="font-weight:900">↪ </span>':'<span style="opacity:.9">'+jobTypeIcon(j)+' </span>'}<span style="font-weight:800">${esc(j.dlNumber||j.id)}</span><div style="opacity:.92;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(cityOf(j.address)||j.customerName||"")}</div></div>`;}).join("")}</div>`;
     }).join("");
     return `<div style="display:grid;grid-template-columns:${gCols}"><div style="padding:8px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);border-left:4px solid ${col};position:sticky;left:0;background:var(--bg-2);z-index:2"><div style="font-weight:800;font-size:12.5px;line-height:1.2">${esc(team)}</div><div style="font-size:10px;color:var(--text-dim)">${gByTeam[team].length} ${es?'trab.':'jobs'}</div></div>${cells}</div>`;
@@ -684,7 +691,7 @@ function opsCalHTML(){
   // list
   const byTeam={}; visible.forEach(r=>{(byTeam[r.team]=byTeam[r.team]||[]).push(r);});
   const listKeys=Object.keys(byTeam).sort((a,b)=>byTeam[b].length-byTeam[a].length);
-  const listView=`<div style="display:flex;flex-direction:column;gap:12px">${listKeys.length?listKeys.map(team=>{const list=byTeam[team].sort((a,b)=>(a.startDate||"").localeCompare(b.startDate||"")||(a.startTime||"").localeCompare(b.startTime||""));const col=teamColor(team);return `<div class="card" style="border-radius:12px;overflow:hidden"><div style="padding:10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;background:${col}18"><span style="width:12px;height:12px;border-radius:3px;background:${col}"></span><span style="font-weight:700;font-size:14px">${esc(team)}</span><span style="color:var(--text-dim);font-size:12px;margin-left:auto">${list.length} ${list.length!==1?(S.lang==='es'?'trabajos':'jobs'):(S.lang==='es'?'trabajo':'job')}</span></div><div>${list.map(calRow).join("")}</div></div>`;}).join(""):`<div style="text-align:center;padding:40px;color:var(--text-dim)">${S.lang==='es'?'Sin trabajos programados':'No jobs scheduled'}</div>`}</div>`;
+  const listView=`<div style="display:flex;flex-direction:column;gap:12px">${listKeys.length?listKeys.map(team=>{const list=byTeam[team].sort((a,b)=>(a.startDate||"").localeCompare(b.startDate||"")||(calTMin(a)-calTMin(b)));const col=teamColor(team);return `<div class="card" style="border-radius:12px;overflow:hidden"><div style="padding:10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;background:${col}18"><span style="width:12px;height:12px;border-radius:3px;background:${col}"></span><span style="font-weight:700;font-size:14px">${esc(team)}</span><span style="color:var(--text-dim);font-size:12px;margin-left:auto">${list.length} ${list.length!==1?(S.lang==='es'?'trabajos':'jobs'):(S.lang==='es'?'trabajo':'job')}</span></div><div>${list.map(calRow).join("")}</div></div>`;}).join(""):`<div style="text-align:center;padding:40px;color:var(--text-dim)">${S.lang==='es'?'Sin trabajos programados':'No jobs scheduled'}</div>`}</div>`;
   // Job Map view — pins for the week's jobs (or a single day), geocoded + cached. Staged for the render hook.
   const es2=S.lang==="es";
   const mapSpan=c.mapSpan||"week";
