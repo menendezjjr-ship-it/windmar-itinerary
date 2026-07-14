@@ -936,7 +936,7 @@ function inspEntryCard(p,it){ const sm=inspMeta(it.status), tm=inspTypeMeta(it.t
    Reuses inspNeedsScheduling() (the "missing"/"ready" set), live crew GPS (S.crews.fleet from
    /api/crews), geocodeInto()/GEO_CACHE and initPinMap(). Distances are real Haversine miles. */
 function dispatchItems(){ // one item per pending inspection, keyed for geocode + ranking
-  return inspNeedsScheduling().filter(e=>e.it.type!=="roofing").map(e=>({ id:e.p.id+"|"+e.it.type, zid:e.p.id, address:e.p.address||"",
+  return inspEntries().filter(e=>e.it.status==="ready"&&e.it.type!=="roofing").map(e=>({ id:e.p.id+"|"+e.it.type, zid:e.p.id, address:e.p.address||"",
     num:e.p.num||"", name:e.p.name||"", type:e.it.type, ahj:e.p.ahj||"", stage:e.p.stage, scheduled:e.it.scheduled||null }));
 }
 function dispatchCrews(){ return (S.crews.fleet||[]).filter(c=>c&&c.gps&&c.gps.lat!=null&&c.gps.lon!=null); } // live GPS only
