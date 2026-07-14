@@ -854,6 +854,14 @@ function notifSeen(key){ let m={}; try{m=JSON.parse(localStorage.getItem("wm_not
 function stageAckSet(){ try{ const a=JSON.parse(localStorage.getItem("wm_stage_ack")||"[]"); return new Set(Array.isArray(a)?a:[]); }catch(e){ return new Set(); } }
 function stageAck(idv){ try{ const s=stageAckSet(); s.add(String(idv)); localStorage.setItem("wm_stage_ack",JSON.stringify([...s].slice(-800))); }catch(e){} }
 function stageUnack(idv){ try{ const s=stageAckSet(); s.delete(String(idv)); localStorage.setItem("wm_stage_ack",JSON.stringify([...s])); }catch(e){} }
+// A crew/status row is "reverted" (soft-deleted) iff its status starts with "[VOID]".
+// The shared Supabase blocks BOTH DELETE and UPDATE for the anon key (RLS — verified: 0 rows
+// affected). So the revert write runs server-side via /api/revert-status (service-role key).
+// The convention/filtering below is inert when no voided rows exist, so it's safe regardless.
+function isVoided(r){ return String(r&&r.status||"").indexOf("[VOID]")===0; }
+// Revert is an admin/coordinator action. window.wmRole is set by the MSAL gate (app_access.role);
+// when unknown (staff-code bypass / gate fallback), we show it — the Itinerary is the coordinator tool.
+function canRevert(){ var r=String(window.wmRole||"").toLowerCase(); return r!=="crew"&&r!=="viewer"; }
 function pushNotif(type,title,body,projId){
   S.notif.items.unshift({type:type,title:title,body:body||"",projId:projId||null,ts:Date.now()});
   if(S.notif.items.length>60) S.notif.items.length=60;
@@ -919,7 +927,7 @@ function attentionHTML(){
       <span class="pill" style="background:#DC2626">${stuck.length} ${es?'estancados':'stuck'}</span>
       <span class="pill" style="background:var(--wh-blue)">${visits.length} ${es?'visitas mañana':'visits tomorrow'}</span>
       <span class="pill" style="background:#0EA5E9">${inspNeed.length} ${es?'inspecciones':'inspections'}</span>
-      <span class="pill" style="background:#F89B24">${(window.CREW_FEED||[]).length} ${es?'cuadrillas':'crew'}</span>
+      <span class="pill" style="background:#F89B24">${(window.CREW_FEED||[]).filter(e=>!isVoided(e)&&(e&&e.source||'')!=='plan-analyzer').length} ${es?'cuadrillas':'crew'}</span>
       <span style="margin-left:auto;color:var(--text-dim);font-size:12px">${es?'mostrar ▾':'show ▾'}</span></div>`;
   }
   const stuckCards=stuck.length?stuck.slice(0,40).map(x=>{const p=x.p,d=Math.floor(x.d),col=d>=14?"#DC2626":d>=7?"#F87171":"#F89B24";
@@ -949,7 +957,7 @@ function attentionHTML(){
   // ETAs panel shows TODAY only (resets daily, no buildup); Crew Updates keep their
   // priority/acknowledge behavior. Full ETA/crew history stays in Crew Records.
   const isToday=(e)=>{ if(!e||!e.created_at)return false; const d=new Date(e.created_at),n=new Date(); return d.getFullYear()===n.getFullYear()&&d.getMonth()===n.getMonth()&&d.getDate()===n.getDate(); };
-  const crewFeed=allFeed.filter(e=>(e&&e.source||'')!=='plan-analyzer'&&!isEta(e));
+  const crewFeed=allFeed.filter(e=>(e&&e.source||'')!=='plan-analyzer'&&!isEta(e)&&!isVoided(e));
   const crewC=function(s){s=(s||'').toLowerCase();if(/insp/.test(s))return /complet|conclu/.test(s)?'#06b6d4':'#F89B24';if(/complet|conclu/.test(s))return '#22c55e';if(/resched|reprogram|reagend/.test(s))return '#ef4444';return '#1D429B';};
   // Map a crew DL# → its live Zoho Deal record (so one click opens the exact job to change the stage).
   const dealByDL={}; (S.proj.list||[]).forEach(p=>{ if(p.num){ dealByDL[String(p.num).toUpperCase().replace(/\s+/g,"")]=p.id; } });
@@ -958,6 +966,7 @@ function attentionHTML(){
   const crewPending=crewFeed.filter(e=>e&&e.id!=null&&!ackSet.has(String(e.id))).length;
   const crewCards=crewFeed.length?crewFeed.slice(0,30).map(function(e){var c=crewC(e.status);var who=[e.dl_number,e.customer].filter(Boolean).join(' ')||e.job_id||'Job';var tm=e.created_at?new Date(e.created_at).toLocaleString(es?'es':'en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';var note=e.note?String(e.note).trim():'';
     var zurl=zohoForDL(e.dl_number||who); var pending=e.id!=null&&!ackSet.has(String(e.id)); var pid=String(e.id==null?'':e.id);
+    var canRev=e.id!=null&&(e.source||'')==='field-hub'&&canRevert(); // admin undo for a mistaken crew status
     return `<div data-action="crewToZoho" data-zurl="${esc(zurl)}" title="${es?'Abrir este trabajo en Zoho para cambiar la etapa':'Open this job in Zoho to change the stage'}" style="padding:13px 15px;border-radius:12px;background:var(--bg-2);border:1px solid ${pending?'#ef4444':'var(--line)'};border-left:5px solid ${c};margin-bottom:10px;cursor:pointer;${pending?'box-shadow:0 0 0 1px #ef444455, 0 0 16px -3px #ef444477;':''}" ${pending?'class="prioPulse"':''}>
       <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:15px;color:${c}">${esc(e.status)}</span><span style="font-size:11px;color:var(--text-dim)">${esc(tm)}</span></div>
       <div style="font-size:14.5px;font-weight:800;margin-top:3px">${esc(who)}</div>
@@ -966,6 +975,7 @@ function attentionHTML(){
       <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <span class="btn3d blue sm" style="pointer-events:none">🔗 ${es?'Abrir en Zoho':'Open in Zoho'} ↗</span>
         ${pending?`<button class="btn3d green sm" data-action="crewAck" data-id="${esc(pid)}">✓ ${es?'Etapa actualizada':'Stage updated'}</button><span class="pill" style="background:#ef4444;font-size:9px;font-weight:800;letter-spacing:.3px">⚠ ${es?'CAMBIAR ETAPA':'NEEDS STAGE CHANGE'}</span>`:`<span class="pill" data-action="crewUnack" data-id="${esc(pid)}" title="${es?'Marcar como pendiente otra vez':'Mark pending again'}" style="background:#22c55e;font-size:9px;cursor:pointer">✓ ${es?'Etapa actualizada':'Stage updated'}</span>`}
+        ${canRev?`<button class="btn3d grey sm" data-action="crewRevert" data-id="${esc(pid)}" data-status="${esc(e.status||'')}" title="${es?'Deshacer este estado (enviado por error)':'Undo this status (sent by mistake)'}" style="margin-left:auto">↩ ${es?'Revertir':'Revert'}</button>`:""}
       </div></div>`;}).join("")
     :`<div style="color:var(--text-dim);font-size:13px;padding:10px;text-align:center">${es?'Sin actualizaciones de cuadrilla aún':'No crew updates yet'}</div>`;
   const col=(title,count,color,inner,maxH)=>`<div class="card" style="padding:0;overflow:hidden"><div style="padding:11px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;background:${color}22"><span style="font-weight:800;font-size:14px">${title}</span><span class="pill" style="background:${color};margin-left:auto">${count}</span></div><div style="padding:11px;max-height:${maxH||300}px;overflow:auto">${inner}</div></div>`;
@@ -974,7 +984,7 @@ function attentionHTML(){
   const planC=function(s){s=(s||'').toLowerCase();if(/permit/.test(s))return '#F59E0B';if(/service bom|bom made/.test(s))return '#06B6D4';if(/done|upload|complet/.test(s))return '#22c55e';return '#8B5CF6';};
   const planDone=function(s){return /bom done|uploaded|complet/i.test(s||'');}; // the "completed" estimator stage
   const planSeen={}; const planJobs=[];
-  allFeed.filter(e=>(e&&e.source||'')==='plan-analyzer').forEach(function(e){
+  allFeed.filter(e=>(e&&e.source||'')==='plan-analyzer'&&!isVoided(e)).forEach(function(e){
     var k=String(e.dl_number||e.job_id||e.customer||'').toUpperCase(); if(!k||planSeen[k])return; planSeen[k]=1; // dedupe → latest status per job (feed is newest-first)
     if(planDone(e.status))return; // passed "completed" → don't keep it on the dashboard
     planJobs.push(e);
@@ -988,7 +998,7 @@ function attentionHTML(){
     :`<div style="color:var(--text-dim);font-size:13px;padding:10px;text-align:center">${es?'Sin actualizaciones del estimador':'No estimator updates'}</div>`;
   // Crew ETAs (field-hub "ETA <time>" status) — latest ETA per job, newest-first.
   const etaSeen={}; const etaJobs=[];
-  allFeed.filter(e=>isEta(e)&&isToday(e)).forEach(function(e){ var k=String(e.dl_number||e.job_id||e.customer||'').toUpperCase(); if(!k||etaSeen[k])return; etaSeen[k]=1; etaJobs.push(e); });
+  allFeed.filter(e=>isEta(e)&&isToday(e)&&!isVoided(e)).forEach(function(e){ var k=String(e.dl_number||e.job_id||e.customer||'').toUpperCase(); if(!k||etaSeen[k])return; etaSeen[k]=1; etaJobs.push(e); });
   const etaCards=etaJobs.length?etaJobs.slice(0,40).map(function(e){var who=[e.dl_number,e.customer].filter(Boolean).join(' ')||e.job_id||'Job';var tm=e.created_at?new Date(e.created_at).toLocaleString(es?'es':'en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';var zurl=zohoForDL(e.dl_number||who);
     return `<div data-action="crewToZoho" data-zurl="${esc(zurl)}" title="${es?'Abrir este trabajo en Zoho':'Open this job in Zoho'}" style="padding:11px 13px;border-radius:11px;background:var(--bg-2);border:1px solid var(--line);border-left:4px solid #06b6d4;margin-bottom:9px;cursor:pointer">
       <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:14px;color:#06b6d4">🕒 ${esc(e.status)}</span><span style="font-size:10px;color:var(--text-dim)">${esc(tm)}</span></div>
@@ -1565,7 +1575,7 @@ async function loadCrewRecords(){
     const SB="https://lmlixmzmzpzgeggvywwb.supabase.co", K="sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
     const r=await fetch(SB+"/rest/v1/job_status_events?source=in.(field-hub,plan-analyzer)&order=created_at.desc&limit=1000",{headers:{apikey:K,Authorization:"Bearer "+K},cache:"no-store"});
     const rows=await r.json();
-    S.crewRec.status="live"; S.crewRec.list=Array.isArray(rows)?rows:[];
+    S.crewRec.status="live"; S.crewRec.list=Array.isArray(rows)?rows.filter(x=>!isVoided(x)):[]; // hide reverted rows
   }catch(e){ S.crewRec.status="error"; S.crewRec.list=[]; }
   render();
 }
@@ -1961,6 +1971,23 @@ document.addEventListener("click",e=>{
     case "enablePush": if(window.wmEnablePush) window.wmEnablePush(); break;
     case "crewAck": stageAck(id); render(); break;
     case "crewUnack": stageUnack(id); render(); break;
+    case "crewRevert": {
+      const es=S.lang==="es";
+      if(!confirm(es?"¿Revertir este estado? Se eliminará del feed y de los registros.":"Revert this status? It will be removed from the feed and records.")) break;
+      const st=el.getAttribute("data-status")||"";
+      // Optimistic: mark the row voided locally so its card vanishes immediately, then PATCH + re-poll.
+      (window.CREW_FEED||[]).forEach(function(x){ if(x&&String(x.id)===String(id)) x.status="[VOID] "+(x.status||""); });
+      (S.crewRec.list||[]).forEach(function(x){ if(x&&String(x.id)===String(id)) x.status="[VOID] "+(x.status||""); });
+      render();
+      if(window.wmRevertStatus) window.wmRevertStatus(id,st).then(function(ok){
+        if(!ok) alert(es?"No se pudo revertir (el servidor aún no tiene la clave service-role de Supabase).":"Revert failed — the server needs the Supabase service-role key (SUPABASE_SERVICE_ROLE_KEY) to be configured.");
+        // Re-sync from Supabase, then re-render so the card stays gone (success) or comes back (failure).
+        var p=window.wmPollStatus?window.wmPollStatus():null;
+        if(p&&p.then){ p.then(function(){ try{render(true);}catch(e){} }); } else { try{render(true);}catch(e){} }
+        if(S.crewRec.status!=="idle") loadCrewRecords();
+      });
+      break;
+    }
     case "notifToggle": S.notif.open=!S.notif.open; if(S.notif.open) S.notif.unread=0; render(); break;
     case "notifClose": S.notif.open=false; render(); break;
     case "notifOpen": S.notif.open=false; S.tab="projects"; S.proj.selected=id; S.proj.noteFrom=null; S.proj.stageFilter="all"; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
@@ -2120,23 +2147,33 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
     setTimeout(function(){d.remove();},14000);
     try{if(typeof Notification!=='undefined'&&Notification.permission==='granted')new Notification('WindMar — '+ev.status,{body:who});}catch(e){}
   }
+  function voided(r){return String(r&&r.status||'').indexOf('[VOID]')===0;} // reverted/soft-deleted rows
   function poll(){
-    fetch(SB_URL+'/rest/v1/job_status_events?select=*&source=neq.app-health&order=created_at.desc&limit=50',{headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY}})
+    return fetch(SB_URL+'/rest/v1/job_status_events?select=*&source=neq.app-health&order=created_at.desc&limit=50',{headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY}})
       .then(function(r){return r.ok?r.json():[];}).then(function(rows){
         if(!Array.isArray(rows))return;
         var prev=window.CREW_FEED||null;
         var changed=!prev||prev.length!==rows.length||((prev[0]&&prev[0].id)!==(rows[0]&&rows[0].id));
-        window.CREW_FEED=rows; // feed the "Crew Updates" dashboard column
+        window.CREW_FEED=rows; // feed the "Crew Updates" dashboard column (voided rows filtered by consumers)
         var seen;try{seen=JSON.parse(localStorage.getItem(KEY));}catch(e){}
         if(!Array.isArray(seen)){localStorage.setItem(KEY,JSON.stringify(rows.map(function(r){return r.id;})));}
         else{
           var seenSet={};seen.forEach(function(id){seenSet[id]=1;});
-          var fresh=rows.filter(function(r){return !seenSet[r.id];});
+          var fresh=rows.filter(function(r){return !seenSet[r.id]&&!voided(r);}); // never toast a reverted row
           if(fresh.length){localStorage.setItem(KEY,JSON.stringify(rows.map(function(r){return r.id;}).concat(seen).slice(0,300)));fresh.reverse().forEach(toast);}
         }
         if(changed&&S.tab==='itinerary'&&typeof render==='function'){try{render(true);}catch(e){}}
       }).catch(function(){});
   }
+  // Revert (soft-delete) a mistaken crew status. The anon key can NEITHER UPDATE nor DELETE this
+  // table (RLS — verified 0 rows affected), so the write runs server-side via /api/revert-status
+  // (service-role key, bypasses RLS). That endpoint PATCHes status -> "[VOID] <original>" +
+  // acknowledged:true; consumers treat a "[VOID]" prefix as removed. Returns promise<boolean>.
+  window.wmRevertStatus=function(id,status){
+    return fetch('/api/revert-status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,status:status||''})})
+      .then(function(r){return r.ok?r.json():{ok:false};}).then(function(j){return !!(j&&j.ok);}).catch(function(){return false;});
+  };
+  window.wmPollStatus=poll; // let the app force a feed re-sync after a revert
   poll();setInterval(poll,25000);window.addEventListener('focus',poll);
 })();
 </script>
@@ -2221,6 +2258,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
         var rec=(rows&&rows[0])||null;
         if(rec&&rec.status==="disabled"){ showDenied(email); return; }
         if(rec&&appsFor(rec).indexOf(APP_KEY)<0){ showDenied(email); return; }
+        try{ window.wmRole=(rec&&rec.role)||""; window.wmUser=email; if(typeof render==="function"){try{render(true);}catch(e){}} }catch(e){}
         pass();
       }).catch(function(){ pass(); });
   }
