@@ -24,11 +24,16 @@ export default async function handler(req, res) {
   if (!body || typeof body !== "object") body = {};
   const id = String(body.id || "").trim();
   const status = String(body.status || "");
+  const who = String(body.who || "admin").trim() || "admin";
+  const origNote = String(body.note || "").trim();
   if (!id) { res.status(400).json({ ok: false, error: "missing id" }); return; }
 
   const usingService = !!SERVICE_KEY;
   const key = SERVICE_KEY || ANON_KEY;
   const newStatus = "[VOID] " + status;
+  // Audit stamp: who reverted, when, and what it was — written server-side into the row's note.
+  const day = new Date().toISOString().slice(0, 10);
+  const auditNote = "↩ reverted by " + who + " · " + day + " — was: " + (origNote || status || "(empty)");
 
   try {
     const r = await fetch(SB_URL + "/rest/v1/job_status_events?id=eq." + encodeURIComponent(id), {
@@ -39,7 +44,7 @@ export default async function handler(req, res) {
         "Content-Type": "application/json",
         Prefer: "return=representation",
       },
-      body: JSON.stringify({ status: newStatus, acknowledged: true }),
+      body: JSON.stringify({ status: newStatus, acknowledged: true, note: auditNote }),
     });
     const txt = await r.text();
     let rows = []; try { rows = JSON.parse(txt); } catch (e) {}
