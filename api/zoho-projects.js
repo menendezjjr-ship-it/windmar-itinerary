@@ -147,13 +147,14 @@ export function mapDeal(r) {
     reroof: lookup(r.Windmar_Roofing) || "",
     modified: r.Modified_Time || null,
     stageModified: r.Stage_Modified_Time || null,
+    modifiedBy: lookup(r.Modified_By) || "",
     insp: inspStatus(r),
     timeline,
   };
 }
 
 const FIELDS = [
-  "Deal_Name", "Stage", "Modified_Time", "Stage_Modified_Time",
+  "Deal_Name", "Stage", "Modified_Time", "Stage_Modified_Time", "Modified_By",
   "Client_Phone", "Client_Mobile", "Client_Email", "Contact_Name", "Owner",
   "Address", "City", "State", "Zip",
   "System_Size_kW1", "Module_Count", "Module_Wattage", "Battery_Brand", "Tesla_Powerwall_Quantity",
