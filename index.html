@@ -378,7 +378,7 @@ const S={
   live:{status:"idle",ok:false,jobs:[],updated:null,err:""},
   proj:{status:"idle",ok:false,list:[],updated:null,err:"",selected:null,q:"",stageFilter:"all",alerts:[],notify:false,notes:{id:null,status:"idle",list:[]},noteFrom:null,atts:{id:null,status:"idle",groups:[]}},
   notif:{items:[],unread:0,open:false}, attnOpen:true,
-  cal:{status:"idle",records:[],y:new Date().getFullYear(),m:new Date().getMonth()+1,view:"grid",typeFilter:"all",teamFilter:[],selected:null,dayPanel:null,weekStartISO:null,err:"",bomNotes:{}},
+  cal:{status:"idle",records:[],y:new Date().getFullYear(),m:new Date().getMonth()+1,view:"grid",typeFilter:"all",teamFilter:[],q:"",selected:null,dayPanel:null,weekStartISO:null,err:"",bomNotes:{}},
   crewRec:{status:"idle",list:[],voided:[],revlogOpen:false,crew:"all",user:"all",q:""},
   instMap:{status:"idle",items:[],pinState:{status:"idle"}},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
@@ -549,11 +549,11 @@ async function loadOpsCal(silent){
 }
 // Job-type classification + colors (MSP / Install / Re-install / Removal / Service). Tweak here to retune.
 const JOB_TYPES={
-  install:  {en:"Install",    es:"Instalación",  color:"#2E6BE6", icon:"⚡"},
-  msp:      {en:"MSP",        es:"MSP",          color:"#8B5CF6", icon:"🔌"},
+  install:  {en:"Install",    es:"Instalación",  color:"#2563EB", icon:"⚡"},
+  msp:      {en:"MSP",        es:"MSP",          color:"#9333EA", icon:"🔌"},
   reinstall:{en:"Re-install", es:"Reinstalación",color:"#F59E0B", icon:"♻"},
-  removal:  {en:"Removal",    es:"Retiro",       color:"#EF4444", icon:"⛔"},
-  service:  {en:"Service",    es:"Servicio",     color:"#06B6D4", icon:"🔧"},
+  removal:  {en:"Removal",    es:"Retiro",       color:"#E11D48", icon:"⛔"},
+  service:  {en:"Service",    es:"Servicio",     color:"#14B8A6", icon:"🔧"},
 };
 function jobType(r){
   if(!r) return "install";
@@ -590,6 +590,7 @@ function wmJtipInit(){ if(window.__wmjtip) return; window.__wmjtip=true;
   document.addEventListener("mousemove",(e)=>{ if(tip.style.display!=="block")return; const el=e.target.closest&&e.target.closest("[data-jtip]"); if(!el){ tip.style.display="none"; return; } place(e); });
   window.addEventListener("scroll",()=>{ tip.style.display="none"; },true);
 }
+function calQMatch(r,q){ if(!q)return true; const s=String(q).toLowerCase(); return String(r.dlNumber||"").toLowerCase().indexOf(s)>=0||String(r.customerName||"").toLowerCase().indexOf(s)>=0||String(r.address||"").toLowerCase().indexOf(s)>=0||String(r.team||"").toLowerCase().indexOf(s)>=0; }
 function calChip(r,cont){
   const tc=jobTypeColor(r), isS=r.type==="service", hot=isS&&calHot(r.priority);
   const base="display:block;width:100%;box-sizing:border-box;font-size:11.5px;padding:4px 7px;margin-bottom:3px;border-radius:6px;cursor:pointer;overflow:hidden;font-weight:700;line-height:1.3;";
@@ -651,28 +652,19 @@ function opsCalHTML(){
   const c=S.cal, M=calM(), D=calD(), today=new Date();
   const ws=c.weekStartISO?new Date(c.weekStartISO+"T00:00:00"):calStartOfWeek(today), we=calAddDays(ws,6);
   const inView=(r)=>{ if(!r.startDate)return false; const d=new Date(r.startDate+"T12:00:00"); if(c.view==="week"||c.view==="grid"||c.view==="map")return d>=ws&&d<calAddDays(ws,7); return d.getMonth()+1===c.m&&d.getFullYear()===c.y; };
-  const scoped=c.records.filter(r=>inView(r)&&(!c.teamFilter.length||c.teamFilter.indexOf(r.team)>=0));
+  const q=(c.q||"").trim();
+  const scoped=c.records.filter(r=>inView(r)&&(!c.teamFilter.length||c.teamFilter.indexOf(r.team)>=0)&&calQMatch(r,q));
   const installCount=scoped.filter(r=>r.type==="install").length, serviceCount=scoped.filter(r=>r.type==="service").length;
   const typed=scoped.filter(r=>c.typeFilter==="all"||r.type===c.typeFilter);
   // De-dupe: same DL marked as BOTH install and service on the same day → keep install, drop the service copy.
   const _instKeys=new Set(typed.filter(r=>r.type==="install"&&r.dlNumber&&r.startDate).map(r=>r.dlNumber+"|"+r.startDate));
   const visible=typed.filter(r=>!(r.type==="service"&&r.dlNumber&&_instKeys.has(r.dlNumber+"|"+r.startDate)));
-  const tpm={}; c.records.filter(r=>inView(r)&&(c.typeFilter==="all"||r.type===c.typeFilter)).forEach(r=>{tpm[r.team]=(tpm[r.team]||0)+1;});
+  const tpm={}; c.records.filter(r=>inView(r)&&(c.typeFilter==="all"||r.type===c.typeFilter)&&calQMatch(r,q)).forEach(r=>{tpm[r.team]=(tpm[r.team]||0)+1;});
   const teamsPresent=Object.keys(tpm).map(k=>[k,tpm[k]]).sort((a,b)=>b[1]-a[1]);
   const byDate={}; visible.forEach(r=>{ calSpan(r).forEach(isoD=>{ const dd=new Date(isoD+"T12:00:00"); if(dd.getMonth()+1===c.m&&dd.getFullYear()===c.y)(byDate[dd.getDate()]=byDate[dd.getDate()]||[]).push(r); }); });
   Object.keys(byDate).forEach(d=>byDate[d].sort((a,b)=>(calTMin(a)-calTMin(b))||a.type.localeCompare(b.type)));
   const compact=window.innerWidth<768, maxChips=compact?2:3;
-  // month grid
-  const firstDay=new Date(c.y,c.m-1,1).getDay(), daysInMonth=new Date(c.y,c.m,0).getDate();
-  let cells="";
-  for(let i=0;i<firstDay;i++) cells+=`<div style="background:rgba(0,0,0,.15);border-left:1px solid var(--line);border-bottom:1px solid var(--line);min-height:${compact?72:122}px;overflow:hidden"></div>`;
-  for(let day=1;day<=daysInMonth;day++){ const recs=byDate[day]||[]; const ins=recs.filter(r=>r.type==="install"), svc=recs.filter(r=>r.type==="service"); const items=[]; for(let k=0;k<Math.max(ins.length,svc.length);k++){ if(k<svc.length)items.push(svc[k]); if(k<ins.length)items.push(ins[k]); } const isT=day===today.getDate()&&c.m===today.getMonth()+1&&c.y===today.getFullYear(); const dow=new Date(c.y,c.m-1,day).getDay(), wknd=dow===0||dow===6;
-    cells+=`<div ${recs.length?`data-action="calDay" data-id="${day}"`:""} style="padding:${compact?'4px 3px':'6px 7px'};border-left:1px solid var(--line);border-bottom:1px solid var(--line);min-height:${compact?72:122}px;overflow:hidden;background:${isT?'rgba(248,155,36,.10)':wknd?'rgba(255,255,255,.015)':'transparent'};cursor:${recs.length?'pointer':'default'};${isT?'outline:2px solid var(--wh-orange);outline-offset:-2px;':''}">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px"><span style="font-size:${compact?11:13}px;font-weight:${isT?800:600};color:${isT?'var(--wh-orange)':'var(--text-dim)'}">${day}</span>${recs.length?`<span style="font-size:9px;font-weight:700;color:#7c8aa5">${recs.length}</span>`:""}</div>
-      ${(()=>{const isoDay=calYMD(new Date(c.y,c.m-1,day));return items.slice(0,maxChips).map(r=>calChip(r,r.startDate!==isoDay)).join("");})()}
-      ${recs.length>maxChips?`<div data-action="calDay" data-id="${day}" style="font-size:10px;color:var(--wh-orange);font-weight:700;cursor:pointer;margin-top:2px">+${recs.length-maxChips} ${S.lang==='es'?'más':'more'}</div>`:""}</div>`;
-  }
-  const monthGrid=`<div class="card" style="border-radius:12px;overflow:hidden"><div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-bottom:1px solid var(--line)">${D.map(d=>`<div style="padding:${compact?'6px 4px':'10px 8px'};text-align:center;font-weight:600;font-size:${compact?10:12}px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em">${d}</div>`).join("")}</div><div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr))">${cells}</div></div>`;
+  // (month view is a crew×month horizontal grid, built below after cityOf/es/teamColor are in scope)
   // week
   let weekHTML=""; for(let i=0;i<7;i++){ const d=calAddDays(ws,i); const dIso=calYMD(d); const list=visible.filter(r=>calSpan(r).indexOf(dIso)>=0).sort((a,b)=>(calTMin(a)-calTMin(b))); const td=dIso===calYMD(today);
     weekHTML+=`<div class="card" style="border-radius:12px;overflow:hidden;border:1px solid ${td?'var(--wh-orange)':'var(--line)'}"><div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:${td?'rgba(248,155,36,.10)':'rgba(255,255,255,.02)'};${list.length?'border-bottom:1px solid var(--line)':''}"><span style="font-weight:800;font-size:15px;color:${td?'var(--wh-orange)':'var(--text)'}">${D[d.getDay()]}</span><span style="color:var(--text-dim);font-size:13px">${M[d.getMonth()].slice(0,3)} ${d.getDate()}</span>${td?`<span style="font-size:9px;font-weight:800;color:var(--wh-orange)">${S.lang==='es'?'HOY':'TODAY'}</span>`:""}<span style="margin-left:auto;font-size:12px;font-weight:600;color:var(--text-dim)">${list.length} ${list.length!==1?(S.lang==='es'?'trabajos':'jobs'):(S.lang==='es'?'trabajo':'job')}</span></div>${list.map(r=>calRow(r,r.startDate!==dIso)).join("")}</div>`; }
@@ -694,6 +686,22 @@ function opsCalHTML(){
     return `<div style="display:grid;grid-template-columns:${gCols}"><div style="padding:8px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);border-left:4px solid ${col};position:sticky;left:0;background:var(--bg-2);z-index:2"><div style="font-weight:800;font-size:12.5px;line-height:1.2">${esc(team)}</div><div style="font-size:10px;color:var(--text-dim)">${gByTeam[team].length} ${es?'trab.':'jobs'}</div></div>${cells}</div>`;
   }).join("");
   const gridView=`<div class="card" style="border-radius:12px;overflow:auto;max-height:74vh"><div style="min-width:1020px">${gHead}${gTeams.length?gBody:`<div style="padding:44px;text-align:center;color:var(--text-dim)">${es?'Sin trabajos esta semana':'No jobs scheduled this week'}</div>`}</div></div>`;
+  // month view = simplified crew×month horizontal-scroll grid (same cell styling as the weekly Crew Grid, spanning every day of the selected month)
+  const mDaysInMonth=new Date(c.y,c.m,0).getDate();
+  const mDays=[]; for(let dd=1;dd<=mDaysInMonth;dd++) mDays.push(new Date(c.y,c.m-1,dd));
+  const mByTeam={}; visible.forEach(r=>{(mByTeam[r.team]=mByTeam[r.team]||[]).push(r);});
+  const mTeams=Object.keys(mByTeam).sort((a,b)=>a.localeCompare(b));
+  const mCols="160px repeat("+mDaysInMonth+",120px)", mMinW=160+mDaysInMonth*120;
+  const mHead=`<div style="display:grid;grid-template-columns:${mCols};min-width:${mMinW}px;position:sticky;top:0;z-index:3">
+    <div style="padding:10px 12px;border-bottom:2px solid var(--line);border-right:1px solid var(--line);font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);position:sticky;left:0;background:var(--panel);z-index:4">${es?'Cuadrilla':'Crew'}</div>
+    ${mDays.map(d=>{const td=calYMD(d)===calYMD(today);return `<div style="padding:8px 4px;text-align:center;border-bottom:2px solid var(--line);border-right:1px solid var(--line);background:${td?'rgba(248,155,36,.12)':'var(--panel)'}"><div style="font-weight:700;font-size:10px;color:var(--text-dim);text-transform:uppercase">${D[d.getDay()]}</div><div style="font-weight:800;font-size:13px;color:${td?'var(--wh-orange)':'var(--text)'}">${d.getDate()}</div></div>`;}).join("")}</div>`;
+  const mBody=mTeams.map(team=>{ const col=teamColor(team);
+    const cells=mDays.map(d=>{ const iso=calYMD(d); const td=iso===calYMD(today); const jobs=mByTeam[team].filter(r=>calSpan(r).indexOf(iso)>=0).sort((a,b)=>(calTMin(a)-calTMin(b)));
+      return `<div style="padding:4px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);min-height:58px;background:${td?'rgba(248,155,36,.05)':'transparent'}">${jobs.map(j=>{const jc=jobTypeColor(j);const jcont=j.startDate!==iso;return `<div data-action="calSelectJob" data-id="${esc(j.id)}" data-jtip="${esc(j.id)}" style="background:${jc};color:${textOn(jc)};border-radius:6px;padding:3px 6px;margin-bottom:3px;cursor:pointer;font-size:10.5px;line-height:1.22;overflow:hidden">${jcont?'<span style="font-weight:900">↪ </span>':'<span style="opacity:.9">'+jobTypeIcon(j)+' </span>'}<span style="font-weight:800">${esc(j.dlNumber||j.id)}</span><div style="opacity:.92;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(cityOf(j.address)||j.customerName||"")}</div></div>`;}).join("")}</div>`;
+    }).join("");
+    return `<div style="display:grid;grid-template-columns:${mCols};min-width:${mMinW}px"><div style="padding:8px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);border-left:4px solid ${col};position:sticky;left:0;background:var(--bg-2);z-index:2"><div style="font-weight:800;font-size:12.5px;line-height:1.2">${esc(team)}</div><div style="font-size:10px;color:var(--text-dim)">${mByTeam[team].length} ${es?'trab.':'jobs'}</div></div>${cells}</div>`;
+  }).join("");
+  const monthGrid=`<div class="card" style="border-radius:12px;overflow:auto;max-height:74vh"><div style="min-width:${mMinW}px">${mHead}${mTeams.length?mBody:`<div style="padding:44px;text-align:center;color:var(--text-dim)">${es?'Sin trabajos este mes':'No jobs scheduled this month'}</div>`}</div></div>`;
   // list
   const byTeam={}; visible.forEach(r=>{(byTeam[r.team]=byTeam[r.team]||[]).push(r);});
   const listKeys=Object.keys(byTeam).sort((a,b)=>byTeam[b].length-byTeam[a].length);
@@ -735,6 +743,13 @@ function opsCalHTML(){
         <button class="btn3d sm" data-action="calRefresh">${c.status==='loading'?'…':'⟳'}</button>
       </div>
     </div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <div style="position:relative;flex:1;min-width:240px;max-width:560px">
+        <span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-dim);font-size:14px;pointer-events:none">🔍</span>
+        <input id="calSearch" class="input" style="width:100%;padding-left:34px" value="${esc(c.q||"")}" placeholder="${es?'Buscar DL#, cliente, dirección, cuadrilla…':'Search DL#, customer, address, crew…'}" autocomplete="off"/>
+      </div>
+      ${q?`<span style="font-size:12px;color:var(--text-dim);font-weight:700">${visible.length} ${es?(visible.length===1?'resultado':'resultados'):(visible.length===1?'result':'results')}</span><button class="btn3d ghost sm" data-action="calSearchClear">✕ ${es?'Limpiar':'Clear'}</button>`:""}
+    </div>
     ${calKpiRow}
     <div class="chipbar" style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">${[["all","All","Todos",installCount+serviceCount],["install","Installs","Instalaciones",installCount],["service","Service","Servicio",serviceCount]].map(s=>{const on=c.typeFilter===s[0];return `<button data-action="calType" data-id="${s[0]}" class="btn3d ${on?'':'ghost'} sm">${s[0]==='install'?'⚡ ':s[0]==='service'?'🔧 ':''}${S.lang==='es'?s[2]:s[1]} <span style="background:${on?'rgba(255,255,255,.25)':'var(--bg)'};border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700">${s[3]}</span></button>`;}).join("")}</div>
     <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:14px;background:var(--panel);padding:10px 20px;border-radius:12px;border:1px solid var(--line)">
@@ -743,7 +758,7 @@ function opsCalHTML(){
       <button class="btn3d grey sm" data-action="calNext">▶</button>
     </div>
     ${teamsPresent.length?`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;align-items:center"><span style="font-size:11px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em">${S.lang==='es'?'Equipos:':'Teams:'}</span>${teamsPresent.map(tt=>{const team=tt[0],n=tt[1],col=teamColor(team),act=c.teamFilter.indexOf(team)>=0,dim=c.teamFilter.length&&!act;return `<button data-action="calTeam" data-id="${esc(team)}" style="display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600;background:${act?col:'var(--panel)'};color:${act?textOn(col):'var(--text)'};border:1.5px solid ${col};opacity:${dim?.4:1}"><span style="width:9px;height:9px;border-radius:50%;background:${act?textOn(col):col}"></span>${esc(team)}<span style="opacity:.7;font-weight:700">${n}</span></button>`;}).join("")}${c.teamFilter.length?`<button class="btn3d ghost sm" data-action="calClearTeams">✕ ${S.lang==='es'?'Limpiar':'Clear'}</button>`:""}</div>`:""}
-    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin:0 0 12px;font-size:12px;font-weight:700;color:var(--text-dim)"><span style="font-size:11px;text-transform:uppercase;letter-spacing:.05em">${es?'Tipo':'Type'}:</span>${Object.keys(JOB_TYPES).map(k=>{const tt=JOB_TYPES[k];return `<span style="display:flex;align-items:center;gap:6px"><span style="width:13px;height:13px;border-radius:4px;background:${tt.color}"></span>${tt.icon} ${es?tt.es:tt.en}</span>`;}).join("")}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px"><span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin-right:2px">${es?'Tipo':'Type'}</span>${Object.keys(JOB_TYPES).map(k=>{const tt=JOB_TYPES[k];return `<span style="display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:999px;background:var(--panel);border:1px solid var(--line);font-size:12px;font-weight:700;color:var(--text)"><span style="width:11px;height:11px;border-radius:50%;background:${tt.color};box-shadow:0 0 0 3px ${tt.color}26"></span><span style="font-size:12.5px">${tt.icon}</span>${es?tt.es:tt.en}</span>`;}).join("")}</div>
     ${view}${dayModal}${selModal}</div>`;
 }
 function calendarTabHTML(){ return opsCalHTML(); }
@@ -2167,6 +2182,7 @@ document.addEventListener("click",e=>{
     case "calType": S.cal.typeFilter=id; render(); break;
     case "calTeam": { const i=S.cal.teamFilter.indexOf(id); if(i>=0)S.cal.teamFilter.splice(i,1); else S.cal.teamFilter.push(id); render(); break; }
     case "calClearTeams": S.cal.teamFilter=[]; render(); break;
+    case "calSearchClear": S.cal.q=""; render(); break;
     case "calSelectJob": { S.cal.selected=id; const _jr=S.cal.records.find(x=>x.id===id); if(_jr&&_jr.type!=="service"&&_jr.dlNumber) loadBomNotes(_jr.dlNumber); render(); break; }
     case "calDay": S.cal.dayPanel=Number(id); render(); break;
     case "calClose": S.cal.selected=null; S.cal.dayPanel=null; render(); break;
@@ -2251,7 +2267,8 @@ document.addEventListener("click",e=>{
 });
 document.addEventListener("keydown",function(e){ if(e.key==="Enter"&&e.target&&e.target.id==="scSearch"){ S.sc.q=e.target.value; loadSiteCapture(S.sc.q.trim()); } });
 document.addEventListener("input",function(e){
-  if(e.target.id==="projSearch"){ S.proj.q=e.target.value; render(); }
+  if(e.target.id==="calSearch"){ S.cal.q=e.target.value; render(); }
+  else if(e.target.id==="projSearch"){ S.proj.q=e.target.value; render(); }
   else if(e.target.id==="recSearch"){ S.crewRec.q=e.target.value; render(); }
   else if(e.target.hasAttribute&&e.target.hasAttribute("data-cnew")){ S.sc.cnew[e.target.getAttribute("data-cnew")]=e.target.value; const pv=document.getElementById("scNamePreview"); if(pv){ pv.textContent=((S.sc.cnew.dl||"")+" "+(S.sc.cnew.customer||"")).trim()||"(enter a DL #)"; } }
   else if(e.target.id==="scSearch"){ S.sc.q=e.target.value; render(); }
