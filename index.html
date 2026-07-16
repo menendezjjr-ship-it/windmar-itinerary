@@ -2619,6 +2619,7 @@ document.addEventListener("change",function(e){
 render();
 loadJobs();
 loadProjects();
+loadCoordReady(true); // preload the Coordinator "Ready to Schedule" feed (silent) so the tab is instant on first paint
 loadSCTemplates();
 loadSiteCapture("",true); // log in to SiteCapture immediately so the tab opens instantly (silent — no flash)
 // Live polling so Engineering-stage alerts fire app-wide while the dashboard is open (silent — no flash).
