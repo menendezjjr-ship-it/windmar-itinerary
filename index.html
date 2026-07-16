@@ -383,7 +383,7 @@ const S={
   instMap:{status:"idle",items:[],pinState:{status:"idle"}},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
   dispatch:{ open:false, updated:null, sig:null, geo:{status:"idle"} },
-  coord:{ q:"", selected:null, notes:{} }, // Coordinator tab: search, open detail key, per-DL install-notes cache
+  coord:{ q:"", selected:null, notes:{}, fields:{status:"idle",map:{},team:[]}, edit:null, savedMsg:null }, // Coordinator tab: search, open detail key, per-DL record cache, field metadata, active editor
   zx:{ proj:{q:"",status:"idle",list:[],err:""}, cal:{q:"",status:"idle",list:[],err:""} }, // all-time Zoho word-search augmentation for both search bars
   wx:{ cityIdx:0, current:null, days:[], live:false, loading:false },
   zoho:{ syncing:false, lastSync:new Date(), showCode:false },
@@ -1283,14 +1283,73 @@ function projectDetailHTML(p){
 const ZOHO_ORG="org666151142";
 // Fetch the Installation Notes for one DL (cached per DL). A Ready-to-Schedule install may
 // have no start date yet, so it's not in the calendar window — look it up directly.
-function loadCoordNotes(dl){ const key=String(dl||"").toUpperCase().replace(/\s+/g,""); if(!key) return;
-  const cur=S.coord.notes[key]; if(cur&&(cur.status==="loading"||cur.status==="live")) return;
-  S.coord.notes[key]={status:"loading",text:"",recordId:""};
+function loadCoordNotes(dl,force){ const key=String(dl||"").toUpperCase().replace(/\s+/g,""); if(!key) return;
+  const cur=S.coord.notes[key]; if(!force&&cur&&(cur.status==="loading"||cur.status==="live")) return;
+  S.coord.notes[key]={status:"loading",text:(cur&&cur.text)||"",recordId:(cur&&cur.recordId)||"",rec:(cur&&cur.rec)||null};
   const refreshTip=()=>{ const tp=document.getElementById("wmjtip"); if(tp&&tp.style.display==="block"&&tp._ctip===key) tp.innerHTML=coordTipHTML(dl); };
   fetch("/api/zoho-jobs?dl="+encodeURIComponent(dl),{cache:"no-store"}).then(r=>r.json()).then(j=>{
-    S.coord.notes[key]=(j&&j.ok)?{status:"live",text:j.installNotes||"",recordId:j.recordId||""}:{status:"error",text:"",recordId:""};
+    S.coord.notes[key]=(j&&j.ok)?{status:"live",text:j.installNotes||"",recordId:j.recordId||"",rec:j.rec||null}:{status:"error",text:"",recordId:"",rec:null};
     refreshTip(); if(S.tab==="coordinator") render(true);
-  }).catch(()=>{ S.coord.notes[key]={status:"error",text:"",recordId:""}; refreshTip(); if(S.tab==="coordinator") render(true); });
+  }).catch(()=>{ S.coord.notes[key]={status:"error",text:"",recordId:"",rec:null}; refreshTip(); if(S.tab==="coordinator") render(true); });
+}
+// Field metadata (picklist values + Installation_Team lookup records) for safe editor inputs. Loaded once.
+function loadCoordFields(){ const F=S.coord.fields; if(F.status==="loading"||F.status==="live") return;
+  S.coord.fields={status:"loading",map:F.map||{},team:F.team||[]};
+  fetch("/api/zoho-fields?module=Installation",{cache:"no-store"}).then(r=>r.json()).then(j=>{
+    S.coord.fields=(j&&j.ok)?{status:"live",map:j.fields||{},team:(j.lookups&&j.lookups.Installation_Team)||[]}:{status:"error",map:{},team:[]};
+    if(S.tab==="coordinator") render(true);
+  }).catch(()=>{ S.coord.fields={status:"error",map:{},team:[]}; if(S.tab==="coordinator") render(true); });
+}
+// Editable Installation fields (Zoho API names VERIFIED live). g=group, ta=textarea, bool=checkbox, ro=read-only display.
+const COORD_EDIT_FIELDS=[
+  {k:"Installation_Team",en:"Installation Team",es:"Cuadrilla",g:"sched"},
+  {k:"Stage",en:"Stage",es:"Etapa",g:"sched"},
+  {k:"Number_of_Days_Needed",en:"Days Needed",es:"Días Necesarios",g:"sched"},
+  {k:"Number_of_Days_Planned_for_Install_default_2",en:"Days Planned",es:"Días Planificados",g:"sched"},
+  {k:"Installation_Proposed_Date",en:"Proposed Date",es:"Fecha Propuesta",g:"sched"},
+  {k:"Installation_Confirmed_Date",en:"Confirmed Date",es:"Fecha Confirmada",g:"sched"},
+  {k:"Installation_Start_Date",en:"Start Date",es:"Fecha de Inicio",g:"sched"},
+  {k:"Installation_Continuation_Date",en:"Continuation Date",es:"Fecha de Continuación",g:"sched"},
+  {k:"Installation_Complete_Date",en:"Complete Date",es:"Fecha de Finalización",g:"sched"},
+  {k:"R_R_Completed_Date",en:"R&R Completed Date",es:"Fecha R&R Completada",g:"sched"},
+  {k:"VIP_Installation",en:"VIP Installation",es:"Instalación VIP",g:"sched",ro:1},
+  {k:"Installation_Notes",en:"Installation Notes",es:"Notas de Instalación",g:"notes",ta:1},
+  {k:"Roof_Notes",en:"Roof Notes",es:"Notas de Techo",g:"notes",ta:1},
+  {k:"AHJ_Specific_Install_Notes",en:"AHJ-Specific Install Notes",es:"Notas de Permiso (AHJ)",g:"notes",ta:1},
+  {k:"Language_Preference",en:"Language Preference",es:"Idioma Preferido",g:"other"},
+  {k:"Customer_Access_Granted",en:"Customer Access Granted",es:"Acceso del Cliente Concedido",g:"other",bool:1},
+  {k:"Drone_No_Fly_Zone",en:"Drone No-Fly Zone",es:"Zona de Exclusión de Drones",g:"other",bool:1},
+];
+// Display a stored record value in read-only mode.
+function coordRecVal(k,rec){ if(!rec) return ""; let v=rec[k];
+  if(k==="Installation_Team") return (v&&v.name)||"";
+  if(v===true) return S.lang==="es"?"Sí":"Yes";
+  if(v===false) return S.lang==="es"?"No":"No";
+  return v==null?"":String(v);
+}
+// Render the correct input for one editable field, prefilled from S.coord.edit.form.
+function coordFieldInputHTML(fd){ const es=S.lang==="es", E=S.coord.edit, meta=(S.coord.fields.map||{})[fd.k]||{}, val=E.form[fd.k];
+  const id="cf_"+fd.k, base="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--bg-2);color:var(--text);font-size:13.5px";
+  const dt=meta.data_type||"";
+  const ro=v=>`<div style="font-size:13px;color:var(--text-dim)">${esc(coordRecVal(fd.k,E._rec)||"—")} <span style="font-size:10px;opacity:.7">(${es?"solo lectura":"read-only"})</span></div>`;
+  if(fd.ro||meta.read_only) return ro();
+  if(fd.bool||dt==="boolean") return `<label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" id="${id}" data-cf="${fd.k}" ${val?"checked":""} style="width:18px;height:18px"/> <span style="font-size:13px">${val?(es?"Sí":"Yes"):(es?"No":"No")}</span></label>`;
+  if(fd.ta) return `<textarea id="${id}" data-cf="${fd.k}" rows="3" style="${base};resize:vertical;font-family:inherit;line-height:1.5">${esc(val)}</textarea>`;
+  if(dt==="picklist"){ const opts=meta.picklist||[]; if(!opts.length) return ro();
+    return `<select id="${id}" data-cf="${fd.k}" style="${base}"><option value="">—</option>`+opts.map(o=>`<option value="${esc(o)}" ${String(val)===String(o)?"selected":""}>${esc(o)}</option>`).join("")+`</select>`; }
+  if(dt==="lookup"||fd.k==="Installation_Team"){ const opts=S.coord.fields.team||[]; if(!opts.length) return ro();
+    return `<select id="${id}" data-cf="${fd.k}" style="${base}"><option value="">—</option>`+opts.map(o=>`<option value="${esc(o.id)}" ${String(val)===String(o.id)?"selected":""}>${esc(o.name)}</option>`).join("")+`</select>`; }
+  if(dt==="date") return `<input type="date" id="${id}" data-cf="${fd.k}" value="${esc(val)}" style="${base}"/>`;
+  if(dt==="integer"||dt==="double"||dt==="number"||dt==="currency") return `<input type="number" id="${id}" data-cf="${fd.k}" value="${esc(val)}" min="0" step="1" style="${base}"/>`;
+  return `<input type="text" id="${id}" data-cf="${fd.k}" value="${esc(val)}" style="${base}"/>`;
+}
+// One field cell — input (edit mode) or value (read-only). Textareas span full width.
+function coordFieldCell(fd,rec,editing){ const es=S.lang==="es", lbl=es?fd.es:fd.en, span=fd.ta?"grid-column:1/-1":"";
+  const inner=editing?coordFieldInputHTML(fd):`<div style="font-size:13.5px;font-weight:500;white-space:pre-wrap;line-height:1.5">${esc(coordRecVal(fd.k,rec))||'<span style="color:var(--text-dim)">—</span>'}</div>`;
+  return `<div style="${span}"><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">${esc(lbl)}</div>${inner}</div>`;
+}
+function coordGroupHTML(title,group,rec,editing){ const rows=COORD_EDIT_FIELDS.filter(f=>f.g===group);
+  return `<div style="grid-column:1/-1;margin-top:8px"><div style="font-size:11px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">${esc(title)}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px">${rows.map(fd=>coordFieldCell(fd,rec,editing)).join("")}</div></div>`;
 }
 function coordinatorHTML(){
   const es=S.lang==="es", P=S.proj, C=S.coord;
@@ -1326,35 +1385,51 @@ function coordDetailModal(){
   const it=(p.insp&&p.insp.items||[]).find(x=>x.type===ptype)||(p.insp&&p.insp.items[0])||null;
   const tm=it?inspTypeMeta(it.type):{c:"var(--wh-grey)"}; const tel=p.mobile||p.phone;
   const dlKey=String(p.num||"").toUpperCase().replace(/\s+/g,"");
-  const nc=S.coord.notes[dlKey]||{status:"idle",text:"",recordId:""};
+  const nc=S.coord.notes[dlKey]||{status:"idle",text:"",recordId:"",rec:null};
+  const editing=!!(S.coord.edit&&S.coord.edit.dl===dlKey);
+  const rec=editing?S.coord.edit._rec:nc.rec;
   const f=(l,v)=>v?`<div><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${l}</div><div style="font-size:14px;font-weight:500">${esc(v)}</div></div>`:"";
-  // Installation Notes block
-  let notesInner;
-  if(nc.status==="loading"||nc.status==="idle") notesInner=`<div style="font-size:12px;color:var(--text-dim)">⟳ ${es?"Cargando notas…":"Loading notes…"}</div>`;
-  else if(nc.status==="error") notesInner=`<div style="font-size:12px;color:var(--warn)">${es?"No se pudieron cargar las notas.":"Couldn't load notes."}</div>`;
-  else if(!nc.text) notesInner=`<div style="font-size:12.5px;color:var(--text-dim)">${es?"Sin notas de instalación.":"No installation notes."}</div>`;
-  else notesInner=`<div style="font-size:13.5px;font-weight:500;line-height:1.55;white-space:pre-wrap;color:var(--text)">${esc(nc.text)}</div>`;
-  const notesBlock=`<div style="grid-column:1/-1;margin-top:4px"><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">📝 ${es?"Notas de Instalación (Zoho)":"Installation Notes (Zoho)"}</div><div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px">${notesInner}</div></div>`;
-  const body=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+  // Deal-level summary (from the pipeline record) — always read-only context.
+  const summary=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
     ${f(es?"Tipo de Inspección":"Inspection Type",it?inspTypeText(it.type):"")}
-    ${f(es?"Etapa":"Stage",p.stage)}
     ${f("AHJ",p.ahj)}
     ${f(es?"Sistema":"System",[p.systemKw?p.systemKw+" kW":"",p.modules?p.modules+" mod":""].filter(Boolean).join(" · "))}
     ${f(es?"Batería":"Battery",p.battery)}
     ${f(es?"Financiamiento":"Finance",p.finance)}
-    <div style="grid-column:1/-1">${f(es?"Dirección":"Address",p.address)}</div>
-    ${notesBlock}</div>`;
+    <div style="grid-column:1/-1">${f(es?"Dirección":"Address",p.address)}</div></div>`;
+  // Editable Installation record: loading / error / not-found handling, else grouped sections.
+  let recBlock;
+  if(nc.status==="loading"||nc.status==="idle") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">⟳ ${es?"Cargando registro de instalación…":"Loading installation record…"}</div>`;
+  else if(nc.status==="error") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--warn)">${es?"No se pudo cargar el registro.":"Couldn't load the record."}</div>`;
+  else if(!rec||!nc.recordId) recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">${es?"No se encontró un registro de instalación editable para este DL.":"No editable Installation record found for this DL."}</div>`;
+  else recBlock=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px">
+      ${coordGroupHTML((es?"🗓 Información de Programación":"🗓 Schedule Information"),"sched",rec,editing)}
+      ${coordGroupHTML((es?"📝 Notas":"📝 Notes"),"notes",rec,editing)}
+      ${coordGroupHTML((es?"⚙️ Otros":"⚙️ Other"),"other",rec,editing)}</div>`;
+  // Save/error/success banners (edit mode) + saved flash (after a successful write).
+  const E=S.coord.edit;
+  const editBanner=editing&&E&&E.err?`<div style="grid-column:1/-1;margin-top:10px;background:rgba(239,68,68,.12);border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--warn)">⚠ ${esc(E.err)}</div>`:"";
+  const savedFlash=(!editing&&S.coord.savedMsg&&S.coord.savedMsg.dl===dlKey)?`<div style="margin-top:12px;background:rgba(34,197,94,.12);border:1px solid var(--ok);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--ok)">✓ ${es?"Guardado en Zoho":"Saved to Zoho"} (${S.coord.savedMsg.n} ${es?"campo(s)":"field(s)"})</div>`:"";
+  const canEdit=nc.status==="live"&&nc.recordId&&rec;
+  const actionsRO=canEdit?`<button class="btn3d sm" data-action="coordEditStart" style="background:#0EA5E9">✏️ ${es?"Editar":"Edit"}</button>`:"";
+  const fieldsLoading=editing&&S.coord.fields.status==="loading"?`<div style="grid-column:1/-1;font-size:11.5px;color:var(--text-dim);margin-top:6px">⟳ ${es?"Cargando opciones de campos…":"Loading field options…"}</div>`:"";
+  const actionsEdit=editing?`<div style="display:flex;gap:10px;margin-top:16px"><button class="btn3d green" data-action="coordSave" ${E&&E.saving?"disabled":""} style="flex:1;padding:12px;font-size:14px">${E&&E.saving?"⟳ "+(es?"Guardando…":"Saving…"):"💾 "+(es?"Guardar cambios":"Save changes")}</button><button class="btn3d grey" data-action="coordEditCancel" ${E&&E.saving?"disabled":""} style="padding:12px 18px;font-size:14px">${es?"Cancelar":"Cancel"}</button></div>`:"";
   // Open-in-Zoho-Install: link the Installation record when its id is known, else a Zoho search.
   const zohoInstallUrl=nc.recordId?`https://crm.zoho.com/crm/${ZOHO_ORG}/tab/CustomModule7/${encodeURIComponent(nc.recordId)}`:`https://crm.zoho.com/crm/${ZOHO_ORG}/search?searchword=${encodeURIComponent(p.num||p.name||"")}`;
   const inner=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px"><div style="min-width:0">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">${it?`<span class="pill" style="background:${tm.c};font-size:10px">🔍 ${esc(inspTypeText(it.type))}</span>`:""}<span class="pill" style="background:#F89B24;font-size:10px">${es?"Listo p/Programar":"Ready to Schedule"}</span></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">${it?`<span class="pill" style="background:${tm.c};font-size:10px">🔍 ${esc(inspTypeText(it.type))}</span>`:""}<span class="pill" style="background:#F89B24;font-size:10px">${es?"Listo p/Programar":"Ready to Schedule"}</span>${editing?`<span class="pill" style="background:#0EA5E9;font-size:10px">✏️ ${es?"Editando":"Editing"}</span>`:""}</div>
       <h3 style="margin:0;font-size:20px;font-weight:700">${p.num?`<span style="color:var(--wh-orange)">${esc(p.num)} </span>`:""}${esc(p.name||"")}</h3>
       ${p.address?`<p style="margin:4px 0 0;color:var(--text-dim);font-size:13px">📍 <a href="https://maps.google.com/?q=${encodeURIComponent(p.address)}" target="_blank" rel="noopener" style="color:var(--wh-blue-light)">${esc(p.address)}</a></p>`:""}
       ${tel?`<div style="margin-top:8px"><a class="btn3d green sm" href="tel:${esc(String(tel).replace(/[^0-9+]/g,""))}">📞 ${esc(tel)}</a></div>`:""}
-    </div><button class="btn3d grey sm" data-action="coordClose">✕</button></div>
-    ${body}
+    </div><div style="display:flex;gap:8px;flex-shrink:0">${editing?"":actionsRO}<button class="btn3d grey sm" data-action="coordClose">✕</button></div></div>
+    ${savedFlash}
+    ${summary}
+    ${recBlock}
+    ${fieldsLoading}
+    ${editBanner}
+    ${actionsEdit}
     <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)"><a class="btn3d blue" href="${zohoInstallUrl}" target="_blank" rel="noopener" style="display:block;text-align:center;font-size:15px;padding:13px">🔗 ${es?"Abrir en Zoho Instalación":"Open in Zoho Install"}</a></div>`;
-  return `<div data-action="coordClose" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px"><div data-action="noop" class="card rise" style="border-radius:16px;max-width:560px;width:100%;max-height:85vh;overflow:auto;padding:24px">${inner}</div></div>`;
+  return `<div data-action="${editing?'noop':'coordClose'}" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px"><div data-action="noop" class="card rise" style="border-radius:16px;max-width:600px;width:100%;max-height:88vh;overflow:auto;padding:24px">${inner}</div></div>`;
 }
 /* ── All-time Zoho word-search augmentation (Projects Pipeline + Calendar search bars).
    Loaded lists only cover the pipeline / calendar window; when the query has FEW/NO local
@@ -2287,8 +2362,48 @@ document.addEventListener("click",e=>{
     case "selectProject": S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
     case "projStageFocus": S.proj.noteFrom=(id&&S.proj.noteFrom!==id)?id:null; render(); break;
     case "closeProject": S.proj.selected=null; S.proj.noteFrom=null; render(); break;
-    case "coordSelect": { S.coord.selected=id; const pid=String(id||"").split("|")[0]; const pp=(S.proj.list||[]).find(x=>x.id===pid); if(pp&&pp.num) loadCoordNotes(pp.num); render(); break; }
-    case "coordClose": S.coord.selected=null; render(); break;
+    case "coordSelect": { S.coord.selected=id; S.coord.edit=null; S.coord.savedMsg=null; const pid=String(id||"").split("|")[0]; const pp=(S.proj.list||[]).find(x=>x.id===pid); if(pp&&pp.num) loadCoordNotes(pp.num); loadCoordFields(); render(); break; }
+    case "coordClose": S.coord.selected=null; S.coord.edit=null; render(); break;
+    case "coordEditStart": {
+      const es=S.lang==="es", k=String(S.coord.selected||"").split("|")[0]; const pp=(S.proj.list||[]).find(x=>x.id===k);
+      const dlKey=String(pp&&pp.num||"").toUpperCase().replace(/\s+/g,""); const nc=S.coord.notes[dlKey];
+      if(!nc||nc.status!=="live"||!nc.recordId||!nc.rec){ alert(es?"El registro aún no está listo. Intenta de nuevo en un momento.":"Record isn't ready yet. Try again in a moment."); break; }
+      loadCoordFields(); // ensure picklist/lookup options are available
+      const rec=nc.rec, form={};
+      COORD_EDIT_FIELDS.forEach(fd=>{ if(fd.ro) return; let v=rec[fd.k]; if(fd.k==="Installation_Team") v=(v&&v.id)||""; if(v==null) v=fd.bool?false:""; form[fd.k]=v; });
+      S.coord.edit={dl:dlKey,recordId:nc.recordId,saving:false,err:"",form,orig:JSON.parse(JSON.stringify(form)),_rec:rec};
+      S.coord.savedMsg=null; render(); break;
+    }
+    case "coordEditCancel": S.coord.edit=null; render(); break;
+    case "coordSave": {
+      const es=S.lang==="es", E=S.coord.edit; if(!E||E.saving) break;
+      // Collect ONLY changed, editable fields.
+      const payload={}, changedLabels=[];
+      COORD_EDIT_FIELDS.forEach(fd=>{ if(fd.ro) return; const meta=(S.coord.fields.map||{})[fd.k]||{}; if(meta.read_only) return;
+        let nv=E.form[fd.k], ov=E.orig[fd.k];
+        let cmpN=(nv==null?"":String(nv)), cmpO=(ov==null?"":String(ov));
+        if(cmpN===cmpO) return;
+        let out=nv;
+        if(fd.bool) out=!!nv;
+        else if(fd.k==="Number_of_Days_Planned_for_Install_default_2") out=(nv===""||nv==null)?null:Number(nv);
+        payload[fd.k]=out;
+        // human label for the confirm summary
+        let disp=out; if(fd.k==="Installation_Team"){ const t=(S.coord.fields.team||[]).find(x=>String(x.id)===String(out)); disp=t?t.name:(out||"(empty)"); }
+        if(disp===true)disp=es?"Sí":"Yes"; else if(disp===false)disp="No"; else if(disp===null||disp==="")disp="(empty)";
+        changedLabels.push("• "+(es?fd.es:fd.en)+": "+disp);
+      });
+      const keys=Object.keys(payload);
+      if(!keys.length){ E.err=es?"No hay cambios para guardar.":"No changes to save."; render(); break; }
+      if(!confirm((es?"¿Guardar estos cambios en Zoho? (Escribe en producción)\n\n":"Save these changes to Zoho? (Writes to production)\n\n")+changedLabels.join("\n"))) break;
+      E.saving=true; E.err=""; render();
+      const dl=E.dl, recordId=E.recordId, n=keys.length;
+      fetch("/api/zoho-update",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({recordId,module:"Installation",fields:payload})}).then(r=>r.json()).then(j=>{
+        const cur=S.coord.edit; if(!cur||cur.dl!==dl) return; // editor changed/closed
+        if(j&&j.ok){ S.coord.edit=null; S.coord.savedMsg={dl,n,t:Date.now()}; loadCoordNotes(dl,true); render(); }
+        else { cur.saving=false; cur.err=(j&&(j.error||j.message))||(es?"No se pudo guardar.":"Save failed."); render(); }
+      }).catch(e=>{ const cur=S.coord.edit; if(cur&&cur.dl===dl){ cur.saving=false; cur.err=String(e&&e.message||e); render(); } });
+      break;
+    }
     case "zxOpen": { const u=el.getAttribute("data-url"); if(u) window.open(u,"_blank","noopener"); break; }
     case "projStage": S.proj.stageFilter=id; S.proj.selected=null; render(); break;
     case "dispatchToggle": {
@@ -2410,12 +2525,14 @@ document.addEventListener("input",function(e){
   if(e.target.id==="calSearch"){ S.cal.q=e.target.value; zohoAugment("cal",e.target.value); render(); }
   else if(e.target.id==="projSearch"){ S.proj.q=e.target.value; zohoAugment("proj",e.target.value); render(); }
   else if(e.target.id==="coordSearch"){ S.coord.q=e.target.value; render(); }
+  else if(e.target.hasAttribute&&e.target.hasAttribute("data-cf")){ if(S.coord.edit) S.coord.edit.form[e.target.getAttribute("data-cf")]=e.target.value; } // no render → keep focus/caret
   else if(e.target.id==="recSearch"){ S.crewRec.q=e.target.value; render(); }
   else if(e.target.hasAttribute&&e.target.hasAttribute("data-cnew")){ S.sc.cnew[e.target.getAttribute("data-cnew")]=e.target.value; const pv=document.getElementById("scNamePreview"); if(pv){ pv.textContent=((S.sc.cnew.dl||"")+" "+(S.sc.cnew.customer||"")).trim()||"(enter a DL #)"; } }
   else if(e.target.id==="scSearch"){ S.sc.q=e.target.value; render(); }
   else if(e.target.hasAttribute&&e.target.hasAttribute("data-nf")){ S.sc.nf[e.target.getAttribute("data-nf")]=e.target.value; S.sc.created=null; render(); }
 });
 document.addEventListener("change",function(e){
+  if(e.target.hasAttribute&&e.target.hasAttribute("data-cf")){ if(S.coord.edit){ const k=e.target.getAttribute("data-cf"); if(e.target.type==="checkbox"){ S.coord.edit.form[k]=e.target.checked; render(); } else { S.coord.edit.form[k]=e.target.value; } } return; }
   if(e.target.id==="recUserSel"){ S.crewRec.user=e.target.value; render(); return; }
   if(e.target.id==="wxCity"){ S.wx.cityIdx=Number(e.target.value); S.wx.current=null; S.wx.days=[]; S.wx.live=false; loadWeather(); return; }
   if(e.target.id==="scType"){ S.sc.nfType=e.target.value; render(); return; }

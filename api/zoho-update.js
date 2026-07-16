@@ -6,15 +6,19 @@ const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.c
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
 const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
 
-// Fields a coordinator may edit (Zoho API names). Anything else in the payload is ignored.
+// Fields a coordinator may edit (Zoho API names — VERIFIED against live Installation
+// metadata). Anything else in the payload is ignored. Note: the stage field is "Stage"
+// (there is no Installation_Stage); planned-days is "..._default_2"; VIP_Installation is
+// read-only in Zoho so it is intentionally NOT writable. Installation_Team is a lookup.
 const ALLOWED = new Set([
   "Installation_Notes", "Roof_Notes", "AHJ_Specific_Install_Notes",
-  "Installation_Stage", "Installation_Team",
+  "Stage", "Installation_Team",
   "Installation_Proposed_Date", "Installation_Confirmed_Date", "Installation_Start_Date",
   "Installation_Continuation_Date", "Installation_Complete_Date", "R_R_Completed_Date",
-  "Number_of_Days_Needed", "Number_of_Days_Planned_for_Install",
-  "Customer_Access_Granted", "Drone_No_Fly_Zone", "VIP_Inspection", "Language_Preference",
+  "Number_of_Days_Needed", "Number_of_Days_Planned_for_Install_default_2",
+  "Customer_Access_Granted", "Drone_No_Fly_Zone", "Language_Preference",
 ]);
+const LOOKUP_FIELDS = new Set(["Installation_Team"]); // sent as { id } to Zoho
 
 let cachedToken = null, tokenExpiry = 0;
 function hasCreds() { return !!(process.env.ZOHO_CLIENT_ID && process.env.ZOHO_CLIENT_SECRET && process.env.ZOHO_REFRESH_TOKEN); }
@@ -55,7 +59,19 @@ export default async function handler(req, res) {
     const module = body.module || "Installation";
     const inFields = (body.fields && typeof body.fields === "object") ? body.fields : {};
     const fields = {};
-    for (const k of Object.keys(inFields)) if (ALLOWED.has(k)) fields[k] = inFields[k];
+    for (const k of Object.keys(inFields)) {
+      if (!ALLOWED.has(k)) continue;
+      let v = inFields[k];
+      if (LOOKUP_FIELDS.has(k)) {
+        // Lookup: Zoho expects { id } (or null to clear). Accept a bare id string or {id}.
+        if (v && typeof v === "object" && v.id) v = { id: String(v.id) };
+        else if (typeof v === "string" && v.trim()) v = { id: v.trim() };
+        else v = null;
+      } else if (v === "") {
+        v = null; // empty string clears a text/date/picklist field
+      }
+      fields[k] = v;
+    }
     if (!Object.keys(fields).length) return res.status(200).json({ ok: false, error: "no editable fields in payload" });
 
     const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(module)}/${encodeURIComponent(recordId)}`, {

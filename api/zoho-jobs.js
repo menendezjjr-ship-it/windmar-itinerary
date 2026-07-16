@@ -208,14 +208,29 @@ export function mapService(r, todayISO) {
   };
 }
 
-// Look up the Installation Notes for a single DL (word-search the Installation module).
+// Editable Installation fields surfaced to the Coordinator editor. VERIFIED against
+// live Zoho: the Stage field is "Stage" (NOT Installation_Stage); planned-days is
+// "Number_of_Days_Planned_for_Install_default_2"; VIP is "VIP_Installation" (read-only);
+// Installation_Team is a lookup (returned as {id,name}).
+const EDIT_FIELDS = [
+  "Installation_Notes", "Roof_Notes", "AHJ_Specific_Install_Notes",
+  "Stage", "Installation_Team",
+  "Installation_Proposed_Date", "Installation_Confirmed_Date", "Installation_Start_Date",
+  "Installation_Continuation_Date", "Installation_Complete_Date", "R_R_Completed_Date",
+  "Number_of_Days_Needed", "Number_of_Days_Planned_for_Install_default_2",
+  "Customer_Access_Granted", "Drone_No_Fly_Zone", "VIP_Installation", "Language_Preference",
+];
+
+// Look up a single DL's Installation record (word-search the Installation module).
 // Used by the Coordinator detail view: a Ready-to-Schedule install often has no start
-// date yet, so it won't appear in the date-windowed feed — this fetches its notes directly.
+// date yet, so it won't appear in the date-windowed feed — this fetches it directly.
+// Returns recordId + installNotes (kept for the hover tip) + the full editable `rec`.
 async function lookupDL(dl, token) {
+  const flds = ["Deal"].concat(EDIT_FIELDS).filter((v, i, a) => a.indexOf(v) === i);
   const path = `Installation/search?word=${encodeURIComponent(dl)}` +
-    `&fields=${encodeURIComponent("Deal,Installation_Notes,Installation_Start_Date")}&per_page=20`;
+    `&fields=${encodeURIComponent(flds.join(","))}&per_page=20`;
   const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
-  if (r.status === 204) return { installNotes: "", recordId: "", count: 0 };
+  if (r.status === 204) return { installNotes: "", recordId: "", count: 0, rec: null };
   if (!r.ok) throw new Error(`Zoho Installation ${r.status}: ${(await r.text()).slice(0, 200)}`);
   const rows = (await r.json()).data || [];
   const key = String(dl).toUpperCase().replace(/\s+/g, "");
@@ -224,7 +239,21 @@ async function lookupDL(dl, token) {
   const pool = exact.length ? exact : rows;
   const withNotes = pool.filter((x) => (x.Installation_Notes || "").trim());
   const pick = withNotes[0] || pool[0] || null;
-  return { installNotes: pick ? (pick.Installation_Notes || "").trim() : "", recordId: pick ? pick.id : "", count: rows.length };
+  let rec = null;
+  if (pick) {
+    rec = {};
+    for (const k of EDIT_FIELDS) {
+      const v = pick[k];
+      if (k === "Installation_Team") rec[k] = (v && typeof v === "object") ? { id: String(v.id || ""), name: v.name || "" } : null;
+      else rec[k] = (v === undefined ? null : v);
+    }
+  }
+  return {
+    installNotes: pick ? (pick.Installation_Notes || "").trim() : "",
+    recordId: pick ? pick.id : "",
+    count: rows.length,
+    rec,
+  };
 }
 
 export default async function handler(req, res) {
