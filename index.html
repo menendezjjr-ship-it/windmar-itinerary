@@ -383,7 +383,7 @@ const S={
   instMap:{status:"idle",items:[],pinState:{status:"idle"}},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
   dispatch:{ open:false, updated:null, sig:null, geo:{status:"idle"} },
-  coord:{ q:"", selected:null, notes:{}, fields:{status:"idle",map:{},team:[]}, edit:null, savedMsg:null }, // Coordinator tab: search, open detail key, per-DL record cache, field metadata, active editor
+  coord:{ q:"", selected:null, notes:{}, fields:{status:"idle",map:{},team:[]}, edit:null, savedMsg:null, ready:{status:"idle",list:[],err:""} }, // Coordinator tab: search, open detail key, per-DL record cache, field metadata, active editor, /api/zoho-ready feed (Pending-Schedule installs + Need-Schedule services)
   zx:{ proj:{q:"",status:"idle",list:[],err:""}, cal:{q:"",status:"idle",list:[],err:""} }, // all-time Zoho word-search augmentation for both search bars
   wx:{ cityIdx:0, current:null, days:[], live:false, loading:false },
   zoho:{ syncing:false, lastSync:new Date(), showCode:false },
@@ -1281,6 +1281,16 @@ function projectDetailHTML(p){
    that is Ready to Schedule (all types). Big cards → click for full detail incl. the
    Zoho Installation Notes (gate codes / pending-install to-dos) + Open-in-Zoho button. ══════════ */
 const ZOHO_ORG="org666151142";
+// Load the "Ready to Schedule" feed (Pending-Schedule installs + Need-Schedule services).
+// These records have no scheduled date yet, so they're queried by status (not in the calendar window).
+function loadCoordReady(silent){
+  const R=S.coord.ready;
+  if(!silent && (R.status==="idle"||R.status==="error")) { S.coord.ready={status:"loading",list:R.list||[],err:""}; if(S.tab==="coordinator") render(); }
+  fetch("/api/zoho-ready",{cache:"no-store"}).then(r=>r.json()).then(j=>{
+    S.coord.ready=(j&&j.ok&&Array.isArray(j.jobs))?{status:"live",list:j.jobs,err:""}:{status:"error",list:[],err:(j&&j.error)||"error"};
+    if(S.tab==="coordinator") render(true);
+  }).catch(e=>{ S.coord.ready={status:"error",list:[],err:String(e)}; if(S.tab==="coordinator") render(true); });
+}
 // Fetch the Installation Notes for one DL (cached per DL). A Ready-to-Schedule install may
 // have no start date yet, so it's not in the calendar window — look it up directly.
 function loadCoordNotes(dl,force){ const key=String(dl||"").toUpperCase().replace(/\s+/g,""); if(!key) return;
@@ -1351,75 +1361,138 @@ function coordFieldCell(fd,rec,editing){ const es=S.lang==="es", lbl=es?fd.es:fd
 function coordGroupHTML(title,group,rec,editing){ const rows=COORD_EDIT_FIELDS.filter(f=>f.g===group);
   return `<div style="grid-column:1/-1;margin-top:8px"><div style="font-size:11px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">${esc(title)}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px">${rows.map(fd=>coordFieldCell(fd,rec,editing)).join("")}</div></div>`;
 }
+// ── Coordinator classification buckets (rendered as report sections, in this order) ──
+const COORD_BUCKETS=["install","msp","reinstall","removal","service","inspection"];
+function coordBucketMeta(b){
+  const es=S.lang==="es";
+  if(b==="inspection") return {label:es?"Inspecciones":"Inspections", color:"#0EA5E9", icon:"🔍"};
+  const t=JOB_TYPES[b]||JOB_TYPES.install;
+  return {label:(es?t.es:t.en), color:t.color, icon:t.icon};
+}
+// Build the unified "Ready to Schedule" list: /api/zoho-ready jobs (installs+services)
+// PLUS the existing inspection "ready" set. Each item is classified into a bucket and
+// enriched with its pipeline project (by DL#) when one is loaded.
+function coordItems(){
+  const out=[];
+  const pByNum={}; (S.proj.list||[]).forEach(p=>{ if(p.num) pByNum[String(p.num).toUpperCase().replace(/\s+/g,"")]=p; });
+  (S.coord.ready.list||[]).forEach(j=>{
+    const cls={type:j.kind==="service"?"service":"", code:j.code, msp:j.msp, scope:j.scope, dlNumber:j.num};
+    const bucket=jobType(cls); // install | msp | reinstall | removal | service
+    const p=pByNum[String(j.num||"").toUpperCase().replace(/\s+/g,"")]||null;
+    out.push({ key:"r|"+(j.id||j.num), source:"ready", bucket, kind:j.kind,
+      num:j.num||"", name:j.project||(p&&p.name)||"", address:j.address||(p&&p.address)||"",
+      ahj:(p&&p.ahj)||"", stage:j.stage||"", crewLabel:j.crewLabel||"", scope:j.scope||"",
+      recordId:j.recordId||"", msp:j.msp, code:j.code, job:j, p:p, it:null });
+  });
+  inspEntries().filter(e=>e.it.status==="ready").forEach(e=>{
+    out.push({ key:"i|"+e.p.id+"|"+e.it.type, source:"insp", bucket:"inspection", kind:"inspection",
+      num:e.p.num||"", name:e.p.name||"", address:e.p.address||"", ahj:e.p.ahj||"",
+      stage:e.p.stage||"", crewLabel:"", scope:"", recordId:"", msp:false, code:"", job:null, p:e.p, it:e.it });
+  });
+  return out;
+}
+function coordSelectedItem(){ const k=String(S.coord.selected||""); return coordItems().find(x=>x.key===k)||null; }
 function coordinatorHTML(){
-  const es=S.lang==="es", P=S.proj, C=S.coord;
+  const es=S.lang==="es", P=S.proj, C=S.coord, R=C.ready;
   const q=(C.q||"").trim().toLowerCase();
-  let ready=inspEntries().filter(e=>e.it.status==="ready"); // all inspection types, Ready to Schedule
-  if(q) ready=ready.filter(e=>(((e.p.name||"")+" "+(e.p.num||"")+" "+(e.p.address||"")).toLowerCase().indexOf(q)>=0));
-  ready.sort((a,b)=>String(a.p.name||"").localeCompare(String(b.p.name||"")));
+  const all=coordItems(); const total=all.length;
+  let items=all;
+  if(q) items=items.filter(it=>(((it.name||"")+" "+(it.num||"")+" "+(it.address||"")).toLowerCase().indexOf(q)>=0));
+  const groups={}; items.forEach(it=>{ (groups[it.bucket]=groups[it.bucket]||[]).push(it); });
+  Object.keys(groups).forEach(b=>groups[b].sort((a,z)=>String(a.name||"").localeCompare(String(z.name||""))));
+  const loading=(P.status==="loading"&&!P.list.length)||(R.status==="loading"&&!R.list.length)||R.status==="idle";
+  const errored=P.status==="error"&&R.status==="error";
   const head=`<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:4px">
     <div><div style="font-weight:900;font-size:22px">🗒 ${es?"Coordinador":"Coordinator"}</div>
-      <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Inspecciones listas para programar. Toca una tarjeta para ver todo + notas de instalación.":"Inspections ready to schedule. Tap a card for full details + install notes."}</div></div>
-    <div style="display:flex;align-items:center;gap:8px"><span class="pill" style="background:#F89B24">${ready.length} ${es?"listas":"ready"}</span><button class="btn3d sm" data-action="projRefresh">${P.status==="loading"?"…":"⟳"}</button></div></div>
+      <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Todo lo que está listo para programar, agrupado por tipo de trabajo. Toca una tarjeta para ver todo + notas.":"Everything ready to schedule, grouped by job type. Tap a card for full details + notes."}</div></div>
+    <div style="display:flex;align-items:center;gap:8px"><span class="pill" style="background:#F89B24">${total} ${es?"listos":"ready"}</span><button class="btn3d sm" data-action="coordRefresh">${(P.status==="loading"||R.status==="loading")?"…":"⟳"}</button></div></div>
   <div style="margin:12px 0"><div style="position:relative;max-width:460px"><span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-dim);pointer-events:none">🔍</span>
     <input id="coordSearch" value="${esc(C.q||"")}" placeholder="${es?"Buscar DL#, cliente, dirección…":"Search DL#, customer, address…"}" autocomplete="off" style="width:100%;padding:11px 14px 11px 36px;border-radius:12px;border:1px solid var(--line);background:var(--bg-2);color:var(--text);font-size:14px"/></div></div>`;
   let body;
-  if(P.status==="loading"&&!P.list.length) body=`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">⟳ ${es?"Cargando…":"Loading…"}</div>`;
-  else if(P.status==="error") body=`<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudo cargar.":"Couldn't load."} ${esc(P.err||"")}</div>`;
-  else if(!ready.length) body=`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">${q?(es?"Sin coincidencias":"No matches"):(es?"Nada listo para programar 🎉":"Nothing ready to schedule 🎉")}</div>`;
-  else body=`<div class="stagger" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">${ready.map(e=>coordCard(e.p,e.it)).join("")}</div>`;
+  if(loading&&!total) body=`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">⟳ ${es?"Cargando…":"Loading…"}</div>`;
+  else if(errored&&!total) body=`<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudo cargar.":"Couldn't load."} ${esc(R.err||P.err||"")}</div>`;
+  else if(!items.length) body=`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">${q?(es?"Sin coincidencias":"No matches"):(es?"Nada listo para programar 🎉":"Nothing ready to schedule 🎉")}</div>`;
+  else body=COORD_BUCKETS.filter(b=>groups[b]&&groups[b].length).map(b=>coordSectionHTML(b,groups[b])).join("");
   return `<div class="fade">${head}${body}${C.selected?coordDetailModal():""}</div>`;
 }
-function coordCard(p,it){ const es=S.lang==="es", tm=inspTypeMeta(it.type); const tel=p.mobile||p.phone;
+// One report section: colored header (icon + name + count) + a responsive card grid.
+function coordSectionHTML(bucket,items){ const m=coordBucketMeta(bucket);
+  const hdr=`<div style="display:flex;align-items:center;gap:10px;margin:22px 0 12px;padding-bottom:8px;border-bottom:2px solid ${m.color}">
+    <span style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;background:${m.color};color:${textOn(m.color)};font-size:16px;flex-shrink:0">${m.icon}</span>
+    <span style="font-weight:900;font-size:17px">${esc(m.label)}</span>
+    <span class="pill" style="background:${m.color};color:${textOn(m.color)};font-size:11px">${items.length}</span></div>`;
+  const grid=`<div class="stagger" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">${items.map(coordItemCard).join("")}</div>`;
+  return hdr+grid;
+}
+function coordItemCard(it){ const es=S.lang==="es", m=coordBucketMeta(it.bucket); const p=it.p; const tel=(p&&(p.mobile||p.phone))||"";
   const f=(icon,v)=>v?`<div style="font-size:12.5px;color:var(--text-dim);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${icon} ${esc(v)}</div>`:"";
-  return `<div class="card jobchip" style="padding:14px 16px;cursor:pointer;border-left:6px solid ${tm.c};background:var(--panel)" data-action="coordSelect" data-id="${esc(p.id+"|"+it.type)}" data-ctip="${esc(p.num||"")}">
-    <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><span style="font-weight:800;font-size:16px;line-height:1.2">${esc(p.name||"—")}</span><span class="pill" style="background:${tm.c};font-size:9.5px;flex-shrink:0">🔍 ${esc(inspTypeText(it.type))}</span></div>
-    <div style="font-size:13px;font-weight:800;color:var(--wh-orange);margin-top:3px">${esc(p.num||"")}${(it.vip&&it.type!=="vip")?` <span class="pill" style="background:var(--jc-MSP);font-size:9px">VIP</span>`:""}</div>
-    ${f("📍",p.address)}${f("🏛",p.ahj)}${f("📞",tel)}
-    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">${p.systemKw?`<span class="pill" style="background:var(--jc-DL);font-size:10px">${p.systemKw} kW</span>`:""}${p.stage?`<span class="pill" style="background:var(--wh-grey);font-size:10px">${esc(p.stage)}</span>`:""}</div></div>`;
+  const typeBadge=(it.source==="insp"&&it.it)
+    ? `<span class="pill" style="background:${inspTypeMeta(it.it.type).c};font-size:9.5px;flex-shrink:0">🔍 ${esc(inspTypeText(it.it.type))}</span>`
+    : `<span class="pill" style="background:${m.color};color:${textOn(m.color)};font-size:9.5px;flex-shrink:0">${m.icon} ${esc(m.label)}</span>`;
+  const vip=(it.source==="insp"&&it.it&&it.it.vip&&it.it.type!=="vip")?` <span class="pill" style="background:var(--jc-MSP);font-size:9px">VIP</span>`:"";
+  const mspBadge=(it.source==="ready"&&it.msp&&it.bucket!=="msp")?` <span class="pill" style="background:var(--jc-MSP);font-size:9px">+MSP</span>`:"";
+  const pills=[
+    (p&&p.systemKw)?`<span class="pill" style="background:var(--jc-DL);font-size:10px">${esc(p.systemKw)} kW</span>`:"",
+    it.stage?`<span class="pill" style="background:var(--wh-grey);font-size:10px">${esc(it.stage)}</span>`:"",
+    it.crewLabel?`<span class="pill" style="background:var(--wh-grey);font-size:10px">👷 ${esc(it.crewLabel)}</span>`:"",
+  ].filter(Boolean).join("");
+  return `<div class="card jobchip" style="padding:14px 16px;cursor:pointer;border-left:6px solid ${m.color};background:var(--panel)" data-action="coordSelect" data-id="${esc(it.key)}" data-ctip="${esc(it.num||"")}">
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><span style="font-weight:800;font-size:16px;line-height:1.2">${esc(it.name||"—")}</span>${typeBadge}</div>
+    <div style="font-size:13px;font-weight:800;color:var(--wh-orange);margin-top:3px">${esc(it.num||"")}${vip}${mspBadge}</div>
+    ${f("📍",it.address)}${f("🏛",it.ahj)}${f("📞",tel)}${it.kind==="service"&&it.scope?f("🔧",it.scope):""}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">${pills}</div></div>`;
 }
 function coordDetailModal(){
-  const es=S.lang==="es", key=String(S.coord.selected||"");
-  const [pid,ptype]=key.split("|");
-  const p=(S.proj.list||[]).find(x=>x.id===pid); if(!p) return "";
-  const it=(p.insp&&p.insp.items||[]).find(x=>x.type===ptype)||(p.insp&&p.insp.items[0])||null;
-  const tm=it?inspTypeMeta(it.type):{c:"var(--wh-grey)"}; const tel=p.mobile||p.phone;
-  const dlKey=String(p.num||"").toUpperCase().replace(/\s+/g,"");
+  const es=S.lang==="es";
+  const item=coordSelectedItem(); if(!item) return "";
+  const p=item.p||null; const it=item.it||null; const isService=item.kind==="service";
+  const m=coordBucketMeta(item.bucket); const tel=(p&&(p.mobile||p.phone))||"";
+  const dlKey=String(item.num||"").toUpperCase().replace(/\s+/g,"");
   const nc=S.coord.notes[dlKey]||{status:"idle",text:"",recordId:"",rec:null};
-  const editing=!!(S.coord.edit&&S.coord.edit.dl===dlKey);
+  const editing=!isService&&!!(S.coord.edit&&S.coord.edit.dl===dlKey);
   const rec=editing?S.coord.edit._rec:nc.rec;
   const f=(l,v)=>v?`<div><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${l}</div><div style="font-size:14px;font-weight:500">${esc(v)}</div></div>`:"";
-  // Deal-level summary (from the pipeline record) — always read-only context.
+  // Read-only summary (context from the pipeline project + the ready job).
   const summary=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-    ${f(es?"Tipo de Inspección":"Inspection Type",it?inspTypeText(it.type):"")}
-    ${f("AHJ",p.ahj)}
-    ${f(es?"Sistema":"System",[p.systemKw?p.systemKw+" kW":"",p.modules?p.modules+" mod":""].filter(Boolean).join(" · "))}
-    ${f(es?"Batería":"Battery",p.battery)}
-    ${f(es?"Financiamiento":"Finance",p.finance)}
-    <div style="grid-column:1/-1">${f(es?"Dirección":"Address",p.address)}</div></div>`;
-  // Editable Installation record: loading / error / not-found handling, else grouped sections.
-  let recBlock;
-  if(nc.status==="loading"||nc.status==="idle") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">⟳ ${es?"Cargando registro de instalación…":"Loading installation record…"}</div>`;
-  else if(nc.status==="error") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--warn)">${es?"No se pudo cargar el registro.":"Couldn't load the record."}</div>`;
-  else if(!rec||!nc.recordId) recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">${es?"No se encontró un registro de instalación editable para este DL.":"No editable Installation record found for this DL."}</div>`;
-  else recBlock=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px">
-      ${coordGroupHTML((es?"🗓 Información de Programación":"🗓 Schedule Information"),"sched",rec,editing)}
-      ${coordGroupHTML((es?"📝 Notas":"📝 Notes"),"notes",rec,editing)}
-      ${coordGroupHTML((es?"⚙️ Otros":"⚙️ Other"),"other",rec,editing)}</div>`;
-  // Save/error/success banners (edit mode) + saved flash (after a successful write).
+    ${f(es?"Tipo":"Type",it?inspTypeText(it.type):m.label)}
+    ${f(es?"Etapa/Estado":"Stage/Status",item.stage)}
+    ${f("AHJ",item.ahj)}
+    ${f(es?"Cuadrilla":"Crew",item.crewLabel)}
+    ${p?f(es?"Sistema":"System",[p.systemKw?p.systemKw+" kW":"",p.modules?p.modules+" mod":""].filter(Boolean).join(" · ")):""}
+    ${p?f(es?"Batería":"Battery",p.battery):""}
+    ${p?f(es?"Financiamiento":"Finance",p.finance):""}
+    ${isService?f(es?"Servicio":"Service",item.scope):""}
+    <div style="grid-column:1/-1">${f(es?"Dirección":"Address",item.address)}</div>
+    ${isService&&item.job&&item.job.desc?`<div style="grid-column:1/-1">${f(es?"Descripción":"Description",item.job.desc)}</div>`:""}</div>`;
   const E=S.coord.edit;
-  const editBanner=editing&&E&&E.err?`<div style="grid-column:1/-1;margin-top:10px;background:rgba(239,68,68,.12);border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--warn)">⚠ ${esc(E.err)}</div>`:"";
-  const savedFlash=(!editing&&S.coord.savedMsg&&S.coord.savedMsg.dl===dlKey)?`<div style="margin-top:12px;background:rgba(34,197,94,.12);border:1px solid var(--ok);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--ok)">✓ ${es?"Guardado en Zoho":"Saved to Zoho"} (${S.coord.savedMsg.n} ${es?"campo(s)":"field(s)"})</div>`:"";
-  const canEdit=nc.status==="live"&&nc.recordId&&rec;
-  const actionsRO=canEdit?`<button class="btn3d sm" data-action="coordEditStart" style="background:#0EA5E9">✏️ ${es?"Editar":"Edit"}</button>`:"";
-  const fieldsLoading=editing&&S.coord.fields.status==="loading"?`<div style="grid-column:1/-1;font-size:11.5px;color:var(--text-dim);margin-top:6px">⟳ ${es?"Cargando opciones de campos…":"Loading field options…"}</div>`:"";
-  const actionsEdit=editing?`<div style="display:flex;gap:10px;margin-top:16px"><button class="btn3d green" data-action="coordSave" ${E&&E.saving?"disabled":""} style="flex:1;padding:12px;font-size:14px">${E&&E.saving?"⟳ "+(es?"Guardando…":"Saving…"):"💾 "+(es?"Guardar cambios":"Save changes")}</button><button class="btn3d grey" data-action="coordEditCancel" ${E&&E.saving?"disabled":""} style="padding:12px 18px;font-size:14px">${es?"Cancelar":"Cancel"}</button></div>`:"";
-  // Open-in-Zoho-Install: link the Installation record when its id is known, else a Zoho search.
-  const zohoInstallUrl=nc.recordId?`https://crm.zoho.com/crm/${ZOHO_ORG}/tab/CustomModule7/${encodeURIComponent(nc.recordId)}`:`https://crm.zoho.com/crm/${ZOHO_ORG}/search?searchword=${encodeURIComponent(p.num||p.name||"")}`;
+  // Middle block: SERVICE = info only (no Installation edit); INSTALL/INSPECTION = editable record.
+  let recBlock="", savedFlash="", editBanner="", actionsRO="", actionsEdit="", fieldsLoading="";
+  if(isService){
+    recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px">🔧 ${es?"Ticket de servicio por programar. Usa \"Abrir en Zoho\" para editar el ticket.":"Service ticket pending scheduling. Use \"Open in Zoho\" to edit the ticket."}</div>`;
+  } else {
+    if(nc.status==="loading"||nc.status==="idle") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">⟳ ${es?"Cargando registro de instalación…":"Loading installation record…"}</div>`;
+    else if(nc.status==="error") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--warn)">${es?"No se pudo cargar el registro.":"Couldn't load the record."}</div>`;
+    else if(!rec||!nc.recordId) recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">${es?"No se encontró un registro de instalación editable para este DL.":"No editable Installation record found for this DL."}</div>`;
+    else recBlock=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px">
+        ${coordGroupHTML((es?"🗓 Información de Programación":"🗓 Schedule Information"),"sched",rec,editing)}
+        ${coordGroupHTML((es?"📝 Notas":"📝 Notes"),"notes",rec,editing)}
+        ${coordGroupHTML((es?"⚙️ Otros":"⚙️ Other"),"other",rec,editing)}</div>`;
+    editBanner=editing&&E&&E.err?`<div style="grid-column:1/-1;margin-top:10px;background:rgba(239,68,68,.12);border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--warn)">⚠ ${esc(E.err)}</div>`:"";
+    savedFlash=(!editing&&S.coord.savedMsg&&S.coord.savedMsg.dl===dlKey)?`<div style="margin-top:12px;background:rgba(34,197,94,.12);border:1px solid var(--ok);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--ok)">✓ ${es?"Guardado en Zoho":"Saved to Zoho"} (${S.coord.savedMsg.n} ${es?"campo(s)":"field(s)"})</div>`:"";
+    const canEdit=nc.status==="live"&&nc.recordId&&rec;
+    actionsRO=canEdit?`<button class="btn3d sm" data-action="coordEditStart" style="background:#0EA5E9">✏️ ${es?"Editar":"Edit"}</button>`:"";
+    fieldsLoading=editing&&S.coord.fields.status==="loading"?`<div style="grid-column:1/-1;font-size:11.5px;color:var(--text-dim);margin-top:6px">⟳ ${es?"Cargando opciones de campos…":"Loading field options…"}</div>`:"";
+    actionsEdit=editing?`<div style="display:flex;gap:10px;margin-top:16px"><button class="btn3d green" data-action="coordSave" ${E&&E.saving?"disabled":""} style="flex:1;padding:12px;font-size:14px">${E&&E.saving?"⟳ "+(es?"Guardando…":"Saving…"):"💾 "+(es?"Guardar cambios":"Save changes")}</button><button class="btn3d grey" data-action="coordEditCancel" ${E&&E.saving?"disabled":""} style="padding:12px 18px;font-size:14px">${es?"Cancelar":"Cancel"}</button></div>`:"";
+  }
+  // Open in Zoho: Installation record for installs (CustomModule7), Service ticket for services (CustomModule40), else search.
+  const zohoUrl=isService
+    ? (item.recordId?`https://crm.zoho.com/crm/${ZOHO_ORG}/tab/CustomModule40/${encodeURIComponent(item.recordId)}`:`https://crm.zoho.com/crm/${ZOHO_ORG}/search?searchword=${encodeURIComponent(item.num||item.name||"")}`)
+    : (nc.recordId?`https://crm.zoho.com/crm/${ZOHO_ORG}/tab/CustomModule7/${encodeURIComponent(nc.recordId)}`:`https://crm.zoho.com/crm/${ZOHO_ORG}/search?searchword=${encodeURIComponent(item.num||item.name||"")}`);
+  const zohoLabel=isService?(es?"Abrir Ticket en Zoho":"Open Ticket in Zoho"):(es?"Abrir en Zoho Instalación":"Open in Zoho Install");
   const inner=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px"><div style="min-width:0">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">${it?`<span class="pill" style="background:${tm.c};font-size:10px">🔍 ${esc(inspTypeText(it.type))}</span>`:""}<span class="pill" style="background:#F89B24;font-size:10px">${es?"Listo p/Programar":"Ready to Schedule"}</span>${editing?`<span class="pill" style="background:#0EA5E9;font-size:10px">✏️ ${es?"Editando":"Editing"}</span>`:""}</div>
-      <h3 style="margin:0;font-size:20px;font-weight:700">${p.num?`<span style="color:var(--wh-orange)">${esc(p.num)} </span>`:""}${esc(p.name||"")}</h3>
-      ${p.address?`<p style="margin:4px 0 0;color:var(--text-dim);font-size:13px">📍 <a href="https://maps.google.com/?q=${encodeURIComponent(p.address)}" target="_blank" rel="noopener" style="color:var(--wh-blue-light)">${esc(p.address)}</a></p>`:""}
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">${it?`<span class="pill" style="background:${inspTypeMeta(it.type).c};font-size:10px">🔍 ${esc(inspTypeText(it.type))}</span>`:`<span class="pill" style="background:${m.color};color:${textOn(m.color)};font-size:10px">${m.icon} ${esc(m.label)}</span>`}<span class="pill" style="background:#F89B24;font-size:10px">${es?"Listo p/Programar":"Ready to Schedule"}</span>${editing?`<span class="pill" style="background:#0EA5E9;font-size:10px">✏️ ${es?"Editando":"Editing"}</span>`:""}</div>
+      <h3 style="margin:0;font-size:20px;font-weight:700">${item.num?`<span style="color:var(--wh-orange)">${esc(item.num)} </span>`:""}${esc(item.name||"")}</h3>
+      ${item.address?`<p style="margin:4px 0 0;color:var(--text-dim);font-size:13px">📍 <a href="https://maps.google.com/?q=${encodeURIComponent(item.address)}" target="_blank" rel="noopener" style="color:var(--wh-blue-light)">${esc(item.address)}</a></p>`:""}
       ${tel?`<div style="margin-top:8px"><a class="btn3d green sm" href="tel:${esc(String(tel).replace(/[^0-9+]/g,""))}">📞 ${esc(tel)}</a></div>`:""}
     </div><div style="display:flex;gap:8px;flex-shrink:0">${editing?"":actionsRO}<button class="btn3d grey sm" data-action="coordClose">✕</button></div></div>
     ${savedFlash}
@@ -1428,7 +1501,7 @@ function coordDetailModal(){
     ${fieldsLoading}
     ${editBanner}
     ${actionsEdit}
-    <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)"><a class="btn3d blue" href="${zohoInstallUrl}" target="_blank" rel="noopener" style="display:block;text-align:center;font-size:15px;padding:13px">🔗 ${es?"Abrir en Zoho Instalación":"Open in Zoho Install"}</a></div>`;
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)"><a class="btn3d blue" href="${zohoUrl}" target="_blank" rel="noopener" style="display:block;text-align:center;font-size:15px;padding:13px">🔗 ${zohoLabel}</a></div>`;
   return `<div data-action="${editing?'noop':'coordClose'}" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px"><div data-action="noop" class="card rise" style="border-radius:16px;max-width:600px;width:100%;max-height:88vh;overflow:auto;padding:24px">${inner}</div></div>`;
 }
 /* ── All-time Zoho word-search augmentation (Projects Pipeline + Calendar search bars).
@@ -2356,17 +2429,18 @@ document.addEventListener("click",e=>{
     case "notifOpen": S.notif.open=false; S.tab="projects"; S.proj.selected=id; S.proj.noteFrom=null; S.proj.stageFilter="all"; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
-    case "setTab": S.tab=id; try{localStorage.setItem("wm_itin_tab",id);}catch(e){} if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="coordinator") loadProjects(S.proj.status!=="idle",true); if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); if(id==="instmap"&&S.instMap.status==="idle") loadInstallMap(); render(); break;
+    case "setTab": S.tab=id; try{localStorage.setItem("wm_itin_tab",id);}catch(e){} if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="coordinator"){ loadProjects(S.proj.status!=="idle",true); loadCoordReady(S.coord.ready.status!=="idle"&&S.coord.ready.status!=="error"); } if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); if(id==="instmap"&&S.instMap.status==="idle") loadInstallMap(); render(); break;
     case "jobsRefresh": loadJobs(); break;
     case "projRefresh": loadProjects(false,true); break;
     case "selectProject": S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
     case "projStageFocus": S.proj.noteFrom=(id&&S.proj.noteFrom!==id)?id:null; render(); break;
     case "closeProject": S.proj.selected=null; S.proj.noteFrom=null; render(); break;
-    case "coordSelect": { S.coord.selected=id; S.coord.edit=null; S.coord.savedMsg=null; const pid=String(id||"").split("|")[0]; const pp=(S.proj.list||[]).find(x=>x.id===pid); if(pp&&pp.num) loadCoordNotes(pp.num); loadCoordFields(); render(); break; }
+    case "coordSelect": { S.coord.selected=id; S.coord.edit=null; S.coord.savedMsg=null; const item=coordSelectedItem(); if(item&&item.kind!=="service"&&item.num){ loadCoordNotes(item.num); loadCoordFields(); } render(); break; }
+    case "coordRefresh": loadProjects(S.proj.status!=="idle",true); loadCoordReady(false); break;
     case "coordClose": S.coord.selected=null; S.coord.edit=null; render(); break;
     case "coordEditStart": {
-      const es=S.lang==="es", k=String(S.coord.selected||"").split("|")[0]; const pp=(S.proj.list||[]).find(x=>x.id===k);
-      const dlKey=String(pp&&pp.num||"").toUpperCase().replace(/\s+/g,""); const nc=S.coord.notes[dlKey];
+      const es=S.lang==="es", item=coordSelectedItem();
+      const dlKey=String(item&&item.num||"").toUpperCase().replace(/\s+/g,""); const nc=S.coord.notes[dlKey];
       if(!nc||nc.status!=="live"||!nc.recordId||!nc.rec){ alert(es?"El registro aún no está listo. Intenta de nuevo en un momento.":"Record isn't ready yet. Try again in a moment."); break; }
       loadCoordFields(); // ensure picklist/lookup options are available
       const rec=nc.rec, form={};
