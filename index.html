@@ -584,13 +584,27 @@ function jobTipHTML(r){ if(!r) return ""; const t=jtInfo(r), es=S.lang==="es", c
     +line(es?"Estado":"Status", r.status)
     +((r.type!=="service"&&r.installNotes)?`<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2A3F7A;color:#ffd9a8"><span style="font-weight:700">📝 </span>${esc(String(r.installNotes).length>160?String(r.installNotes).slice(0,157)+"…":r.installNotes)}</div>`:"");
 }
+// Hover tooltip for Coordinator cards — project info + Zoho Installation Notes (loaded per DL, cached).
+function coordTipHTML(num){ const es=S.lang==="es"; const p=(S.proj.list||[]).find(x=>String(x.num)===String(num)); if(!p) return "";
+  const key=String(num||"").toUpperCase().replace(/\s+/g,""); const nc=(S.coord.notes||{})[key];
+  const line=(l,v)=>v?`<div style="margin-top:3px"><span style="color:#8fa3c8">${l}:</span> ${esc(v)}</div>`:"";
+  const notes = (nc&&nc.status==="live")?(nc.text||(es?"(sin notas)":"(no notes)")) : (nc&&nc.status==="loading")?(es?"cargando…":"loading…") : "—";
+  return `<div style="font-weight:800;font-size:13px;color:#fff;margin-bottom:4px"><span style="color:var(--wh-orange)">${esc(p.num||"")}</span> ${esc(p.name||"")}</div>`
+    +line(es?"Dirección":"Address",p.address)+line("AHJ",p.ahj)+line(es?"Etapa":"Stage",p.stage)
+    +`<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2A3F7A;color:#ffd9a8"><span style="font-weight:700">📝 </span>${esc(String(notes).length>200?String(notes).slice(0,197)+"…":notes)}</div>`;
+}
 function wmJtipInit(){ if(window.__wmjtip) return; window.__wmjtip=true;
   const tip=document.createElement("div"); tip.id="wmjtip";
   tip.style.cssText="position:fixed;z-index:2147483000;pointer-events:none;max-width:290px;background:#0f1b34;border:1px solid #2A3F7A;border-radius:10px;padding:10px 12px;box-shadow:0 10px 28px rgba(0,0,0,.45);font-size:12px;line-height:1.35;color:#dbe7ff;display:none";
   document.body.appendChild(tip);
   const place=(e)=>{ const pad=14,w=tip.offsetWidth,h=tip.offsetHeight; let x=e.clientX+pad,y=e.clientY+pad; if(x+w>window.innerWidth-8)x=e.clientX-w-pad; if(y+h>window.innerHeight-8)y=e.clientY-h-pad; tip.style.left=Math.max(6,x)+"px"; tip.style.top=Math.max(6,y)+"px"; };
-  document.addEventListener("mouseover",(e)=>{ const el=e.target.closest&&e.target.closest("[data-jtip]"); if(!el)return; const r=(S.cal.records||[]).find(x=>String(x.id)===String(el.getAttribute("data-jtip"))); if(!r)return; tip.innerHTML=jobTipHTML(r); tip.style.display="block"; place(e); });
-  document.addEventListener("mousemove",(e)=>{ if(tip.style.display!=="block")return; const el=e.target.closest&&e.target.closest("[data-jtip]"); if(!el){ tip.style.display="none"; return; } place(e); });
+  document.addEventListener("mouseover",(e)=>{
+    const jel=e.target.closest&&e.target.closest("[data-jtip]");
+    if(jel){ const r=(S.cal.records||[]).find(x=>String(x.id)===String(jel.getAttribute("data-jtip"))); if(!r)return; tip._ctip=null; tip.innerHTML=jobTipHTML(r); tip.style.display="block"; place(e); return; }
+    const cel=e.target.closest&&e.target.closest("[data-ctip]");
+    if(cel){ const dl=cel.getAttribute("data-ctip"); loadCoordNotes(dl); tip._ctip=String(dl||"").toUpperCase().replace(/\s+/g,""); tip.innerHTML=coordTipHTML(dl); tip.style.display="block"; place(e); return; }
+  });
+  document.addEventListener("mousemove",(e)=>{ if(tip.style.display!=="block")return; const el=e.target.closest&&(e.target.closest("[data-jtip]")||e.target.closest("[data-ctip]")); if(!el){ tip.style.display="none"; tip._ctip=null; return; } place(e); });
   window.addEventListener("scroll",()=>{ tip.style.display="none"; },true);
 }
 function calQMatch(r,q){ if(!q)return true; const s=String(q).toLowerCase(); return String(r.dlNumber||"").toLowerCase().indexOf(s)>=0||String(r.customerName||"").toLowerCase().indexOf(s)>=0||String(r.address||"").toLowerCase().indexOf(s)>=0||String(r.team||"").toLowerCase().indexOf(s)>=0; }
@@ -864,7 +878,7 @@ async function loadProjects(silent,fresh){
     const r=await fetch("/api/zoho-projects"+(fresh?("?t="+Date.now()):""),{cache:"no-store"});
     const j=await r.json();
     if(j&&j.configured&&j.ok&&Array.isArray(j.projects)){
-      S.proj.status="live"; S.proj.ok=true; S.proj.list=j.projects; S.proj.updated=j.updated;
+      S.proj.status="live"; S.proj.ok=true; S.proj.list=(j.projects||[]).filter(p=>!/^RL\d/i.test(String(p.num||""))); S.proj.updated=j.updated; // exclude roofing-only (RL); RDL keeps solar
       notifyProjects(j.projects);
     } else if(j&&j.configured){ S.proj.status="error"; S.proj.ok=false; S.proj.list=[]; S.proj.err=j.error||"error"; }
     else { S.proj.status="unconfigured"; S.proj.ok=false; S.proj.list=[]; }
@@ -1272,10 +1286,11 @@ const ZOHO_ORG="org666151142";
 function loadCoordNotes(dl){ const key=String(dl||"").toUpperCase().replace(/\s+/g,""); if(!key) return;
   const cur=S.coord.notes[key]; if(cur&&(cur.status==="loading"||cur.status==="live")) return;
   S.coord.notes[key]={status:"loading",text:"",recordId:""};
+  const refreshTip=()=>{ const tp=document.getElementById("wmjtip"); if(tp&&tp.style.display==="block"&&tp._ctip===key) tp.innerHTML=coordTipHTML(dl); };
   fetch("/api/zoho-jobs?dl="+encodeURIComponent(dl),{cache:"no-store"}).then(r=>r.json()).then(j=>{
     S.coord.notes[key]=(j&&j.ok)?{status:"live",text:j.installNotes||"",recordId:j.recordId||""}:{status:"error",text:"",recordId:""};
-    if(S.tab==="coordinator") render(true);
-  }).catch(()=>{ S.coord.notes[key]={status:"error",text:"",recordId:""}; if(S.tab==="coordinator") render(true); });
+    refreshTip(); if(S.tab==="coordinator") render(true);
+  }).catch(()=>{ S.coord.notes[key]={status:"error",text:"",recordId:""}; refreshTip(); if(S.tab==="coordinator") render(true); });
 }
 function coordinatorHTML(){
   const es=S.lang==="es", P=S.proj, C=S.coord;
@@ -1298,7 +1313,7 @@ function coordinatorHTML(){
 }
 function coordCard(p,it){ const es=S.lang==="es", tm=inspTypeMeta(it.type); const tel=p.mobile||p.phone;
   const f=(icon,v)=>v?`<div style="font-size:12.5px;color:var(--text-dim);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${icon} ${esc(v)}</div>`:"";
-  return `<div class="card jobchip" style="padding:14px 16px;cursor:pointer;border-left:6px solid ${tm.c};background:var(--panel)" data-action="coordSelect" data-id="${esc(p.id+"|"+it.type)}">
+  return `<div class="card jobchip" style="padding:14px 16px;cursor:pointer;border-left:6px solid ${tm.c};background:var(--panel)" data-action="coordSelect" data-id="${esc(p.id+"|"+it.type)}" data-ctip="${esc(p.num||"")}">
     <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><span style="font-weight:800;font-size:16px;line-height:1.2">${esc(p.name||"—")}</span><span class="pill" style="background:${tm.c};font-size:9.5px;flex-shrink:0">🔍 ${esc(inspTypeText(it.type))}</span></div>
     <div style="font-size:13px;font-weight:800;color:var(--wh-orange);margin-top:3px">${esc(p.num||"")}${(it.vip&&it.type!=="vip")?` <span class="pill" style="background:var(--jc-MSP);font-size:9px">VIP</span>`:""}</div>
     ${f("📍",p.address)}${f("🏛",p.ahj)}${f("📞",tel)}
