@@ -163,7 +163,7 @@ const LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAoAAAAGNCAYAAACBu8BgAADG8ElEQVR42uz9fX
 const I18N = {
  en:{
   appName:"Itinerary", appTagline:"Dispatch & Field Operations", lang:"Español",
-  tab_itinerary:"Itinerary", tab_projects:"Projects", tab_crews:"Crews", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_records:"Crew Records", tab_instmap:"Install Map", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar",
+  tab_itinerary:"Itinerary", tab_coordinator:"Coordinator", tab_projects:"Projects", tab_crews:"Crews", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_records:"Crew Records", tab_instmap:"Install Map", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar",
   // job codes
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Solar / Battery Install", jc_RDL_long:"Re-Roof + Solar", jc_RL_long:"Roofing", jc_S_long:"Service Call", jc_MSP_long:"Main Service Panel Upgrade",
@@ -213,7 +213,7 @@ const I18N = {
  },
  es:{
   appName:"Itinerario", appTagline:"Despacho y Operaciones de Campo", lang:"English",
-  tab_itinerary:"Itinerario", tab_projects:"Proyectos", tab_crews:"Cuadrillas", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_records:"Registros de Cuadrilla", tab_instmap:"Mapa de Instalaciones", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario",
+  tab_itinerary:"Itinerario", tab_coordinator:"Coordinador", tab_projects:"Proyectos", tab_crews:"Cuadrillas", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_records:"Registros de Cuadrilla", tab_instmap:"Mapa de Instalaciones", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario",
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Instalación Solar / Batería", jc_RDL_long:"Re-Techado + Solar", jc_RL_long:"Techado", jc_S_long:"Llamada de Servicio", jc_MSP_long:"Mejora del Panel Principal",
   legend:"Leyenda de Códigos", crew:"Cuadrilla", today:"Hoy", prevDay:"Anterior", nextDay:"Siguiente",
@@ -383,6 +383,8 @@ const S={
   instMap:{status:"idle",items:[],pinState:{status:"idle"}},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
   dispatch:{ open:false, updated:null, sig:null, geo:{status:"idle"} },
+  coord:{ q:"", selected:null, notes:{} }, // Coordinator tab: search, open detail key, per-DL install-notes cache
+  zx:{ proj:{q:"",status:"idle",list:[],err:""}, cal:{q:"",status:"idle",list:[],err:""} }, // all-time Zoho word-search augmentation for both search bars
   wx:{ cityIdx:0, current:null, days:[], live:false, loading:false },
   zoho:{ syncing:false, lastSync:new Date(), showCode:false },
   sc:{ q:"", project:null, cat:"inverter", queue:[], uploading:false, done:false,
@@ -530,7 +532,7 @@ function calTMin(r){ if(!r) return 1e9;
   var m=s.match(/(\d{1,2}):(\d{2})\s*([AaPp][Mm])?/); if(!m) return 1e9;
   var hh=+m[1], mm=+m[2], ap=(m[3]||"").toUpperCase(); if(ap==="PM"&&hh!==12)hh+=12; if(ap==="AM"&&hh===12)hh=0; return hh*60+mm;
 }
-function calRec(j){ return { type:j.kind, id:j.id, recordId:j.recordId||"", plan:j.plan||null, bom:j.bom||null, team:j.crewLabel||"Unassigned", startDate:j.date, daysNeeded:j.days||1, hhmm:j.hhmm||"", startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", desc:j.desc||"", code:j.code||"", msp:!!j.msp, phone:j.phone||"", cat:jobCat(j) }; }
+function calRec(j){ return { type:j.kind, id:j.id, recordId:j.recordId||"", plan:j.plan||null, bom:j.bom||null, team:j.crewLabel||"Unassigned", startDate:j.date, daysNeeded:j.days||1, hhmm:j.hhmm||"", startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", desc:j.desc||"", code:j.code||"", msp:!!j.msp, phone:j.phone||"", installNotes:j.installNotes||"", cat:jobCat(j) }; }
 // Multi-day jobs: ISO dates a record occupies (start day + continuation days).
 function calSpan(r){ if(!r.startDate)return []; const n=Math.max(1,Math.min(21,parseInt(r.daysNeeded,10)||1)); const base=new Date(r.startDate+"T12:00:00"); const out=[]; for(let i=0;i<n;i++){const x=new Date(base);x.setDate(base.getDate()+i);out.push(calYMD(x));} return out; }
 async function loadOpsCal(silent){
@@ -579,7 +581,8 @@ function jobTipHTML(r){ if(!r) return ""; const t=jtInfo(r), es=S.lang==="es", c
     +line(es?"Fecha":"Date", dateStr+(r.startTime?" · "+r.startTime:""))
     +line(es?"Dirección":"Address", r.address)
     +line(r.type==="service"?(es?"Servicio":"Service"):(es?"Alcance":"Scope"), r.scope)
-    +line(es?"Estado":"Status", r.status);
+    +line(es?"Estado":"Status", r.status)
+    +((r.type!=="service"&&r.installNotes)?`<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2A3F7A;color:#ffd9a8"><span style="font-weight:700">📝 </span>${esc(String(r.installNotes).length>160?String(r.installNotes).slice(0,157)+"…":r.installNotes)}</div>`:"");
 }
 function wmJtipInit(){ if(window.__wmjtip) return; window.__wmjtip=true;
   const tip=document.createElement("div"); tip.id="wmjtip";
@@ -734,6 +737,7 @@ function opsCalHTML(){
   const _kpiCard=(label,o,accent,icon)=>{ const tot=o.total||1, seg=(v,cc)=>v?`<span style="width:${v/tot*100}%;background:${cc}"></span>`:""; return `<div class="card" style="padding:16px 18px;flex:1;min-width:240px"><div style="display:flex;justify-content:space-between;align-items:baseline"><div style="font-weight:800;font-size:13px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.6px">${icon} ${label}</div><div style="font-size:30px;font-weight:900;color:${accent}">${o.total}</div></div><div style="display:flex;height:9px;border-radius:6px;overflow:hidden;margin-top:10px;background:var(--line)">${seg(o.complete,"#16A34A")}${seg(o.inprogress,"#06B6D4")}${seg(o.pastdue,"#DC2626")}</div><div style="display:flex;gap:14px;margin-top:9px;font-size:12px;font-weight:800"><span style="color:#16A34A">✓ ${o.complete}</span><span style="color:#06B6D4">▶ ${o.inprogress}</span><span style="color:#DC2626">! ${o.pastdue}</span></div></div>`; };
   const calLegend=`<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin:2px 0 12px;font-size:12px;font-weight:700;color:var(--text-dim)">${[["#16A34A","Complete","Completado"],["#06B6D4","In Progress","En Progreso"],["#DC2626","Past Due","Atrasado"],["#F89B24","Scheduled","Programado"]].map(x=>`<span style="display:flex;align-items:center;gap:6px"><span style="width:13px;height:13px;border-radius:4px;background:${x[0]}"></span>${S.lang==="es"?x[2]:x[1]}</span>`).join("")}</div>`;
   const calKpiRow=calLegend+`<div class="stagger" style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">${_kpiCard(S.lang==="es"?"Instalación":"Installation",_insK,"var(--jc-DL)","🔧")}${_kpiCard(S.lang==="es"?"Servicio":"Service",_svcK,"var(--wh-orange)","🛠")}</div>`;
+  const calNums={}; c.records.forEach(r=>{ if(r.dlNumber) calNums[String(r.dlNumber).toUpperCase().replace(/\s+/g,"")]=1; }); // loaded DLs (exclude from Zoho augment)
   return `<div class="fade">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px">
       <div><h1 style="font-size:${compact?18:24}px;font-weight:700;margin:0">📅 ${S.lang==='es'?'Calendario de Operaciones':'Operations Calendar'}</h1>
@@ -750,6 +754,7 @@ function opsCalHTML(){
       </div>
       ${q?`<span style="font-size:12px;color:var(--text-dim);font-weight:700">${visible.length} ${es?(visible.length===1?'resultado':'resultados'):(visible.length===1?'result':'results')}</span><button class="btn3d ghost sm" data-action="calSearchClear">✕ ${es?'Limpiar':'Clear'}</button>`:""}
     </div>
+    ${zxSectionHTML("cal",calNums)}
     ${calKpiRow}
     <div class="chipbar" style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">${[["all","All","Todos",installCount+serviceCount],["install","Installs","Instalaciones",installCount],["service","Service","Servicio",serviceCount]].map(s=>{const on=c.typeFilter===s[0];return `<button data-action="calType" data-id="${s[0]}" class="btn3d ${on?'':'ghost'} sm">${s[0]==='install'?'⚡ ':s[0]==='service'?'🔧 ':''}${S.lang==='es'?s[2]:s[1]} <span style="background:${on?'rgba(255,255,255,.25)':'var(--bg)'};border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700">${s[3]}</span></button>`;}).join("")}</div>
     <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:14px;background:var(--panel);padding:10px 20px;border-radius:12px;border:1px solid var(--line)">
@@ -1258,6 +1263,120 @@ function projectDetailHTML(p){
     <div style="padding:8px 20px 18px;border-top:1px solid var(--line);margin-top:8px">${notesHead}<div style="max-height:440px;overflow:auto">${notesInner}</div></div>
   </div>`;
 }
+/* ══════════ TAB: COORDINATOR — dumbed-down, scan-friendly board of every inspection
+   that is Ready to Schedule (all types). Big cards → click for full detail incl. the
+   Zoho Installation Notes (gate codes / pending-install to-dos) + Open-in-Zoho button. ══════════ */
+const ZOHO_ORG="org666151142";
+// Fetch the Installation Notes for one DL (cached per DL). A Ready-to-Schedule install may
+// have no start date yet, so it's not in the calendar window — look it up directly.
+function loadCoordNotes(dl){ const key=String(dl||"").toUpperCase().replace(/\s+/g,""); if(!key) return;
+  const cur=S.coord.notes[key]; if(cur&&(cur.status==="loading"||cur.status==="live")) return;
+  S.coord.notes[key]={status:"loading",text:"",recordId:""};
+  fetch("/api/zoho-jobs?dl="+encodeURIComponent(dl),{cache:"no-store"}).then(r=>r.json()).then(j=>{
+    S.coord.notes[key]=(j&&j.ok)?{status:"live",text:j.installNotes||"",recordId:j.recordId||""}:{status:"error",text:"",recordId:""};
+    if(S.tab==="coordinator") render(true);
+  }).catch(()=>{ S.coord.notes[key]={status:"error",text:"",recordId:""}; if(S.tab==="coordinator") render(true); });
+}
+function coordinatorHTML(){
+  const es=S.lang==="es", P=S.proj, C=S.coord;
+  const q=(C.q||"").trim().toLowerCase();
+  let ready=inspEntries().filter(e=>e.it.status==="ready"); // all inspection types, Ready to Schedule
+  if(q) ready=ready.filter(e=>(((e.p.name||"")+" "+(e.p.num||"")+" "+(e.p.address||"")).toLowerCase().indexOf(q)>=0));
+  ready.sort((a,b)=>String(a.p.name||"").localeCompare(String(b.p.name||"")));
+  const head=`<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:4px">
+    <div><div style="font-weight:900;font-size:22px">🗒 ${es?"Coordinador":"Coordinator"}</div>
+      <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Inspecciones listas para programar. Toca una tarjeta para ver todo + notas de instalación.":"Inspections ready to schedule. Tap a card for full details + install notes."}</div></div>
+    <div style="display:flex;align-items:center;gap:8px"><span class="pill" style="background:#F89B24">${ready.length} ${es?"listas":"ready"}</span><button class="btn3d sm" data-action="projRefresh">${P.status==="loading"?"…":"⟳"}</button></div></div>
+  <div style="margin:12px 0"><div style="position:relative;max-width:460px"><span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-dim);pointer-events:none">🔍</span>
+    <input id="coordSearch" value="${esc(C.q||"")}" placeholder="${es?"Buscar DL#, cliente, dirección…":"Search DL#, customer, address…"}" autocomplete="off" style="width:100%;padding:11px 14px 11px 36px;border-radius:12px;border:1px solid var(--line);background:var(--bg-2);color:var(--text);font-size:14px"/></div></div>`;
+  let body;
+  if(P.status==="loading"&&!P.list.length) body=`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">⟳ ${es?"Cargando…":"Loading…"}</div>`;
+  else if(P.status==="error") body=`<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudo cargar.":"Couldn't load."} ${esc(P.err||"")}</div>`;
+  else if(!ready.length) body=`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">${q?(es?"Sin coincidencias":"No matches"):(es?"Nada listo para programar 🎉":"Nothing ready to schedule 🎉")}</div>`;
+  else body=`<div class="stagger" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">${ready.map(e=>coordCard(e.p,e.it)).join("")}</div>`;
+  return `<div class="fade">${head}${body}${C.selected?coordDetailModal():""}</div>`;
+}
+function coordCard(p,it){ const es=S.lang==="es", tm=inspTypeMeta(it.type); const tel=p.mobile||p.phone;
+  const f=(icon,v)=>v?`<div style="font-size:12.5px;color:var(--text-dim);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${icon} ${esc(v)}</div>`:"";
+  return `<div class="card jobchip" style="padding:14px 16px;cursor:pointer;border-left:6px solid ${tm.c};background:var(--panel)" data-action="coordSelect" data-id="${esc(p.id+"|"+it.type)}">
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start"><span style="font-weight:800;font-size:16px;line-height:1.2">${esc(p.name||"—")}</span><span class="pill" style="background:${tm.c};font-size:9.5px;flex-shrink:0">🔍 ${esc(inspTypeText(it.type))}</span></div>
+    <div style="font-size:13px;font-weight:800;color:var(--wh-orange);margin-top:3px">${esc(p.num||"")}${(it.vip&&it.type!=="vip")?` <span class="pill" style="background:var(--jc-MSP);font-size:9px">VIP</span>`:""}</div>
+    ${f("📍",p.address)}${f("🏛",p.ahj)}${f("📞",tel)}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">${p.systemKw?`<span class="pill" style="background:var(--jc-DL);font-size:10px">${p.systemKw} kW</span>`:""}${p.stage?`<span class="pill" style="background:var(--wh-grey);font-size:10px">${esc(p.stage)}</span>`:""}</div></div>`;
+}
+function coordDetailModal(){
+  const es=S.lang==="es", key=String(S.coord.selected||"");
+  const [pid,ptype]=key.split("|");
+  const p=(S.proj.list||[]).find(x=>x.id===pid); if(!p) return "";
+  const it=(p.insp&&p.insp.items||[]).find(x=>x.type===ptype)||(p.insp&&p.insp.items[0])||null;
+  const tm=it?inspTypeMeta(it.type):{c:"var(--wh-grey)"}; const tel=p.mobile||p.phone;
+  const dlKey=String(p.num||"").toUpperCase().replace(/\s+/g,"");
+  const nc=S.coord.notes[dlKey]||{status:"idle",text:"",recordId:""};
+  const f=(l,v)=>v?`<div><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${l}</div><div style="font-size:14px;font-weight:500">${esc(v)}</div></div>`:"";
+  // Installation Notes block
+  let notesInner;
+  if(nc.status==="loading"||nc.status==="idle") notesInner=`<div style="font-size:12px;color:var(--text-dim)">⟳ ${es?"Cargando notas…":"Loading notes…"}</div>`;
+  else if(nc.status==="error") notesInner=`<div style="font-size:12px;color:var(--warn)">${es?"No se pudieron cargar las notas.":"Couldn't load notes."}</div>`;
+  else if(!nc.text) notesInner=`<div style="font-size:12.5px;color:var(--text-dim)">${es?"Sin notas de instalación.":"No installation notes."}</div>`;
+  else notesInner=`<div style="font-size:13.5px;font-weight:500;line-height:1.55;white-space:pre-wrap;color:var(--text)">${esc(nc.text)}</div>`;
+  const notesBlock=`<div style="grid-column:1/-1;margin-top:4px"><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">📝 ${es?"Notas de Instalación (Zoho)":"Installation Notes (Zoho)"}</div><div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px">${notesInner}</div></div>`;
+  const body=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    ${f(es?"Tipo de Inspección":"Inspection Type",it?inspTypeText(it.type):"")}
+    ${f(es?"Etapa":"Stage",p.stage)}
+    ${f("AHJ",p.ahj)}
+    ${f(es?"Sistema":"System",[p.systemKw?p.systemKw+" kW":"",p.modules?p.modules+" mod":""].filter(Boolean).join(" · "))}
+    ${f(es?"Batería":"Battery",p.battery)}
+    ${f(es?"Financiamiento":"Finance",p.finance)}
+    <div style="grid-column:1/-1">${f(es?"Dirección":"Address",p.address)}</div>
+    ${notesBlock}</div>`;
+  // Open-in-Zoho-Install: link the Installation record when its id is known, else a Zoho search.
+  const zohoInstallUrl=nc.recordId?`https://crm.zoho.com/crm/${ZOHO_ORG}/tab/CustomModule7/${encodeURIComponent(nc.recordId)}`:`https://crm.zoho.com/crm/${ZOHO_ORG}/search?searchword=${encodeURIComponent(p.num||p.name||"")}`;
+  const inner=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px"><div style="min-width:0">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">${it?`<span class="pill" style="background:${tm.c};font-size:10px">🔍 ${esc(inspTypeText(it.type))}</span>`:""}<span class="pill" style="background:#F89B24;font-size:10px">${es?"Listo p/Programar":"Ready to Schedule"}</span></div>
+      <h3 style="margin:0;font-size:20px;font-weight:700">${p.num?`<span style="color:var(--wh-orange)">${esc(p.num)} </span>`:""}${esc(p.name||"")}</h3>
+      ${p.address?`<p style="margin:4px 0 0;color:var(--text-dim);font-size:13px">📍 <a href="https://maps.google.com/?q=${encodeURIComponent(p.address)}" target="_blank" rel="noopener" style="color:var(--wh-blue-light)">${esc(p.address)}</a></p>`:""}
+      ${tel?`<div style="margin-top:8px"><a class="btn3d green sm" href="tel:${esc(String(tel).replace(/[^0-9+]/g,""))}">📞 ${esc(tel)}</a></div>`:""}
+    </div><button class="btn3d grey sm" data-action="coordClose">✕</button></div>
+    ${body}
+    <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)"><a class="btn3d blue" href="${zohoInstallUrl}" target="_blank" rel="noopener" style="display:block;text-align:center;font-size:15px;padding:13px">🔗 ${es?"Abrir en Zoho Instalación":"Open in Zoho Install"}</a></div>`;
+  return `<div data-action="coordClose" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px"><div data-action="noop" class="card rise" style="border-radius:16px;max-width:560px;width:100%;max-height:85vh;overflow:auto;padding:24px">${inner}</div></div>`;
+}
+/* ── All-time Zoho word-search augmentation (Projects Pipeline + Calendar search bars).
+   Loaded lists only cover the pipeline / calendar window; when the query has FEW/NO local
+   matches (debounced, q≥3) we reach out to /api/zoho-search and show clickable Zoho cards. ── */
+let _zxTimers={};
+function zohoAugment(kind, q){ q=(q||"").trim(); const slot=S.zx[kind]; clearTimeout(_zxTimers[kind]);
+  if(q.length<3){ slot.q=""; slot.status="idle"; slot.list=[]; slot.err=""; return; }
+  // Gauge local matches — only hit Zoho when the loaded list can't satisfy the search.
+  let localN;
+  if(kind==="proj"){ const lq=q.toLowerCase(); localN=(S.proj.list||[]).filter(p=>((p.name||"")+" "+(p.num||"")+" "+(p.address||"")).toLowerCase().indexOf(lq)>=0).length; }
+  else { localN=(S.cal.records||[]).filter(r=>calQMatch(r,q)).length; }
+  slot.q=q;
+  if(localN>=5){ slot.status="idle"; slot.list=[]; return; } // plenty locally → don't hammer Zoho
+  _zxTimers[kind]=setTimeout(()=>{
+    if((kind==="proj"?(S.proj.q||""):(S.cal.q||"")).trim()!==q) return; // query moved on
+    slot.status="loading"; render(true);
+    fetch("/api/zoho-search?q="+encodeURIComponent(q),{cache:"no-store"}).then(r=>r.json()).then(j=>{
+      if((kind==="proj"?(S.proj.q||""):(S.cal.q||"")).trim()!==q) return; // stale response
+      slot.list=(j&&j.ok&&j.results)||[]; slot.status=(j&&j.ok)?"live":"error"; slot.err=(j&&j.error)||""; render(true);
+    }).catch(()=>{ if((kind==="proj"?(S.proj.q||""):(S.cal.q||"")).trim()!==q) return; slot.status="error"; slot.list=[]; render(true); });
+  },400);
+}
+function zxSectionHTML(kind, localNums){ const es=S.lang==="es", slot=S.zx[kind];
+  const q=(kind==="proj"?(S.proj.q||""):(S.cal.q||"")).trim();
+  if(q.length<3||slot.q!==q) return "";
+  if(slot.status==="loading") return `<div style="margin-top:14px;font-size:12px;color:var(--text-dim)">📁 ${es?"Buscando en registros de Zoho…":"Searching Zoho records…"}</div>`;
+  if(slot.status!=="live") return "";
+  const seen=localNums||{};
+  const list=(slot.list||[]).filter(r=>!(r.dl&&seen[String(r.dl).toUpperCase().replace(/\s+/g,"")]));
+  if(!list.length) return "";
+  const cards=list.map(r=>`<div class="card jobchip" data-action="zxOpen" data-url="${esc(r.zohoUrl)}" style="padding:11px 13px;cursor:pointer;border-left:4px solid var(--wh-blue-light);background:var(--panel)">
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:13.5px">${esc(r.name||"—")}</span>${r.stage?`<span class="pill" style="background:var(--wh-grey);font-size:9.5px;flex-shrink:0">${esc(r.stage)}</span>`:""}</div>
+    <div style="font-size:12px;color:var(--wh-orange);font-weight:800;margin-top:3px">${esc(r.dl||"")}${r.kw?` <span style="color:var(--text-dim);font-weight:600">· ${esc(r.kw)} kW</span>`:""}</div>
+    ${r.address?`<div style="font-size:11.5px;color:var(--text-dim);margin-top:3px">📍 ${esc(r.address)}</div>`:""}
+    <div style="font-size:11px;color:var(--wh-blue-light);margin-top:5px;font-weight:700">🔗 ${es?"Abrir en Zoho":"Open in Zoho"}</div></div>`).join("");
+  return `<div style="margin-top:16px"><div style="font-weight:800;font-size:13px;color:var(--text-dim);margin-bottom:8px">📁 ${es?"De registros de Zoho (todo el historial)":"From Zoho records (all-time)"} <span style="opacity:.7">(${list.length})</span></div><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px">${cards}</div></div>`;
+}
 function projectsHTML(){
   const P=S.proj;
   const q=(P.q||"").toLowerCase();
@@ -1307,7 +1426,9 @@ function projectsHTML(){
     :(!P.ok&&P.status==="unconfigured")?`<div class="card" style="padding:18px;color:var(--text-dim)">Not connected to Zoho yet — add credentials to go live.</div>`
     :(P.status==="loading"&&!P.list.length)?`<div class="card" style="padding:18px;color:var(--text-dim)">Loading…</div>`
     :(sel?projectDetailHTML(sel):"")+groups;
-  return `<div class="fade">`+head+alertBanner+body+`</div>`;
+  const projNums={}; (P.list||[]).forEach(p=>{ if(p.num) projNums[String(p.num).toUpperCase().replace(/\s+/g,"")]=1; });
+  const zx=(P.stageFilter!=="inspections")?zxSectionHTML("proj",projNums):"";
+  return `<div class="fade">`+head+alertBanner+body+zx+`</div>`;
 }
 
 /* ---------- Captured Brigada snapshot (April 2026) — shows real data with no login ---------- */
@@ -1934,6 +2055,7 @@ function zohoHTML(){
    ============================================================================ */
 const TABS=[
   {id:"itinerary",key:"tab_itinerary",fn:itineraryHTML},
+  {id:"coordinator",key:"tab_coordinator",fn:coordinatorHTML},
   {id:"projects",key:"tab_projects",fn:projectsHTML},
   {id:"calendar",key:"tab_calendar",fn:calendarTabHTML},
   {id:"crews",key:"tab_crews",fn:crewsHTML},
@@ -2144,12 +2266,15 @@ document.addEventListener("click",e=>{
     case "notifOpen": S.notif.open=false; S.tab="projects"; S.proj.selected=id; S.proj.noteFrom=null; S.proj.stageFilter="all"; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
-    case "setTab": S.tab=id; try{localStorage.setItem("wm_itin_tab",id);}catch(e){} if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); if(id==="instmap"&&S.instMap.status==="idle") loadInstallMap(); render(); break;
+    case "setTab": S.tab=id; try{localStorage.setItem("wm_itin_tab",id);}catch(e){} if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="coordinator") loadProjects(S.proj.status!=="idle",true); if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); if(id==="instmap"&&S.instMap.status==="idle") loadInstallMap(); render(); break;
     case "jobsRefresh": loadJobs(); break;
     case "projRefresh": loadProjects(false,true); break;
     case "selectProject": S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
     case "projStageFocus": S.proj.noteFrom=(id&&S.proj.noteFrom!==id)?id:null; render(); break;
     case "closeProject": S.proj.selected=null; S.proj.noteFrom=null; render(); break;
+    case "coordSelect": { S.coord.selected=id; const pid=String(id||"").split("|")[0]; const pp=(S.proj.list||[]).find(x=>x.id===pid); if(pp&&pp.num) loadCoordNotes(pp.num); render(); break; }
+    case "coordClose": S.coord.selected=null; render(); break;
+    case "zxOpen": { const u=el.getAttribute("data-url"); if(u) window.open(u,"_blank","noopener"); break; }
     case "projStage": S.proj.stageFilter=id; S.proj.selected=null; render(); break;
     case "dispatchToggle": {
       S.dispatch.open=!S.dispatch.open;
@@ -2182,7 +2307,7 @@ document.addEventListener("click",e=>{
     case "calType": S.cal.typeFilter=id; render(); break;
     case "calTeam": { const i=S.cal.teamFilter.indexOf(id); if(i>=0)S.cal.teamFilter.splice(i,1); else S.cal.teamFilter.push(id); render(); break; }
     case "calClearTeams": S.cal.teamFilter=[]; render(); break;
-    case "calSearchClear": S.cal.q=""; render(); break;
+    case "calSearchClear": S.cal.q=""; S.zx.cal={q:"",status:"idle",list:[],err:""}; render(); break;
     case "calSelectJob": { S.cal.selected=id; const _jr=S.cal.records.find(x=>x.id===id); if(_jr&&_jr.type!=="service"&&_jr.dlNumber) loadBomNotes(_jr.dlNumber); render(); break; }
     case "calDay": S.cal.dayPanel=Number(id); render(); break;
     case "calClose": S.cal.selected=null; S.cal.dayPanel=null; render(); break;
@@ -2267,8 +2392,9 @@ document.addEventListener("click",e=>{
 });
 document.addEventListener("keydown",function(e){ if(e.key==="Enter"&&e.target&&e.target.id==="scSearch"){ S.sc.q=e.target.value; loadSiteCapture(S.sc.q.trim()); } });
 document.addEventListener("input",function(e){
-  if(e.target.id==="calSearch"){ S.cal.q=e.target.value; render(); }
-  else if(e.target.id==="projSearch"){ S.proj.q=e.target.value; render(); }
+  if(e.target.id==="calSearch"){ S.cal.q=e.target.value; zohoAugment("cal",e.target.value); render(); }
+  else if(e.target.id==="projSearch"){ S.proj.q=e.target.value; zohoAugment("proj",e.target.value); render(); }
+  else if(e.target.id==="coordSearch"){ S.coord.q=e.target.value; render(); }
   else if(e.target.id==="recSearch"){ S.crewRec.q=e.target.value; render(); }
   else if(e.target.hasAttribute&&e.target.hasAttribute("data-cnew")){ S.sc.cnew[e.target.getAttribute("data-cnew")]=e.target.value; const pv=document.getElementById("scNamePreview"); if(pv){ pv.textContent=((S.sc.cnew.dl||"")+" "+(S.sc.cnew.customer||"")).trim()||"(enter a DL #)"; } }
   else if(e.target.id==="scSearch"){ S.sc.q=e.target.value; render(); }

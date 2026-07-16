@@ -115,7 +115,7 @@ function normCrew(raw) {
   return { id, label };
 }
 
-const INSTALL_FIELDS = "Name,Installation_Start_Date,Installation_Complete_Date,Installation_Team,Deal,MSP_Upgrade_Required,Battery_Type,Language_Preference,Number_of_Days_Needed,Permit_Package,BOM";
+const INSTALL_FIELDS = "Name,Installation_Start_Date,Installation_Complete_Date,Installation_Team,Deal,MSP_Upgrade_Required,Battery_Type,Language_Preference,Number_of_Days_Needed,Permit_Package,BOM,Installation_Notes";
 // A Zoho file-upload field is an array of file objects; return the latest (newest-first).
 function latestFile(field) {
   if (!Array.isArray(field)) return null;
@@ -162,6 +162,7 @@ export function mapInstall(r, todayISO) {
     phone: "",
     geo: null,
     scope: scopeBits.join(" · ") || "Installation",
+    installNotes: (r.Installation_Notes || "").trim(), // coordinator gate codes / pending-install to-dos (shown on hover + Coordinator detail)
   };
 }
 
@@ -207,9 +208,40 @@ export function mapService(r, todayISO) {
   };
 }
 
+// Look up the Installation Notes for a single DL (word-search the Installation module).
+// Used by the Coordinator detail view: a Ready-to-Schedule install often has no start
+// date yet, so it won't appear in the date-windowed feed — this fetches its notes directly.
+async function lookupDL(dl, token) {
+  const path = `Installation/search?word=${encodeURIComponent(dl)}` +
+    `&fields=${encodeURIComponent("Deal,Installation_Notes,Installation_Start_Date")}&per_page=20`;
+  const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+  if (r.status === 204) return { installNotes: "", recordId: "", count: 0 };
+  if (!r.ok) throw new Error(`Zoho Installation ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  const rows = (await r.json()).data || [];
+  const key = String(dl).toUpperCase().replace(/\s+/g, "");
+  // Prefer the record whose Deal name begins with the exact DL; then one that actually has notes.
+  const exact = rows.filter((x) => lookup(x.Deal).toUpperCase().replace(/\s+/g, "").indexOf(key) === 0);
+  const pool = exact.length ? exact : rows;
+  const withNotes = pool.filter((x) => (x.Installation_Notes || "").trim());
+  const pick = withNotes[0] || pool[0] || null;
+  return { installNotes: pick ? (pick.Installation_Notes || "").trim() : "", recordId: pick ? pick.id : "", count: rows.length };
+}
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=120");
   if (!hasCreds()) return res.status(200).json({ configured: false, ok: false, jobs: [] });
+
+  // Single-DL Installation-Notes lookup (Coordinator detail): /api/zoho-jobs?dl=DL8467
+  const dl = String(req.query.dl || "").trim();
+  if (dl) {
+    try {
+      const token = await getAccessToken();
+      const out = await lookupDL(dl, token);
+      return res.status(200).json({ configured: true, ok: true, dl, ...out });
+    } catch (e) {
+      return res.status(200).json({ configured: true, ok: false, dl, installNotes: "", recordId: "", error: String(e && e.message || e) });
+    }
+  }
 
   // Date window: default today-14 .. today+45 (covers day nav + the monthly snapshot).
   const today = new Date();
