@@ -131,6 +131,19 @@ function normCrew(raw) {
 const INSTALL_FIELDS = "Name,Stage,Installation_Team,Deal,MSP_Upgrade_Required,Battery_Type,Number_of_Days_Needed,Installation_Notes,Installation_Start_Date";
 const SERVICE_FIELDS = "Name,Scheduled_Visit_1,Assigned_Technician,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description,Priority";
 
+// Editable Service_Ticket fields for the Coordinator/Calendar service editor (mirrors zoho-jobs.js).
+const SERVICE_EDIT_FIELDS = ["Ticket_Status", "Priority", "Type_of_Service", "Service_Description", "Scheduled_Visit_1", "Assigned_Technician"];
+function buildServiceRec(row) {
+  const rec = {};
+  for (const k of SERVICE_EDIT_FIELDS) {
+    const v = row[k];
+    if (k === "Assigned_Technician") rec[k] = (v && typeof v === "object") ? { id: String(v.id || ""), name: v.name || "" } : (v || null);
+    else if (k === "Type_of_Service") rec[k] = Array.isArray(v) ? v : (v == null ? [] : [v]);
+    else rec[k] = (v === undefined ? null : v);
+  }
+  return rec;
+}
+
 // Map a "Pending Schedule" Installation -> the shared job shape (kind:"install").
 function mapReadyInstall(r) {
   const deal = parseDeal(lookup(r.Deal));
@@ -202,6 +215,7 @@ function mapReadyService(r, todayISO) {
     geo: null,
     scope: (svc || "Service").replace(/\(\d+\)\s*/g, "").trim(),
     desc: (r.Service_Description || "").trim(),
+    svcRec: buildServiceRec(r), // editable fields embedded so the service editor loads synchronously
     ready: true,
   };
 }

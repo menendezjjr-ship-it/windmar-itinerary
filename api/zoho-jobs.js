@@ -127,6 +127,26 @@ function latestFile(field) {
 }
 const SERVICE_FIELDS = "Name,Scheduled_Visit_1,Assigned_Technician,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description,Priority";
 
+// Editable Service_Ticket fields surfaced to the Coordinator/Calendar editor. Ticket_Status is
+// the "Stage". Type_of_Service (multiselect) + Assigned_Technician (lookup) are for read-only
+// display; only Ticket_Status/Priority/Service_Description/Scheduled_Visit_1 are writable.
+const SERVICE_EDIT_FIELDS = [
+  "Ticket_Status", "Priority", "Type_of_Service", "Service_Description",
+  "Scheduled_Visit_1", "Assigned_Technician",
+];
+// Build the editable-record shape from a raw Service_Ticket row (shared by mapService — so the
+// editor loads synchronously from the feed — and by the ?svc= single-record lookup fallback).
+function buildServiceRec(row) {
+  const rec = {};
+  for (const k of SERVICE_EDIT_FIELDS) {
+    const v = row[k];
+    if (k === "Assigned_Technician") rec[k] = (v && typeof v === "object") ? { id: String(v.id || ""), name: v.name || "" } : (v || null);
+    else if (k === "Type_of_Service") rec[k] = Array.isArray(v) ? v : (v == null ? [] : [v]);
+    else rec[k] = (v === undefined ? null : v);
+  }
+  return rec;
+}
+
 export function mapInstall(r, todayISO) {
   const deal = parseDeal(lookup(r.Deal));
   const crew = normCrew(lookup(r.Installation_Team) || "Unassigned");
@@ -206,6 +226,7 @@ export function mapService(r, todayISO) {
     geo: null,
     scope: (svc || "Service").replace(/\(\d+\)\s*/g, "").trim(),
     desc: (r.Service_Description || "").trim(), // full work-order description for the ticket
+    svcRec: buildServiceRec(r), // editable fields embedded so the service editor loads synchronously (no per-open token refresh)
   };
 }
 
@@ -257,17 +278,9 @@ async function lookupDL(dl, token) {
   };
 }
 
-// Editable Service_Ticket fields surfaced to the Coordinator/Calendar editor. Ticket_Status is
-// the "Stage". Type_of_Service (multiselect) + Assigned_Technician (lookup) are returned for
-// read-only display; only Ticket_Status/Priority/Service_Description/Scheduled_Visit_1 are writable.
-const SERVICE_EDIT_FIELDS = [
-  "Ticket_Status", "Priority", "Type_of_Service", "Service_Description",
-  "Scheduled_Visit_1", "Assigned_Technician",
-];
-
-// Fetch one Service_Ticket record by id and return its editable fields (Calendar/Coordinator
-// service editor). A DL can carry both an install and a service ticket, so callers resolve the
-// exact ticket by its recordId (not by DL). Returns { recordId, module, rec }.
+// Fetch one Service_Ticket record by id and return its editable fields — a FALLBACK for the
+// service editor when the feed's embedded svcRec is unavailable. Normally the client uses the
+// svcRec embedded in the feed (no per-open token refresh). Returns { recordId, module, rec }.
 async function lookupService(recordId, token) {
   const path = `Service_Ticket/${encodeURIComponent(recordId)}?fields=${encodeURIComponent(SERVICE_EDIT_FIELDS.join(","))}`;
   const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
@@ -275,14 +288,7 @@ async function lookupService(recordId, token) {
   if (!r.ok) throw new Error(`Zoho Service_Ticket ${r.status}: ${(await r.text()).slice(0, 200)}`);
   const row = ((await r.json()).data || [])[0] || null;
   if (!row) return { recordId: "", module: "Service_Ticket", rec: null, count: 0 };
-  const rec = {};
-  for (const k of SERVICE_EDIT_FIELDS) {
-    const v = row[k];
-    if (k === "Assigned_Technician") rec[k] = (v && typeof v === "object") ? { id: String(v.id || ""), name: v.name || "" } : (v || null);
-    else if (k === "Type_of_Service") rec[k] = Array.isArray(v) ? v : (v == null ? [] : [v]);
-    else rec[k] = (v === undefined ? null : v);
-  }
-  return { recordId: String(row.id), module: "Service_Ticket", rec, count: 1 };
+  return { recordId: String(row.id), module: "Service_Ticket", rec: buildServiceRec(row), count: 1 };
 }
 
 export default async function handler(req, res) {
