@@ -997,7 +997,7 @@ function inspEntryCard(p,it){ const sm=inspMeta(it.status), tm=inspTypeMeta(it.t
    Reuses inspNeedsScheduling() (the "missing"/"ready" set), live crew GPS (S.crews.fleet from
    /api/crews), geocodeInto()/GEO_CACHE and initPinMap(). Distances are real Haversine miles. */
 function dispatchItems(){ // one item per pending inspection, keyed for geocode + ranking
-  return inspEntries().filter(e=>e.it.status==="ready"&&e.it.type!=="roofing").map(e=>({ id:e.p.id+"|"+e.it.type, zid:e.p.id, address:e.p.address||"",
+  return inspEntries().filter(e=>e.it.status==="ready"&&e.it.type!=="roofing").map(e=>({ id:e.p.id+"|"+e.it.type, zid:e.p.id, postInstallId:e.p.postInstallId||"", address:e.p.address||"",
     num:e.p.num||"", name:e.p.name||"", type:e.it.type, ahj:e.p.ahj||"", stage:e.p.stage, scheduled:e.it.scheduled||null }));
 }
 function dispatchCrews(){ return (S.crews.fleet||[]).filter(c=>c&&c.gps&&c.gps.lat!=null&&c.gps.lon!=null); } // live GPS only
@@ -1040,7 +1040,7 @@ function dispatchHTML(){
     const nearHTML=!liveCrews?`<span style="font-size:12px;color:var(--text-dim)">${es?"GPS no disponible":"GPS unavailable"}</span>`
       :(!r.near.length?`<span style="font-size:12px;color:var(--text-dim)">${es?"Sin cuadrillas con GPS":"No crews with GPS"}</span>`
       :r.near.map((x,i)=>`<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;${i===0?'font-weight:800':'opacity:.85'}"><span style="color:${i===0?'var(--jc-DL)':'var(--text-dim)'};font-size:${i===0?'13':'12'}px">${i===0?'🧭 ':''}${esc(crewName(x.crew))}</span><span style="color:var(--wh-orange);font-weight:800;font-size:12.5px">${x.d.toFixed(1)} mi</span>${x.crew.addr?`<span style="font-size:11px;color:var(--text-dim)">· ${esc(cityFromAddr(x.crew.addr)||x.crew.addr)}</span>`:""}${i===0?(" "+dirLinkFrom(x.crew,p.lat,p.lon)):""}</div>`).join(""));
-    const zurl="https://crm.zoho.com/crm/org666151142/tab/Potentials/"+esc(p.zid);
+    const zurl=p.postInstallId?("https://crm.zoho.com/crm/org666151142/tab/CustomModule11/"+esc(p.postInstallId)):("https://crm.zoho.com/crm/org666151142/tab/Potentials/"+esc(p.zid));
     return `<div class="card" style="padding:12px 14px;border-left:5px solid ${tm.c}">
       <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
         <span style="font-weight:800;font-size:14px">${esc(p.name)} <span style="color:var(--text-dim);font-weight:600;font-size:12px">${esc(p.num||"")}</span></span>
@@ -1273,13 +1273,15 @@ function projectDetailHTML(p){
   const attSection=`<div style="padding:8px 20px 4px;border-top:1px solid var(--line);margin-top:8px"><div class="label" style="margin:6px 0 8px">📎 ${es?'Archivos / Adjuntos':'Attachments'}${atReady?` (${attCount})`:''}</div>${attInner}</div>`;
   const focusLabel=S.proj.noteFrom?((p.timeline.find(x=>x.key===S.proj.noteFrom)||{}).label||""):"";
   const notesHead=`<div style="display:flex;align-items:center;gap:10px;margin:6px 0 10px;flex-wrap:wrap"><div class="label" style="margin:0">📝 ${es?'Notas por etapa':'Notes by stage'}${ready?` (${ns.list.length})`:''}</div>${S.proj.noteFrom?`<button class="btn3d ghost sm" data-action="projStageFocus" data-id="${esc(S.proj.noteFrom)}">✕ ${es?'Ver todas':'Show all'}</button><span style="font-size:11px;color:var(--wh-orange);font-weight:700">${es?'etapa':'stage'}: ${esc(focusLabel)}</span>`:`<span style="font-size:11px;color:var(--text-dim)">${es?'agrupadas · etapa actual primero':'grouped · current stage first'}</span>`}</div>`;
-  const zohoUrl="https://crm.zoho.com/crm/org666151142/tab/Potentials/"+esc(p.id);
+  // Inspection projects (Install / Post-Installation with a resolved FI record) open the
+  // Post-Installation record (Final_Inspectin = CustomModule11); all others open the Deal.
+  const zohoUrl=p.postInstallId?("https://crm.zoho.com/crm/org666151142/tab/CustomModule11/"+esc(p.postInstallId)):("https://crm.zoho.com/crm/org666151142/tab/Potentials/"+esc(p.id));
   return `<div class="card fade" style="padding:0;margin-bottom:16px;border-left:8px solid ${sc.c};overflow:auto;max-height:82vh">
     <div style="padding:18px 20px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;position:sticky;top:0;background:var(--panel);z-index:2;border-bottom:1px solid var(--line)">
       <div><span class="pill" style="background:${sc.c}">${esc(stageLabel(p.stage))}</span>
         <h2 style="margin:10px 0 2px;font-size:22px">${esc(p.name)}</h2>
         <div style="color:var(--text-dim);font-weight:700;font-size:13px">${esc(p.num)}${(p.salesRep||p.owner)?(" · "+ptr("owner")+": "+esc(p.salesRep||p.owner)):""}</div></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn3d blue sm" href="${zohoUrl}" target="_blank">🔗 Zoho</a><button class="btn3d sm" data-action="scFromProject" data-id="${esc(p.id)}">📸 SiteCapture</button><button class="btn3d grey sm" data-action="closeProject">✕ ${ptr("close")}</button></div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn3d blue sm" href="${zohoUrl}" target="_blank" title="${p.postInstallId?(S.lang==='es'?'Abrir Post-Instalación en Zoho ('+esc(p.postInstallName||'')+')':'Open Post-Installation in Zoho ('+esc(p.postInstallName||'')+')'):(S.lang==='es'?'Abrir en Zoho':'Open in Zoho')}">🔗 ${p.postInstallId?(p.postInstallName||'Zoho'):'Zoho'}</a><button class="btn3d sm" data-action="scFromProject" data-id="${esc(p.id)}">📸 SiteCapture</button><button class="btn3d grey sm" data-action="closeProject">✕ ${ptr("close")}</button></div></div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(258px,1fr));gap:0 24px;padding:14px 20px 0">
       <div>
         <div class="label" style="margin:6px 0">${ptr("contact")}</div>
@@ -1694,11 +1696,15 @@ function coordDetailModal(){
     const ed=installEditorParts(dlKey);
     recBlock=ed.recBlock; savedFlash=ed.savedFlash; editBanner=ed.editBanner; actionsRO=ed.actionsRO; actionsEdit=ed.actionsEdit; fieldsLoading=ed.fieldsLoading; noteBox=ed.noteBox;
   }
-  // Open in Zoho: Installation record for installs (CustomModule7), Service ticket for services (CustomModule40), else search.
-  const zohoUrl=isService
+  // Open in Zoho: inspection → Post-Installation record (Final_Inspectin = CustomModule11) when resolved;
+  // installs → Installation record (CustomModule7); services → Service ticket (CustomModule40); else search.
+  const postId=(it&&p&&p.postInstallId)?p.postInstallId:"";
+  const zohoUrl=postId
+    ? `https://crm.zoho.com/crm/${ZOHO_ORG}/tab/CustomModule11/${encodeURIComponent(postId)}`
+    : isService
     ? (item.recordId?`https://crm.zoho.com/crm/${ZOHO_ORG}/tab/CustomModule40/${encodeURIComponent(item.recordId)}`:`https://crm.zoho.com/crm/${ZOHO_ORG}/search?searchword=${encodeURIComponent(item.num||item.name||"")}`)
     : (nc.recordId?`https://crm.zoho.com/crm/${ZOHO_ORG}/tab/CustomModule7/${encodeURIComponent(nc.recordId)}`:`https://crm.zoho.com/crm/${ZOHO_ORG}/search?searchword=${encodeURIComponent(item.num||item.name||"")}`);
-  const zohoLabel=isService?(es?"Abrir Ticket en Zoho":"Open Ticket in Zoho"):(es?"Abrir en Zoho Instalación":"Open in Zoho Install");
+  const zohoLabel=postId?(es?"Abrir Post-Instalación en Zoho":"Open Post-Installation in Zoho"):isService?(es?"Abrir Ticket en Zoho":"Open Ticket in Zoho"):(es?"Abrir en Zoho Instalación":"Open in Zoho Install");
   const inner=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px"><div style="min-width:0">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">${it?`<span class="pill" style="background:${inspTypeMeta(it.type).c};font-size:10px">🔍 ${esc(inspTypeText(it.type))}</span>`:`<span class="pill" style="background:${m.color};color:${textOn(m.color)};font-size:10px">${m.icon} ${esc(m.label)}</span>`}<span class="pill" style="background:#F89B24;font-size:10px">${es?"Listo p/Programar":"Ready to Schedule"}</span>${editing?`<span class="pill" style="background:#0EA5E9;font-size:10px">✏️ ${es?"Editando":"Editing"}</span>`:""}</div>
       <h3 style="margin:0;font-size:20px;font-weight:700">${item.num?`<span style="color:var(--wh-orange)">${esc(item.num)} </span>`:""}${esc(item.name||"")}</h3>
@@ -3066,10 +3072,9 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
   try{ if(staffMode&&localStorage.getItem("wm_gate_code")==="1"){ pass(); return; } }catch(e){}
   function check(acct){
     var email=(acct.username||"").toLowerCase();
+    // Log the sign-in with approximate IP location server-side (no browser prompt).
     try{ if(!sessionStorage.getItem("wm_login_logged")){ sessionStorage.setItem("wm_login_logged","1");
-      var _logPost=function(lat,lon,city){ try{ fetch(SB+"/rest/v1/login_events",{method:"POST",headers:Object.assign({},H,{Prefer:"return=minimal"}),body:JSON.stringify({email:email,name:acct.name||null,app:APP_LABEL,lat:(lat==null?null:lat),lon:(lon==null?null:lon),city:city||null})}).catch(function(){}); }catch(e){} };
-      var _logFinish=function(lat,lon){ if(lat==null){ _logPost(); return; } fetch("https://api.bigdatacloud.net/data/reverse-geocode-client?latitude="+lat+"&longitude="+lon+"&localityLanguage=en").then(function(r){return r.json();}).then(function(d){ _logPost(lat,lon,[d.city||d.locality,d.principalSubdivisionCode||d.principalSubdivision].filter(Boolean).join(", ")); }).catch(function(){ _logPost(lat,lon,""); }); };
-      if(navigator&&navigator.geolocation){ navigator.geolocation.getCurrentPosition(function(p){_logFinish(p.coords.latitude,p.coords.longitude);}, function(){_logPost();}, {timeout:8000,maximumAge:300000}); } else { _logPost(); }
+      fetch("/api/log-login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:email,name:acct.name||null,app:APP_LABEL})}).catch(function(){});
     } }catch(e){}
     fetch(SB+"/rest/v1/app_access?on_conflict=email",{method:"POST",headers:Object.assign({},H,{Prefer:"resolution=merge-duplicates,return=representation"}),body:JSON.stringify({email:email,name:acct.name||null,last_seen:new Date().toISOString()})})
       .then(function(r){return r.ok?r.json():null;}).then(function(rows){
