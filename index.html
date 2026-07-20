@@ -584,14 +584,25 @@ function jobTipHTML(r){ if(!r) return ""; const t=jtInfo(r), es=S.lang==="es", c
     +line(es?"Estado":"Status", r.status)
     +((r.type!=="service"&&r.installNotes)?`<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2A3F7A;color:#ffd9a8"><span style="font-weight:700">📝 </span>${esc(String(r.installNotes).length>160?String(r.installNotes).slice(0,157)+"…":r.installNotes)}</div>`:"");
 }
-// Hover tooltip for Coordinator cards — project info + Zoho Installation Notes (loaded per DL, cached).
-function coordTipHTML(num){ const es=S.lang==="es"; const p=(S.proj.list||[]).find(x=>String(x.num)===String(num)); if(!p) return "";
-  const key=String(num||"").toUpperCase().replace(/\s+/g,""); const nc=(S.coord.notes||{})[key];
+// Hover tooltip for Coordinator rows — resolves the item from ANY coordinator source (ready feed,
+// pipeline project, inspection set) by DL# and shows a calendar-style popup INCLUDING the notes.
+function coordTipHTML(num){ const es=S.lang==="es";
+  const key=String(num||"").toUpperCase().replace(/\s+/g,""); if(!key) return "";
+  const rj=(S.coord.ready.list||[]).find(x=>String(x.num||"").toUpperCase().replace(/\s+/g,"")===key); // ready install/service (carries installNotes)
+  const p=(S.proj.list||[]).find(x=>String(x.num||"").toUpperCase().replace(/\s+/g,"")===key);        // pipeline project (also covers inspections)
+  if(!rj&&!p) return "";
+  const name=(rj&&rj.project)||(p&&p.name)||"", address=(rj&&rj.address)||(p&&p.address)||"";
+  const stage=(rj&&rj.stage)||(p&&p.stage)||"", crew=(rj&&rj.crewLabel)||"";
+  const nc=(S.coord.notes||{})[key];
+  // Notes: prefer the ready install's own installNotes, else the per-DL cache (loaded on hover as fallback).
+  const notesRaw=(rj&&rj.installNotes)?rj.installNotes
+    :(nc&&nc.status==="live")?(nc.text||"")
+    :(nc&&nc.status==="loading")?(es?"cargando…":"loading…"):"";
+  const notes=notesRaw?(String(notesRaw).length>160?String(notesRaw).slice(0,157)+"…":notesRaw):(es?"(sin notas)":"(no notes)");
   const line=(l,v)=>v?`<div style="margin-top:3px"><span style="color:#8fa3c8">${l}:</span> ${esc(v)}</div>`:"";
-  const notes = (nc&&nc.status==="live")?(nc.text||(es?"(sin notas)":"(no notes)")) : (nc&&nc.status==="loading")?(es?"cargando…":"loading…") : "—";
-  return `<div style="font-weight:800;font-size:13px;color:#fff;margin-bottom:4px"><span style="color:var(--wh-orange)">${esc(p.num||"")}</span> ${esc(p.name||"")}</div>`
-    +line(es?"Dirección":"Address",p.address)+line("AHJ",p.ahj)+line(es?"Etapa":"Stage",p.stage)
-    +`<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2A3F7A;color:#ffd9a8"><span style="font-weight:700">📝 </span>${esc(String(notes).length>200?String(notes).slice(0,197)+"…":notes)}</div>`;
+  return `<div style="font-weight:800;font-size:13px;color:#fff;margin-bottom:4px"><span style="color:var(--wh-orange)">${esc(num||"")}</span> ${esc(name)}</div>`
+    +line(es?"Dirección":"Address",address)+line("AHJ",(p&&p.ahj)||"")+line(es?"Etapa/Estado":"Stage",stage)+line(es?"Cuadrilla":"Crew",crew)
+    +`<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2A3F7A;color:#ffd9a8"><span style="font-weight:700">📝 </span>${esc(notes)}</div>`;
 }
 function wmJtipInit(){ if(window.__wmjtip) return; window.__wmjtip=true;
   const tip=document.createElement("div"); tip.id="wmjtip";
@@ -626,7 +637,7 @@ function calRow(r,cont){
       <div style="font-size:11px;color:#7c8aa5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="color:${col}">${esc(r.team)}</span>${r.address?" · "+esc(r.address):""}</div></div>
     ${isS&&calHot(r.priority)?'<span style="flex-shrink:0">🔥</span>':""}</div>`;
 }
-function calModal(inner){ return `<div data-action="calClose" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px"><div data-action="noop" class="card rise" style="border-radius:16px;max-width:560px;width:100%;max-height:85vh;overflow:auto;padding:24px">${inner}</div></div>`; }
+function calModal(inner,noClose){ return `<div data-action="${noClose?'noop':'calClose'}" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px"><div data-action="noop" class="card rise" style="border-radius:16px;max-width:560px;width:100%;max-height:85vh;overflow:auto;padding:24px">${inner}</div></div>`; }
 function calDetailHTML(r){
   const col=teamColor(r.team), isS=r.type==="service";
   const f=(l,v)=>v?`<div><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${l}</div><div style="font-size:14px;font-weight:500">${esc(v)}</div></div>`:"";
@@ -656,6 +667,13 @@ function calDetailHTML(r){
     ${r.address?`<p style="margin:4px 0 0;color:var(--text-dim);font-size:13px">📍 <a href="https://maps.google.com/?q=${encodeURIComponent(r.address)}" target="_blank" style="color:var(--wh-blue-light)">${esc(r.address)}</a></p>`:""}
     ${r.phone?`<div style="margin-top:8px"><a class="btn3d green sm" href="tel:${esc(String(r.phone).replace(/[^0-9+]/g,""))}">📞 ${esc(r.phone)}</a></div>`:""}
   </div><button class="btn3d grey sm" data-action="calClose">✕</button></div>${body}${bomBlock}${(function(){
+    // ✏️ Edit stage/schedule + ➕ add-note for INSTALLS — same shared editor as the Coordinator.
+    if(isS) return ""; const es=S.lang==='es';
+    const dlKey=String(r.dlNumber||"").toUpperCase().replace(/\s+/g,""); if(!dlKey) return "";
+    const ed=installEditorParts(dlKey);
+    const hdr=`<div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em">✏️ ${es?'Editar instalación (Zoho)':'Edit Installation (Zoho)'}</div>`;
+    return `<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">${hdr}${ed.editing?'':ed.actionsRO}</div>${ed.savedFlash}${ed.recBlock}${ed.fieldsLoading}${ed.editBanner}${ed.actionsEdit}${ed.noteBox}</div>`;
+  })()}${(function(){
     const es=S.lang==='es'; const fileLink=(rid,fl)=>`/api/zoho-file?id=${encodeURIComponent(rid)}&aid=${encodeURIComponent(fl.aid)}&module=Installation&name=${encodeURIComponent(fl.name||"download")}`;
     const btns=[];
     if(r.recordId&&r.plan) btns.push(`<a class="btn3d green sm" href="${fileLink(r.recordId,r.plan)}" target="_blank" rel="noopener">📐 ${es?'Ver Planos':'View Plans'}</a>`);
@@ -744,7 +762,7 @@ function opsCalHTML(){
   const view=c.status==="loading"?`<div style="text-align:center;padding:50px;color:var(--text-dim)">⟳ ${S.lang==='es'?'Cargando…':'Loading…'}</div>`:c.status==="error"?`<div class="card" style="padding:18px;color:var(--warn)">API error: ${esc(c.err||"")}</div>`:c.view==="month"?monthGrid:c.view==="week"?weekView:c.view==="grid"?gridView:c.view==="map"?mapView:listView;
   const navLabel=(c.view==="week"||c.view==="grid"||c.view==="map")?(M[ws.getMonth()].slice(0,3)+" "+ws.getDate()+" - "+(ws.getMonth()!==we.getMonth()?M[we.getMonth()].slice(0,3)+" ":"")+we.getDate()+", "+we.getFullYear()):(M[c.m-1]+" "+c.y);
   const dayModal=c.dayPanel!=null?calModal((function(){const recs=byDate[c.dayPanel]||[];return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><h3 style="margin:0;font-size:18px;font-weight:700">${M[c.m-1]} ${c.dayPanel}, ${c.y} <span style="color:var(--text-dim);font-weight:500;font-size:14px">· ${recs.length} ${recs.length!==1?'jobs':'job'}</span></h3><button class="btn3d grey sm" data-action="calClose">✕</button></div><div style="display:flex;flex-direction:column;gap:8px">${recs.map(calRow).join("")}</div>`;})()):"";
-  const selModal=c.selected?(function(){const r=c.records.find(x=>x.id===c.selected);return r?calModal(calDetailHTML(r)):"";})():"";
+  const selModal=c.selected?(function(){const r=c.records.find(x=>x.id===c.selected);if(!r)return "";const editingThis=r.type!=="service"&&!!(S.coord.edit&&S.coord.edit.dl===String(r.dlNumber||"").toUpperCase().replace(/\s+/g,""));return calModal(calDetailHTML(r),editingThis);})():"";
   // ── KPI summary (Installation / Service totals + complete/in-progress/past-due) ──
   const calKpi=(type)=>{ const arr=scoped.filter(r=>r.type===type); const o={total:arr.length,complete:0,inprogress:0,pastdue:0}; arr.forEach(r=>{ if(r.cat==="completed")o.complete++; else if(r.cat==="in_progress")o.inprogress++; else if(r.cat==="pastdue")o.pastdue++; }); return o; };
   const _insK=calKpi("install"), _svcK=calKpi("service");
@@ -1299,16 +1317,16 @@ function loadCoordNotes(dl,force){ const key=String(dl||"").toUpperCase().replac
   const refreshTip=()=>{ const tp=document.getElementById("wmjtip"); if(tp&&tp.style.display==="block"&&tp._ctip===key) tp.innerHTML=coordTipHTML(dl); };
   fetch("/api/zoho-jobs?dl="+encodeURIComponent(dl),{cache:"no-store"}).then(r=>r.json()).then(j=>{
     S.coord.notes[key]=(j&&j.ok)?{status:"live",text:j.installNotes||"",recordId:j.recordId||"",rec:j.rec||null}:{status:"error",text:"",recordId:"",rec:null};
-    refreshTip(); if(S.tab==="coordinator") render(true);
-  }).catch(()=>{ S.coord.notes[key]={status:"error",text:"",recordId:"",rec:null}; refreshTip(); if(S.tab==="coordinator") render(true); });
+    refreshTip(); if(S.tab==="coordinator"||S.tab==="calendar") render(true);
+  }).catch(()=>{ S.coord.notes[key]={status:"error",text:"",recordId:"",rec:null}; refreshTip(); if(S.tab==="coordinator"||S.tab==="calendar") render(true); });
 }
 // Field metadata (picklist values + Installation_Team lookup records) for safe editor inputs. Loaded once.
 function loadCoordFields(){ const F=S.coord.fields; if(F.status==="loading"||F.status==="live") return;
   S.coord.fields={status:"loading",map:F.map||{},team:F.team||[]};
   fetch("/api/zoho-fields?module=Installation",{cache:"no-store"}).then(r=>r.json()).then(j=>{
     S.coord.fields=(j&&j.ok)?{status:"live",map:j.fields||{},team:(j.lookups&&j.lookups.Installation_Team)||[]}:{status:"error",map:{},team:[]};
-    if(S.tab==="coordinator") render(true);
-  }).catch(()=>{ S.coord.fields={status:"error",map:{},team:[]}; if(S.tab==="coordinator") render(true); });
+    if(S.tab==="coordinator"||S.tab==="calendar") render(true);
+  }).catch(()=>{ S.coord.fields={status:"error",map:{},team:[]}; if(S.tab==="coordinator"||S.tab==="calendar") render(true); });
 }
 // Editable Installation fields (Zoho API names VERIFIED live). g=group, ta=textarea, bool=checkbox, ro=read-only display.
 const COORD_EDIT_FIELDS=[
@@ -1384,7 +1402,8 @@ function coordItems(){
       ahj:(p&&p.ahj)||"", stage:j.stage||"", crewLabel:j.crewLabel||"", scope:j.scope||"",
       recordId:j.recordId||"", msp:j.msp, code:j.code, job:j, p:p, it:null });
   });
-  inspEntries().filter(e=>e.it.status==="ready").forEach(e=>{
+  const DEAD=/closed\s*lost|dead|cancell?ed/i; // guard: never surface a dead sale as ready
+  inspEntries().filter(e=>e.it.status==="ready"&&!DEAD.test(e.p.stage||"")).forEach(e=>{
     out.push({ key:"i|"+e.p.id+"|"+e.it.type, source:"insp", bucket:"inspection", kind:"inspection",
       num:e.p.num||"", name:e.p.name||"", address:e.p.address||"", ahj:e.p.ahj||"",
       stage:e.p.stage||"", crewLabel:"", scope:"", recordId:"", msp:false, code:"", job:null, p:e.p, it:e.it });
@@ -1455,6 +1474,55 @@ function coordItemRow(it,i){ const es=S.lang==="es", m=coordBucketMeta(it.bucket
     ${vip}${mspBadge}${statusPill}
     <span style="color:${crewDim};margin-left:auto;font-size:12px;flex-shrink:0">${crew}</span></div>`;
 }
+// ── Shared editable-Installation editor (Schedule + Stage fields, Save, Add-note) ──────────
+// Used by BOTH the Coordinator detail modal and the Calendar install detail modal. Keyed by
+// dlKey; reads/writes the S.coord.* caches (notes/edit/fields/addNote/savedMsg). Safe to share
+// because only one job modal is open at a time and every cache slot is namespaced by dlKey.
+// Returns the pieces so each caller can place them within its own layout.
+function installEditorParts(dlKey){
+  const es=S.lang==="es";
+  const nc=S.coord.notes[dlKey]||{status:"idle",text:"",recordId:"",rec:null};
+  const editing=!!(S.coord.edit&&S.coord.edit.dl===dlKey);
+  const rec=editing?S.coord.edit._rec:nc.rec;
+  const E=S.coord.edit;
+  let recBlock="",fieldsLoading="",editBanner="",savedFlash="",actionsRO="",actionsEdit="",noteBox="";
+  if(nc.status==="loading"||nc.status==="idle") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">⟳ ${es?"Cargando registro de instalación…":"Loading installation record…"}</div>`;
+  else if(nc.status==="error") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--warn)">${es?"No se pudo cargar el registro.":"Couldn't load the record."}</div>`;
+  else if(!rec||!nc.recordId) recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">${es?"No se encontró un registro de instalación editable para este DL.":"No editable Installation record found for this DL."}</div>`;
+  else recBlock=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px">
+      ${coordGroupHTML((es?"🗓 Información de Programación":"🗓 Schedule Information"),"sched",rec,editing)}
+      ${coordGroupHTML((es?"📝 Notas":"📝 Notes"),"notes",rec,editing)}
+      ${coordGroupHTML((es?"⚙️ Otros":"⚙️ Other"),"other",rec,editing)}</div>`;
+  editBanner=editing&&E&&E.err?`<div style="grid-column:1/-1;margin-top:10px;background:rgba(239,68,68,.12);border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--warn)">⚠ ${esc(E.err)}</div>`:"";
+  savedFlash=(!editing&&S.coord.savedMsg&&S.coord.savedMsg.dl===dlKey)?`<div style="margin-top:12px;background:rgba(34,197,94,.12);border:1px solid var(--ok);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--ok)">✓ ${es?"Guardado en Zoho":"Saved to Zoho"} (${S.coord.savedMsg.n} ${es?"campo(s)":"field(s)"})</div>`:"";
+  const canEdit=nc.status==="live"&&nc.recordId&&rec;
+  actionsRO=canEdit?`<button class="btn3d sm" data-action="coordEditStart" style="background:#0EA5E9">✏️ ${es?"Editar":"Edit"}</button>`:"";
+  fieldsLoading=editing&&S.coord.fields.status==="loading"?`<div style="grid-column:1/-1;font-size:11.5px;color:var(--text-dim);margin-top:6px">⟳ ${es?"Cargando opciones de campos…":"Loading field options…"}</div>`:"";
+  actionsEdit=editing?`<div style="display:flex;gap:10px;margin-top:16px"><button class="btn3d green" data-action="coordSave" ${E&&E.saving?"disabled":""} style="flex:1;padding:12px;font-size:14px">${E&&E.saving?"⟳ "+(es?"Guardando…":"Saving…"):"💾 "+(es?"Guardar cambios":"Save changes")}</button><button class="btn3d grey" data-action="coordEditCancel" ${E&&E.saving?"disabled":""} style="padding:12px 18px;font-size:14px">${es?"Cancelar":"Cancel"}</button></div>`:"";
+  if(nc.recordId && !editing){ const AN=S.coord.addNote||{}; const anOk=AN.okDl===dlKey;
+    noteBox=`<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
+      <div style="font-size:11px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">➕ ${es?"Agregar una nota":"Add a note"}</div>
+      <textarea id="coordNoteText" ${AN.sending?"disabled":""} placeholder="${es?"Agregar una nota…":"Add a note…"}" style="width:100%;min-height:64px;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg-2);color:var(--text);font-size:13.5px;resize:vertical">${esc(AN.text||"")}</textarea>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+        <button class="btn3d blue sm" data-action="coordAddNote" ${AN.sending?"disabled":""}>${AN.sending?"⟳ "+(es?"Agregando…":"Adding…"):"➕ "+(es?"Agregar":"Add")}</button>
+        ${anOk?`<span style="font-size:12.5px;color:var(--ok)">✓ ${es?"Nota agregada":"Note added to Zoho"}</span>`:""}
+        ${AN.err?`<span style="font-size:12.5px;color:var(--warn)">⚠ ${esc(AN.err)}</span>`:""}
+      </div></div>`;
+  }
+  return {recBlock,fieldsLoading,editBanner,savedFlash,actionsRO,actionsEdit,noteBox,editing,canEdit};
+}
+// Which install record is the active job modal editing? Calendar install modal OR Coordinator
+// selection (only one is open at a time). Returns {dlKey,num} so the edit/add-note handlers
+// can serve both surfaces without a coordinator-only selection.
+function editContext(){
+  if(S.tab==="calendar" && S.cal.selected){
+    const r=(S.cal.records||[]).find(x=>x.id===S.cal.selected);
+    if(r && r.type!=="service" && r.dlNumber) return {dlKey:String(r.dlNumber).toUpperCase().replace(/\s+/g,""), num:r.dlNumber};
+  }
+  const item=coordSelectedItem();
+  if(item) return {dlKey:String(item.num||"").toUpperCase().replace(/\s+/g,""), num:item.num||""};
+  return null;
+}
 function coordDetailModal(){
   const es=S.lang==="es";
   const item=coordSelectedItem(); if(!item) return "";
@@ -1477,36 +1545,13 @@ function coordDetailModal(){
     ${isService?f(es?"Servicio":"Service",item.scope):""}
     <div style="grid-column:1/-1">${f(es?"Dirección":"Address",item.address)}</div>
     ${isService&&item.job&&item.job.desc?`<div style="grid-column:1/-1">${f(es?"Descripción":"Description",item.job.desc)}</div>`:""}</div>`;
-  const E=S.coord.edit;
-  // Middle block: SERVICE = info only (no Installation edit); INSTALL/INSPECTION = editable record.
+  // Middle block: SERVICE = info only (no Installation edit); INSTALL/INSPECTION = editable record (shared editor).
   let recBlock="", savedFlash="", editBanner="", actionsRO="", actionsEdit="", fieldsLoading="", noteBox="";
   if(isService){
     recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px">🔧 ${es?"Ticket de servicio por programar. Usa \"Abrir en Zoho\" para editar el ticket.":"Service ticket pending scheduling. Use \"Open in Zoho\" to edit the ticket."}</div>`;
   } else {
-    if(nc.status==="loading"||nc.status==="idle") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">⟳ ${es?"Cargando registro de instalación…":"Loading installation record…"}</div>`;
-    else if(nc.status==="error") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--warn)">${es?"No se pudo cargar el registro.":"Couldn't load the record."}</div>`;
-    else if(!rec||!nc.recordId) recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">${es?"No se encontró un registro de instalación editable para este DL.":"No editable Installation record found for this DL."}</div>`;
-    else recBlock=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px">
-        ${coordGroupHTML((es?"🗓 Información de Programación":"🗓 Schedule Information"),"sched",rec,editing)}
-        ${coordGroupHTML((es?"📝 Notas":"📝 Notes"),"notes",rec,editing)}
-        ${coordGroupHTML((es?"⚙️ Otros":"⚙️ Other"),"other",rec,editing)}</div>`;
-    editBanner=editing&&E&&E.err?`<div style="grid-column:1/-1;margin-top:10px;background:rgba(239,68,68,.12);border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--warn)">⚠ ${esc(E.err)}</div>`:"";
-    savedFlash=(!editing&&S.coord.savedMsg&&S.coord.savedMsg.dl===dlKey)?`<div style="margin-top:12px;background:rgba(34,197,94,.12);border:1px solid var(--ok);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--ok)">✓ ${es?"Guardado en Zoho":"Saved to Zoho"} (${S.coord.savedMsg.n} ${es?"campo(s)":"field(s)"})</div>`:"";
-    const canEdit=nc.status==="live"&&nc.recordId&&rec;
-    actionsRO=canEdit?`<button class="btn3d sm" data-action="coordEditStart" style="background:#0EA5E9">✏️ ${es?"Editar":"Edit"}</button>`:"";
-    fieldsLoading=editing&&S.coord.fields.status==="loading"?`<div style="grid-column:1/-1;font-size:11.5px;color:var(--text-dim);margin-top:6px">⟳ ${es?"Cargando opciones de campos…":"Loading field options…"}</div>`:"";
-    actionsEdit=editing?`<div style="display:flex;gap:10px;margin-top:16px"><button class="btn3d green" data-action="coordSave" ${E&&E.saving?"disabled":""} style="flex:1;padding:12px;font-size:14px">${E&&E.saving?"⟳ "+(es?"Guardando…":"Saving…"):"💾 "+(es?"Guardar cambios":"Save changes")}</button><button class="btn3d grey" data-action="coordEditCancel" ${E&&E.saving?"disabled":""} style="padding:12px 18px;font-size:14px">${es?"Cancelar":"Cancel"}</button></div>`:"";
-    // ➕ Add a note → posts to the Zoho record's Notes related list (NOT the Installation_Notes field). Only when we have an Installation recordId and aren't mid-edit.
-    if(nc.recordId && !editing){ const AN=S.coord.addNote||{}; const anOk=AN.okDl===dlKey;
-      noteBox=`<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
-        <div style="font-size:11px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">➕ ${es?"Agregar una nota":"Add a note"}</div>
-        <textarea id="coordNoteText" ${AN.sending?"disabled":""} placeholder="${es?"Agregar una nota…":"Add a note…"}" style="width:100%;min-height:64px;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg-2);color:var(--text);font-size:13.5px;resize:vertical">${esc(AN.text||"")}</textarea>
-        <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
-          <button class="btn3d blue sm" data-action="coordAddNote" ${AN.sending?"disabled":""}>${AN.sending?"⟳ "+(es?"Agregando…":"Adding…"):"➕ "+(es?"Agregar":"Add")}</button>
-          ${anOk?`<span style="font-size:12.5px;color:var(--ok)">✓ ${es?"Nota agregada":"Note added to Zoho"}</span>`:""}
-          ${AN.err?`<span style="font-size:12.5px;color:var(--warn)">⚠ ${esc(AN.err)}</span>`:""}
-        </div></div>`;
-    }
+    const ed=installEditorParts(dlKey);
+    recBlock=ed.recBlock; savedFlash=ed.savedFlash; editBanner=ed.editBanner; actionsRO=ed.actionsRO; actionsEdit=ed.actionsEdit; fieldsLoading=ed.fieldsLoading; noteBox=ed.noteBox;
   }
   // Open in Zoho: Installation record for installs (CustomModule7), Service ticket for services (CustomModule40), else search.
   const zohoUrl=isService
@@ -2468,7 +2513,7 @@ document.addEventListener("click",e=>{
     case "coordAddNote": {
       const es=S.lang==="es", AN=S.coord.addNote||(S.coord.addNote={text:"",sending:false,err:"",okDl:""}); if(AN.sending) break;
       const ta=document.getElementById("coordNoteText"); const txt=((ta?ta.value:AN.text)||"").trim(); if(!txt) break;
-      const item=coordSelectedItem(); const dlKey=String(item&&item.num||"").toUpperCase().replace(/\s+/g,""); const nc=S.coord.notes[dlKey];
+      const ctx=editContext(); if(!ctx) break; const dlKey=ctx.dlKey; const nc=S.coord.notes[dlKey];
       if(!nc||!nc.recordId){ AN.err=es?"El registro aún no está listo.":"Record isn't ready yet."; render(); break; }
       AN.text=txt; AN.sending=true; AN.err=""; AN.okDl=""; render();
       const recordId=nc.recordId;
@@ -2481,8 +2526,8 @@ document.addEventListener("click",e=>{
       break;
     }
     case "coordEditStart": {
-      const es=S.lang==="es", item=coordSelectedItem();
-      const dlKey=String(item&&item.num||"").toUpperCase().replace(/\s+/g,""); const nc=S.coord.notes[dlKey];
+      const es=S.lang==="es", ctx=editContext(); if(!ctx) break;
+      const dlKey=ctx.dlKey; const nc=S.coord.notes[dlKey];
       if(!nc||nc.status!=="live"||!nc.recordId||!nc.rec){ alert(es?"El registro aún no está listo. Intenta de nuevo en un momento.":"Record isn't ready yet. Try again in a moment."); break; }
       loadCoordFields(); // ensure picklist/lookup options are available
       const rec=nc.rec, form={};
@@ -2554,9 +2599,13 @@ document.addEventListener("click",e=>{
     case "calTeam": { const i=S.cal.teamFilter.indexOf(id); if(i>=0)S.cal.teamFilter.splice(i,1); else S.cal.teamFilter.push(id); render(); break; }
     case "calClearTeams": S.cal.teamFilter=[]; render(); break;
     case "calSearchClear": S.cal.q=""; S.zx.cal={q:"",status:"idle",list:[],err:""}; render(); break;
-    case "calSelectJob": { S.cal.selected=id; const _jr=S.cal.records.find(x=>x.id===id); if(_jr&&_jr.type!=="service"&&_jr.dlNumber) loadBomNotes(_jr.dlNumber); render(); break; }
+    case "calSelectJob": { S.cal.selected=id; const _jr=S.cal.records.find(x=>x.id===id);
+      if(_jr&&_jr.type!=="service"&&_jr.dlNumber){ loadBomNotes(_jr.dlNumber);
+        // Reuse the Coordinator's Installation editor for calendar installs: reset editor state + fetch the full editable record + field metadata.
+        S.coord.edit=null; S.coord.savedMsg=null; S.coord.addNote={text:"",sending:false,err:"",okDl:""}; loadCoordNotes(_jr.dlNumber); loadCoordFields(); }
+      render(); break; }
     case "calDay": S.cal.dayPanel=Number(id); render(); break;
-    case "calClose": S.cal.selected=null; S.cal.dayPanel=null; render(); break;
+    case "calClose": S.cal.selected=null; S.cal.dayPanel=null; S.coord.edit=null; S.coord.addNote={text:"",sending:false,err:"",okDl:""}; render(); break;
     case "calRefresh": loadOpsCal(); break;
     case "noop": break;
     case "selectJob": S.selectedJob=id; render(); break;

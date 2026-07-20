@@ -37,6 +37,28 @@ async function getAccessToken() {
   return cachedToken;
 }
 
+// Fetch { dealId: Stage } for a set of Deal ids (chunked ≤100/call via the bulk-by-ids GET).
+// Used to drop installs whose SALE is dead (Deal Stage "Closed Lost") even though the
+// Installation is still "Pending Schedule". Never throws — on error returns what it has.
+async function fetchDealStages(ids, token) {
+  const out = {};
+  const uniq = [...new Set((ids || []).filter(Boolean).map(String))];
+  for (let i = 0; i < uniq.length; i += 100) {
+    const chunk = uniq.slice(i, i + 100);
+    try {
+      const res = await fetch(
+        `${API_DOMAIN}/crm/${API_VERSION}/Deals?ids=${encodeURIComponent(chunk.join(","))}&fields=Stage`,
+        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
+      );
+      if (res.status === 204 || !res.ok) continue;
+      const data = await res.json();
+      (data.data || []).forEach((d) => { if (d && d.id) out[String(d.id)] = (d.Stage || "").trim(); });
+    } catch (e) { /* keep going; unresolved deals are simply kept (don't over-filter) */ }
+  }
+  return out;
+}
+const DEAD_STAGE = /closed\s*lost|dead|cancell?ed/i; // primarily "Closed Lost" (verified exact string live)
+
 // Run a paginated CRM search and return ALL matches (criteria/fields URL-encoded).
 async function searchAll(module, criteria, fields, token) {
   const all = [];
@@ -121,6 +143,7 @@ function mapReadyInstall(r) {
   return {
     id: deal.num || r.Name,
     recordId: r.id,
+    dealId: (r.Deal && r.Deal.id) || "", // associated Deal id → used to drop Closed-Lost sales
     num: deal.num || "",
     kind: "install",
     code: deal.code || "DL",
@@ -203,7 +226,19 @@ export default async function handler(req, res) {
       searchAll("Service_Ticket", "(Ticket_Status:starts_with:3)", SERVICE_FIELDS, token),
     ]);
 
-    const instJobs = installs.map(mapReadyInstall);
+    const instJobsRaw = installs.map(mapReadyInstall);
+
+    // Drop installs whose associated Deal (the sale) is dead — primarily Stage "Closed Lost".
+    // Batch-resolve the Deal Stages, then filter. Installs with no resolvable Deal are KEPT.
+    const dealStages = await fetchDealStages(instJobsRaw.map((j) => j.dealId), token);
+    const instJobs = [];
+    let closedLost = 0;
+    for (const j of instJobsRaw) {
+      const st = j.dealId ? dealStages[j.dealId] : "";
+      if (st && DEAD_STAGE.test(st)) { closedLost++; continue; }
+      instJobs.push(j);
+    }
+
     const svcJobs = services
       .map((r) => mapReadyService(r, todayISO))
       .filter((j) => j.cat === "needs_schedule");
@@ -222,7 +257,7 @@ export default async function handler(req, res) {
       configured: true,
       ok: true,
       updated: new Date().toISOString(),
-      counts: { installs: instJobs.length, services: svcJobs.length, jobs: jobs.length },
+      counts: { installs: instJobs.length, services: svcJobs.length, jobs: jobs.length, filteredClosedLost: closedLost },
       jobs,
     });
   } catch (e) {
