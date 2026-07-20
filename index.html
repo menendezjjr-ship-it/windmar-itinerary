@@ -384,6 +384,9 @@ const S={
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
   dispatch:{ open:false, updated:null, sig:null, geo:{status:"idle"} },
   coord:{ q:"", selected:null, collapsed:{}, notes:{}, fields:{status:"idle",map:{},team:[]}, edit:null, savedMsg:null, addNote:{text:"",sending:false,err:"",okDl:""}, ready:{status:"idle",list:[],err:""} }, // Coordinator tab: search, open detail key, per-section collapsed state, per-DL record cache, field metadata, active editor, /api/zoho-ready feed (Pending-Schedule installs + Need-Schedule services)
+  svc:{ rec:{}, fields:{status:"idle",map:{}}, edit:null, savedMsg:null, scope:{status:"idle",canUpdate:false} }, // Service_Ticket editor: per-recordId editable-record cache, field metadata (picklists), active editor, UPDATE-scope probe
+  attachScope:{status:"idle",canAttach:false}, // Attachments CREATE scope probe (gates the photo picker so no broken button ever ships)
+  note:{ text:"", sending:false, err:"", okKey:"", prog:"" }, // unified note+photo box (install AND service), keyed by module:recordId
   zx:{ proj:{q:"",status:"idle",list:[],err:""}, cal:{q:"",status:"idle",list:[],err:""} }, // all-time Zoho word-search augmentation for both search bars
   wx:{ cityIdx:0, current:null, days:[], live:false, loading:false },
   zoho:{ syncing:false, lastSync:new Date(), showCode:false },
@@ -667,8 +670,14 @@ function calDetailHTML(r){
     ${r.address?`<p style="margin:4px 0 0;color:var(--text-dim);font-size:13px">📍 <a href="https://maps.google.com/?q=${encodeURIComponent(r.address)}" target="_blank" style="color:var(--wh-blue-light)">${esc(r.address)}</a></p>`:""}
     ${r.phone?`<div style="margin-top:8px"><a class="btn3d green sm" href="tel:${esc(String(r.phone).replace(/[^0-9+]/g,""))}">📞 ${esc(r.phone)}</a></div>`:""}
   </div><button class="btn3d grey sm" data-action="calClose">✕</button></div>${body}${bomBlock}${(function(){
-    // ✏️ Edit stage/schedule + ➕ add-note for INSTALLS — same shared editor as the Coordinator.
-    if(isS) return ""; const es=S.lang==='es';
+    // ✏️ Edit stage/schedule + ➕ add-note — shared editor. INSTALLS → Installation editor;
+    // SERVICES → Service_Ticket editor (Ticket_Status = "Stage"). Both reuse the shared helpers.
+    const es=S.lang==='es';
+    if(isS){ if(!r.recordId) return "";
+      const ed=serviceEditorParts(r.recordId);
+      const hdr=`<div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em">✏️ ${es?'Editar servicio (Zoho)':'Edit Service (Zoho)'}</div>`;
+      return `<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">${hdr}${ed.editing?'':ed.actionsRO}</div>${ed.savedFlash}${ed.recBlock}${ed.fieldsLoading}${ed.editBanner}${ed.actionsEdit}${ed.noteBox}</div>`;
+    }
     const dlKey=String(r.dlNumber||"").toUpperCase().replace(/\s+/g,""); if(!dlKey) return "";
     const ed=installEditorParts(dlKey);
     const hdr=`<div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em">✏️ ${es?'Editar instalación (Zoho)':'Edit Installation (Zoho)'}</div>`;
@@ -762,7 +771,7 @@ function opsCalHTML(){
   const view=c.status==="loading"?`<div style="text-align:center;padding:50px;color:var(--text-dim)">⟳ ${S.lang==='es'?'Cargando…':'Loading…'}</div>`:c.status==="error"?`<div class="card" style="padding:18px;color:var(--warn)">API error: ${esc(c.err||"")}</div>`:c.view==="month"?monthGrid:c.view==="week"?weekView:c.view==="grid"?gridView:c.view==="map"?mapView:listView;
   const navLabel=(c.view==="week"||c.view==="grid"||c.view==="map")?(M[ws.getMonth()].slice(0,3)+" "+ws.getDate()+" - "+(ws.getMonth()!==we.getMonth()?M[we.getMonth()].slice(0,3)+" ":"")+we.getDate()+", "+we.getFullYear()):(M[c.m-1]+" "+c.y);
   const dayModal=c.dayPanel!=null?calModal((function(){const recs=byDate[c.dayPanel]||[];return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><h3 style="margin:0;font-size:18px;font-weight:700">${M[c.m-1]} ${c.dayPanel}, ${c.y} <span style="color:var(--text-dim);font-weight:500;font-size:14px">· ${recs.length} ${recs.length!==1?'jobs':'job'}</span></h3><button class="btn3d grey sm" data-action="calClose">✕</button></div><div style="display:flex;flex-direction:column;gap:8px">${recs.map(calRow).join("")}</div>`;})()):"";
-  const selModal=c.selected?(function(){const r=c.records.find(x=>x.id===c.selected);if(!r)return "";const editingThis=r.type!=="service"&&!!(S.coord.edit&&S.coord.edit.dl===String(r.dlNumber||"").toUpperCase().replace(/\s+/g,""));return calModal(calDetailHTML(r),editingThis);})():"";
+  const selModal=c.selected?(function(){const r=c.records.find(x=>x.id===c.selected);if(!r)return "";const editingInst=r.type!=="service"&&!!(S.coord.edit&&S.coord.edit.dl===String(r.dlNumber||"").toUpperCase().replace(/\s+/g,""));const editingSvc=r.type==="service"&&!!(S.svc.edit&&S.svc.edit.rid===String(r.recordId||"").replace(/[^0-9]/g,""));return calModal(calDetailHTML(r),editingInst||editingSvc);})():"";
   // ── KPI summary (Installation / Service totals + complete/in-progress/past-due) ──
   const calKpi=(type)=>{ const arr=scoped.filter(r=>r.type===type); const o={total:arr.length,complete:0,inprogress:0,pastdue:0}; arr.forEach(r=>{ if(r.cat==="completed")o.complete++; else if(r.cat==="in_progress")o.inprogress++; else if(r.cat==="pastdue")o.pastdue++; }); return o; };
   const _insK=calKpi("install"), _svcK=calKpi("service");
@@ -1291,6 +1300,12 @@ function projectDetailHTML(p){
       </div>
       <div><div class="label" style="margin:6px 0">${ptr("timeline")}</div><div style="margin-top:4px">${tl}</div></div>
     </div>
+    ${(function(){ // Feature B: shared Installation editor (Edit stage/schedule + fields + ➕ note/photos) on the Projects detail.
+      const dlKey=String(p.num||"").toUpperCase().replace(/\s+/g,""); if(!dlKey) return "";
+      const ed=installEditorParts(dlKey);
+      const hdr=`<div class="label" style="margin:6px 0 8px">✏️ ${es?'Editar instalación (Zoho)':'Edit Installation (Zoho)'}</div>`;
+      return `<div style="padding:8px 20px 4px;border-top:1px solid var(--line);margin-top:8px"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px">${hdr}${ed.editing?'':ed.actionsRO}</div>${ed.savedFlash}${ed.recBlock}${ed.fieldsLoading}${ed.editBanner}${ed.actionsEdit}${ed.noteBox}</div>`;
+    })()}
     ${attSection}
     <div style="padding:8px 20px 18px;border-top:1px solid var(--line);margin-top:8px">${notesHead}<div style="max-height:440px;overflow:auto">${notesInner}</div></div>
   </div>`;
@@ -1317,16 +1332,49 @@ function loadCoordNotes(dl,force){ const key=String(dl||"").toUpperCase().replac
   const refreshTip=()=>{ const tp=document.getElementById("wmjtip"); if(tp&&tp.style.display==="block"&&tp._ctip===key) tp.innerHTML=coordTipHTML(dl); };
   fetch("/api/zoho-jobs?dl="+encodeURIComponent(dl),{cache:"no-store"}).then(r=>r.json()).then(j=>{
     S.coord.notes[key]=(j&&j.ok)?{status:"live",text:j.installNotes||"",recordId:j.recordId||"",rec:j.rec||null}:{status:"error",text:"",recordId:"",rec:null};
-    refreshTip(); if(S.tab==="coordinator"||S.tab==="calendar") render(true);
-  }).catch(()=>{ S.coord.notes[key]={status:"error",text:"",recordId:"",rec:null}; refreshTip(); if(S.tab==="coordinator"||S.tab==="calendar") render(true); });
+    refreshTip(); if(["coordinator","calendar","projects"].includes(S.tab)) render(true);
+  }).catch(()=>{ S.coord.notes[key]={status:"error",text:"",recordId:"",rec:null}; refreshTip(); if(["coordinator","calendar","projects"].includes(S.tab)) render(true); });
 }
 // Field metadata (picklist values + Installation_Team lookup records) for safe editor inputs. Loaded once.
 function loadCoordFields(){ const F=S.coord.fields; if(F.status==="loading"||F.status==="live") return;
   S.coord.fields={status:"loading",map:F.map||{},team:F.team||[]};
   fetch("/api/zoho-fields?module=Installation",{cache:"no-store"}).then(r=>r.json()).then(j=>{
     S.coord.fields=(j&&j.ok)?{status:"live",map:j.fields||{},team:(j.lookups&&j.lookups.Installation_Team)||[]}:{status:"error",map:{},team:[]};
-    if(S.tab==="coordinator"||S.tab==="calendar") render(true);
-  }).catch(()=>{ S.coord.fields={status:"error",map:{},team:[]}; if(S.tab==="coordinator"||S.tab==="calendar") render(true); });
+    if(["coordinator","calendar","projects"].includes(S.tab)) render(true);
+  }).catch(()=>{ S.coord.fields={status:"error",map:{},team:[]}; if(["coordinator","calendar","projects"].includes(S.tab)) render(true); });
+}
+// ── Service_Ticket editor loaders (Feature 1) ──
+// Fetch one Service_Ticket's editable record by recordId (cached per recordId).
+function loadServiceRec(recordId,force){ const rid=String(recordId||"").replace(/[^0-9]/g,""); if(!rid) return;
+  const cur=S.svc.rec[rid]; if(!force&&cur&&(cur.status==="loading"||cur.status==="live")) return;
+  S.svc.rec[rid]={status:"loading",rec:(cur&&cur.rec)||null,module:"Service_Ticket"};
+  fetch("/api/zoho-jobs?svc="+encodeURIComponent(rid),{cache:"no-store"}).then(r=>r.json()).then(j=>{
+    S.svc.rec[rid]=(j&&j.ok)?{status:"live",rec:j.rec||null,module:j.module||"Service_Ticket"}:{status:"error",rec:null,module:"Service_Ticket"};
+    if(["coordinator","calendar"].includes(S.tab)) render(true);
+  }).catch(()=>{ S.svc.rec[rid]={status:"error",rec:null,module:"Service_Ticket"}; if(["coordinator","calendar"].includes(S.tab)) render(true); });
+}
+// Service_Ticket field metadata (Ticket_Status/Priority picklists discovered live). Loaded once.
+function loadServiceFields(){ const F=S.svc.fields; if(F.status==="loading"||F.status==="live") return;
+  S.svc.fields={status:"loading",map:F.map||{}};
+  fetch("/api/zoho-fields?module=Service_Ticket",{cache:"no-store"}).then(r=>r.json()).then(j=>{
+    S.svc.fields=(j&&j.ok)?{status:"live",map:j.fields||{}}:{status:"error",map:{}};
+    if(["coordinator","calendar"].includes(S.tab)) render(true);
+  }).catch(()=>{ S.svc.fields={status:"error",map:{}}; if(["coordinator","calendar"].includes(S.tab)) render(true); });
+}
+// Non-destructive scope probes — gate the Save button / photo picker so no broken control ever ships.
+function loadSvcScope(){ const P=S.svc.scope; if(P.status==="loading"||P.status==="live") return;
+  S.svc.scope={status:"loading",canUpdate:false};
+  fetch("/api/zoho-update?diag=1&module=Service_Ticket",{cache:"no-store"}).then(r=>r.json()).then(j=>{
+    S.svc.scope={status:"live",canUpdate:!!(j&&j.canUpdate)};
+    if(["coordinator","calendar"].includes(S.tab)) render(true);
+  }).catch(()=>{ S.svc.scope={status:"error",canUpdate:false}; });
+}
+function loadAttachScope(){ const P=S.attachScope; if(P.status==="loading"||P.status==="live") return;
+  S.attachScope={status:"loading",canAttach:false};
+  fetch("/api/zoho-attach?diag=1",{cache:"no-store"}).then(r=>r.json()).then(j=>{
+    S.attachScope={status:"live",canAttach:!!(j&&j.canAttach)};
+    if(["coordinator","calendar","projects"].includes(S.tab)) render(true);
+  }).catch(()=>{ S.attachScope={status:"error",canAttach:false}; });
 }
 // Editable Installation fields (Zoho API names VERIFIED live). g=group, ta=textarea, bool=checkbox, ro=read-only display.
 const COORD_EDIT_FIELDS=[
@@ -1499,16 +1547,87 @@ function installEditorParts(dlKey){
   actionsRO=canEdit?`<button class="btn3d sm" data-action="coordEditStart" style="background:#0EA5E9">✏️ ${es?"Editar":"Edit"}</button>`:"";
   fieldsLoading=editing&&S.coord.fields.status==="loading"?`<div style="grid-column:1/-1;font-size:11.5px;color:var(--text-dim);margin-top:6px">⟳ ${es?"Cargando opciones de campos…":"Loading field options…"}</div>`:"";
   actionsEdit=editing?`<div style="display:flex;gap:10px;margin-top:16px"><button class="btn3d green" data-action="coordSave" ${E&&E.saving?"disabled":""} style="flex:1;padding:12px;font-size:14px">${E&&E.saving?"⟳ "+(es?"Guardando…":"Saving…"):"💾 "+(es?"Guardar cambios":"Save changes")}</button><button class="btn3d grey" data-action="coordEditCancel" ${E&&E.saving?"disabled":""} style="padding:12px 18px;font-size:14px">${es?"Cancelar":"Cancel"}</button></div>`:"";
-  if(nc.recordId && !editing){ const AN=S.coord.addNote||{}; const anOk=AN.okDl===dlKey;
-    noteBox=`<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
-      <div style="font-size:11px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">➕ ${es?"Agregar una nota":"Add a note"}</div>
-      <textarea id="coordNoteText" ${AN.sending?"disabled":""} placeholder="${es?"Agregar una nota…":"Add a note…"}" style="width:100%;min-height:64px;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg-2);color:var(--text);font-size:13.5px;resize:vertical">${esc(AN.text||"")}</textarea>
-      <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
-        <button class="btn3d blue sm" data-action="coordAddNote" ${AN.sending?"disabled":""}>${AN.sending?"⟳ "+(es?"Agregando…":"Adding…"):"➕ "+(es?"Agregar":"Add")}</button>
-        ${anOk?`<span style="font-size:12.5px;color:var(--ok)">✓ ${es?"Nota agregada":"Note added to Zoho"}</span>`:""}
-        ${AN.err?`<span style="font-size:12.5px;color:var(--warn)">⚠ ${esc(AN.err)}</span>`:""}
-      </div></div>`;
-  }
+  if(nc.recordId && !editing){ noteBox=noteBoxHTML("Installation",nc.recordId); }
+  return {recBlock,fieldsLoading,editBanner,savedFlash,actionsRO,actionsEdit,noteBox,editing,canEdit};
+}
+// Unified "➕ Add a note" box with optional photo attach (install AND service). Posts the note
+// via /api/zoho-add-note, then uploads each selected photo via /api/zoho-attach to the SAME
+// record. The photo picker only appears when the Attachments CREATE scope is present (self-gating
+// — never ships a broken control). module = Installation | Service_Ticket.
+function noteBoxHTML(module,recordId){ const es=S.lang==="es", N=S.note, key=module+":"+recordId, okThis=N.okKey===key;
+  const canAttach=S.attachScope.canAttach;
+  return `<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
+    <div style="font-size:11px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">➕ ${es?"Agregar una nota":"Add a note"}</div>
+    <textarea id="wmNoteText" ${N.sending?"disabled":""} placeholder="${es?"Agregar una nota…":"Add a note…"}" style="width:100%;min-height:64px;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg-2);color:var(--text);font-size:13.5px;resize:vertical">${esc(N.text||"")}</textarea>
+    ${canAttach?`<div style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><label class="btn3d grey sm" style="cursor:${N.sending?"default":"pointer"}">📷 ${es?"Adjuntar fotos":"Attach photos"}<input id="wmNoteFiles" type="file" accept="image/*" multiple ${N.sending?"disabled":""} style="display:none" onchange="wmNoteFilesPicked(this)"/></label><span id="wmNoteFilesLbl" style="font-size:12px;color:var(--text-dim)"></span></div>`:""}
+    <div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap">
+      <button class="btn3d blue sm" data-action="noteAdd" data-module="${esc(module)}" data-rid="${esc(recordId)}" ${N.sending?"disabled":""}>${N.sending?"⟳ "+(es?"Agregando…":"Adding…"):"➕ "+(es?"Agregar":"Add")}</button>
+      ${N.sending&&N.prog?`<span style="font-size:12.5px;color:var(--text-dim)">${esc(N.prog)}</span>`:""}
+      ${okThis?`<span style="font-size:12.5px;color:var(--ok)">✓ ${esc(N.prog||(es?"Nota agregada":"Note added to Zoho"))}</span>`:""}
+      ${N.err?`<span style="font-size:12.5px;color:var(--warn)">⚠ ${esc(N.err)}</span>`:""}
+    </div></div>`;
+}
+// Live label for the photo picker (updates without a re-render so the file selection survives).
+window.wmNoteFilesPicked=function(inp){ const l=document.getElementById("wmNoteFilesLbl"); if(!l) return; const n=inp&&inp.files?inp.files.length:0; const es=S.lang==="es"; l.textContent=n?(n+" "+(es?(n===1?"foto":"fotos"):(n===1?"photo":"photos"))+" "+(es?"seleccionada(s)":"selected")):""; };
+
+// ── Service_Ticket editor (Feature 1) — parallels installEditorParts but keyed by recordId. ──
+// Editable: Ticket_Status (="Stage"), Priority, Scheduled_Visit_1, Service_Description.
+// Read-only display: Type_of_Service (multiselect), Assigned_Technician (lookup).
+const SERVICE_EDIT_FIELDS=[
+  {k:"Ticket_Status",en:"Stage",es:"Etapa"},
+  {k:"Priority",en:"Priority",es:"Prioridad"},
+  {k:"Scheduled_Visit_1",en:"Scheduled Visit",es:"Visita Programada",dt:1},
+  {k:"Type_of_Service",en:"Type of Service",es:"Tipo de Servicio",ro:1,multi:1},
+  {k:"Assigned_Technician",en:"Assigned Technician",es:"Técnico Asignado",ro:1,lookup:1},
+  {k:"Service_Description",en:"Service Description",es:"Descripción del Servicio",ta:1},
+];
+// Zoho datetime "2026-06-25T09:00:00-04:00" → datetime-local value "2026-06-25T09:00".
+function svcDTLocal(v){ if(!v||typeof v!=="string") return ""; const m=v.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/); return m?m[1]+"T"+m[2]:""; }
+// datetime-local "2026-06-25T09:00" → Zoho "2026-06-25T09:00:00-04:00" (Florida offset).
+function svcDTZoho(v){ if(!v) return null; const m=String(v).match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/); return m?`${m[1]}T${m[2]}:00-04:00`:null; }
+function svcRecVal(fd,rec){ if(!rec) return ""; let v=rec[fd.k];
+  if(fd.lookup) return (v&&v.name)||"";
+  if(fd.multi) return Array.isArray(v)?v.join(", "):(v||"");
+  if(fd.dt){ const dl=svcDTLocal(v); if(!dl) return ""; try{ return new Date(v).toLocaleString(S.lang==="es"?"es":"en",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}); }catch(e){ return dl.replace("T"," "); } }
+  return v==null?"":String(v);
+}
+function svcFieldInputHTML(fd){ const es=S.lang==="es", E=S.svc.edit, meta=(S.svc.fields.map||{})[fd.k]||{}, val=E.form[fd.k];
+  const id="sf_"+fd.k, base="width:100%;padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--bg-2);color:var(--text);font-size:13.5px";
+  const ro=()=>`<div style="font-size:13px;color:var(--text-dim)">${esc(svcRecVal(fd,E._rec)||"—")} <span style="font-size:10px;opacity:.7">(${es?"solo lectura":"read-only"})</span></div>`;
+  if(fd.ro||meta.read_only) return ro();
+  if(fd.ta) return `<textarea id="${id}" data-sf="${fd.k}" rows="3" style="${base};resize:vertical;font-family:inherit;line-height:1.5">${esc(val)}</textarea>`;
+  if(fd.dt) return `<input type="datetime-local" id="${id}" data-sf="${fd.k}" value="${esc(val)}" style="${base}"/>`;
+  const dt=meta.data_type||"";
+  if(dt==="picklist"){ const opts=meta.picklist||[]; if(!opts.length) return ro();
+    const cur=val==null?"":String(val); const has=opts.some(o=>String(o)===cur);
+    return `<select id="${id}" data-sf="${fd.k}" style="${base}"><option value="">—</option>`+(cur&&!has?`<option value="${esc(cur)}" selected>${esc(cur)}</option>`:"")+opts.map(o=>`<option value="${esc(o)}" ${cur===String(o)?"selected":""}>${esc(o)}</option>`).join("")+`</select>`; }
+  return `<input type="text" id="${id}" data-sf="${fd.k}" value="${esc(val)}" style="${base}"/>`;
+}
+function svcFieldCell(fd,rec,editing){ const es=S.lang==="es", lbl=es?fd.es:fd.en, span=fd.ta?"grid-column:1/-1":"";
+  const inner=editing?svcFieldInputHTML(fd):`<div style="font-size:13.5px;font-weight:500;white-space:pre-wrap;line-height:1.5">${esc(svcRecVal(fd,rec))||'<span style="color:var(--text-dim)">—</span>'}</div>`;
+  return `<div style="${span}"><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">${esc(lbl)}</div>${inner}</div>`;
+}
+// Build the service editor parts for a given recordId. Returns the same shape family as
+// installEditorParts so the calendar/coordinator surfaces render it identically.
+function serviceEditorParts(recordId){ const es=S.lang==="es", rid=String(recordId||"").replace(/[^0-9]/g,"");
+  const rc=S.svc.rec[rid]||{status:"idle",rec:null};
+  const editing=!!(S.svc.edit&&S.svc.edit.rid===rid);
+  const rec=editing?S.svc.edit._rec:rc.rec;
+  const E=S.svc.edit;
+  let recBlock="",fieldsLoading="",editBanner="",savedFlash="",actionsRO="",actionsEdit="",noteBox="";
+  if(rc.status==="loading"||rc.status==="idle") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">⟳ ${es?"Cargando ticket de servicio…":"Loading service ticket…"}</div>`;
+  else if(rc.status==="error") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--warn)">${es?"No se pudo cargar el ticket.":"Couldn't load the ticket."}</div>`;
+  else if(!rec) recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">${es?"No se encontró un ticket editable.":"No editable ticket found."}</div>`;
+  else recBlock=`<div style="grid-column:1/-1;margin-top:8px"><div style="font-size:11px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">🔧 ${es?"Editar Ticket de Servicio (Zoho)":"Edit Service Ticket (Zoho)"}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px">${SERVICE_EDIT_FIELDS.map(fd=>svcFieldCell(fd,rec,editing)).join("")}</div></div>`;
+  editBanner=editing&&E&&E.err?`<div style="grid-column:1/-1;margin-top:10px;background:rgba(239,68,68,.12);border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--warn)">⚠ ${esc(E.err)}</div>`:"";
+  savedFlash=(!editing&&S.svc.savedMsg&&S.svc.savedMsg.rid===rid)?`<div style="margin-top:12px;background:rgba(34,197,94,.12);border:1px solid var(--ok);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--ok)">✓ ${es?"Guardado en Zoho":"Saved to Zoho"} (${S.svc.savedMsg.n} ${es?"campo(s)":"field(s)"})</div>`:"";
+  const canUpd=S.svc.scope.status==="live"?S.svc.scope.canUpdate:true; // optimistic until probe returns; save still fails-safe
+  const canEdit=rc.status==="live"&&rec&&canUpd;
+  actionsRO=canEdit?`<button class="btn3d sm" data-action="svcEditStart" data-rid="${esc(rid)}" style="background:#0EA5E9">✏️ ${es?"Editar":"Edit"}</button>`:"";
+  if(rc.status==="live"&&rec&&!canUpd&&S.svc.scope.status==="live") recBlock+=`<div style="grid-column:1/-1;margin-top:8px;font-size:11.5px;color:var(--text-dim)">🔒 ${es?"Edición de tickets deshabilitada (falta permiso de Zoho).":"Ticket editing disabled (Zoho scope missing)."}</div>`;
+  fieldsLoading=editing&&S.svc.fields.status==="loading"?`<div style="grid-column:1/-1;font-size:11.5px;color:var(--text-dim);margin-top:6px">⟳ ${es?"Cargando opciones…":"Loading field options…"}</div>`:"";
+  actionsEdit=editing?`<div style="display:flex;gap:10px;margin-top:16px"><button class="btn3d green" data-action="svcSave" ${E&&E.saving?"disabled":""} style="flex:1;padding:12px;font-size:14px">${E&&E.saving?"⟳ "+(es?"Guardando…":"Saving…"):"💾 "+(es?"Guardar cambios":"Save changes")}</button><button class="btn3d grey" data-action="svcEditCancel" ${E&&E.saving?"disabled":""} style="padding:12px 18px;font-size:14px">${es?"Cancelar":"Cancel"}</button></div>`:"";
+  if(rc.status==="live"&&rec&&!editing){ noteBox=noteBoxHTML("Service_Ticket",rid); }
   return {recBlock,fieldsLoading,editBanner,savedFlash,actionsRO,actionsEdit,noteBox,editing,canEdit};
 }
 // Which install record is the active job modal editing? Calendar install modal OR Coordinator
@@ -1518,6 +1637,10 @@ function editContext(){
   if(S.tab==="calendar" && S.cal.selected){
     const r=(S.cal.records||[]).find(x=>x.id===S.cal.selected);
     if(r && r.type!=="service" && r.dlNumber) return {dlKey:String(r.dlNumber).toUpperCase().replace(/\s+/g,""), num:r.dlNumber};
+  }
+  if(S.tab==="projects" && S.proj.selected){
+    const p=(S.proj.list||[]).find(x=>x.id===S.proj.selected);
+    if(p && p.num) return {dlKey:String(p.num).toUpperCase().replace(/\s+/g,""), num:p.num};
   }
   const item=coordSelectedItem();
   if(item) return {dlKey:String(item.num||"").toUpperCase().replace(/\s+/g,""), num:item.num||""};
@@ -1530,8 +1653,10 @@ function coordDetailModal(){
   const m=coordBucketMeta(item.bucket); const tel=(p&&(p.mobile||p.phone))||"";
   const dlKey=String(item.num||"").toUpperCase().replace(/\s+/g,"");
   const nc=S.coord.notes[dlKey]||{status:"idle",text:"",recordId:"",rec:null};
-  const editing=!isService&&!!(S.coord.edit&&S.coord.edit.dl===dlKey);
-  const rec=editing?S.coord.edit._rec:nc.rec;
+  const svcRid=String(item.recordId||"").replace(/[^0-9]/g,"");
+  const svcEditing=isService&&!!(S.svc.edit&&S.svc.edit.rid===svcRid);
+  const editing=(!isService&&!!(S.coord.edit&&S.coord.edit.dl===dlKey))||svcEditing;
+  const rec=(!isService&&editing)?S.coord.edit._rec:nc.rec;
   const f=(l,v)=>v?`<div><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${l}</div><div style="font-size:14px;font-weight:500">${esc(v)}</div></div>`:"";
   // Read-only summary (context from the pipeline project + the ready job).
   const summary=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -1548,7 +1673,11 @@ function coordDetailModal(){
   // Middle block: SERVICE = info only (no Installation edit); INSTALL/INSPECTION = editable record (shared editor).
   let recBlock="", savedFlash="", editBanner="", actionsRO="", actionsEdit="", fieldsLoading="", noteBox="";
   if(isService){
-    recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px">🔧 ${es?"Ticket de servicio por programar. Usa \"Abrir en Zoho\" para editar el ticket.":"Service ticket pending scheduling. Use \"Open in Zoho\" to edit the ticket."}</div>`;
+    if(item.recordId){ const ed=serviceEditorParts(item.recordId);
+      recBlock=ed.recBlock; savedFlash=ed.savedFlash; editBanner=ed.editBanner; actionsRO=ed.actionsRO; actionsEdit=ed.actionsEdit; fieldsLoading=ed.fieldsLoading; noteBox=ed.noteBox;
+    } else {
+      recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px">🔧 ${es?"Sin ticket de servicio editable. Usa \"Abrir en Zoho\".":"No editable service ticket. Use \"Open in Zoho\"."}</div>`;
+    }
   } else {
     const ed=installEditorParts(dlKey);
     recBlock=ed.recBlock; savedFlash=ed.savedFlash; editBanner=ed.editBanner; actionsRO=ed.actionsRO; actionsEdit=ed.actionsEdit; fieldsLoading=ed.fieldsLoading; noteBox=ed.noteBox;
@@ -2496,33 +2625,93 @@ document.addEventListener("click",e=>{
     }
     case "notifToggle": S.notif.open=!S.notif.open; if(S.notif.open) S.notif.unread=0; render(); break;
     case "notifClose": S.notif.open=false; render(); break;
-    case "notifOpen": S.notif.open=false; S.tab="projects"; S.proj.selected=id; S.proj.noteFrom=null; S.proj.stageFilter="all"; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
+    case "notifOpen": { S.notif.open=false; S.tab="projects"; S.proj.selected=id; S.proj.noteFrom=null; S.proj.stageFilter="all"; loadProjectNotes(id); loadProjectAttachments(id);
+      S.coord.edit=null; S.svc.edit=null; S.note={text:"",sending:false,err:"",okKey:"",prog:""};
+      const _np=(S.proj.list||[]).find(x=>x.id===id); if(_np&&_np.num){ loadCoordNotes(_np.num); loadCoordFields(); loadAttachScope(); }
+      render(); break; }
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
     case "setTab": S.tab=id; try{localStorage.setItem("wm_itin_tab",id);}catch(e){} if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="coordinator"){ loadProjects(S.proj.status!=="idle",true); loadCoordReady(S.coord.ready.status!=="idle"&&S.coord.ready.status!=="error"); } if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); if(id==="instmap"&&S.instMap.status==="idle") loadInstallMap(); render(); break;
     case "jobsRefresh": loadJobs(); break;
     case "projRefresh": loadProjects(false,true); break;
-    case "selectProject": S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); loadProjectAttachments(id); render(); break;
+    case "selectProject": { S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); loadProjectAttachments(id);
+      // Feature B: reuse the shared Installation editor on the Projects detail — reset editor/note state + fetch the record + field metadata for this project's DL.
+      S.coord.edit=null; S.coord.savedMsg=null; S.svc.edit=null; S.note={text:"",sending:false,err:"",okKey:"",prog:""};
+      const _pp=(S.proj.list||[]).find(x=>x.id===id); if(_pp&&_pp.num){ loadCoordNotes(_pp.num); loadCoordFields(); loadAttachScope(); }
+      render(); break; }
     case "projStageFocus": S.proj.noteFrom=(id&&S.proj.noteFrom!==id)?id:null; render(); break;
     case "closeProject": S.proj.selected=null; S.proj.noteFrom=null; render(); break;
-    case "coordSelect": { S.coord.selected=id; S.coord.edit=null; S.coord.savedMsg=null; S.coord.addNote={text:"",sending:false,err:"",okDl:""}; const item=coordSelectedItem(); if(item&&item.kind!=="service"&&item.num){ loadCoordNotes(item.num); loadCoordFields(); } render(); break; }
+    case "coordSelect": { S.coord.selected=id; S.coord.edit=null; S.coord.savedMsg=null; S.svc.edit=null; S.svc.savedMsg=null; S.note={text:"",sending:false,err:"",okKey:"",prog:""}; loadAttachScope(); const item=coordSelectedItem();
+      if(item&&item.kind==="service"){ if(item.recordId){ loadServiceRec(item.recordId); loadServiceFields(); loadSvcScope(); } }
+      else if(item&&item.num){ loadCoordNotes(item.num); loadCoordFields(); }
+      render(); break; }
     case "coordToggle": { const b=el.getAttribute("data-bucket"); if(b){ S.coord.collapsed=S.coord.collapsed||{}; S.coord.collapsed[b]=!S.coord.collapsed[b]; } render(); break; }
     case "coordToggleAll": { const grp={}; coordItems().forEach(it=>{grp[it.bucket]=1;}); const buckets=COORD_BUCKETS.filter(x=>grp[x]); const anyCollapsed=buckets.some(x=>S.coord.collapsed&&S.coord.collapsed[x]); S.coord.collapsed={}; if(!anyCollapsed) buckets.forEach(x=>{S.coord.collapsed[x]=true;}); render(); break; }
     case "coordRefresh": loadProjects(S.proj.status!=="idle",true); loadCoordReady(false); break;
-    case "coordClose": S.coord.selected=null; S.coord.edit=null; S.coord.addNote={text:"",sending:false,err:"",okDl:""}; render(); break;
-    case "coordAddNote": {
-      const es=S.lang==="es", AN=S.coord.addNote||(S.coord.addNote={text:"",sending:false,err:"",okDl:""}); if(AN.sending) break;
-      const ta=document.getElementById("coordNoteText"); const txt=((ta?ta.value:AN.text)||"").trim(); if(!txt) break;
-      const ctx=editContext(); if(!ctx) break; const dlKey=ctx.dlKey; const nc=S.coord.notes[dlKey];
-      if(!nc||!nc.recordId){ AN.err=es?"El registro aún no está listo.":"Record isn't ready yet."; render(); break; }
-      AN.text=txt; AN.sending=true; AN.err=""; AN.okDl=""; render();
-      const recordId=nc.recordId;
-      fetch("/api/zoho-add-note",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({recordId,module:"Installation",title:"Coordinator note",content:txt})}).then(r=>r.json()).then(j=>{
-        const cur=S.coord.addNote; if(!cur) return;
-        if(j&&j.ok){ S.coord.addNote={text:"",sending:false,err:"",okDl:dlKey}; }
-        else { cur.sending=false; cur.err=(j&&(j.error||j.message))||(es?"No se pudo agregar la nota.":"Couldn't add note."); }
-        render();
-      }).catch(e=>{ const cur=S.coord.addNote; if(cur){ cur.sending=false; cur.err=String(e&&e.message||e); render(); } });
+    case "coordClose": S.coord.selected=null; S.coord.edit=null; S.svc.edit=null; S.note={text:"",sending:false,err:"",okKey:"",prog:""}; render(); break;
+    case "noteAdd": {
+      // Unified add-note + photo attach (install AND service). Posts the note text to
+      // /api/zoho-add-note, then uploads each selected photo to /api/zoho-attach on the SAME record.
+      const es=S.lang==="es", N=S.note; if(N.sending) break;
+      const module=el.getAttribute("data-module")||"Installation";
+      const recordId=String(el.getAttribute("data-rid")||"").replace(/[^0-9]/g,"");
+      const ta=document.getElementById("wmNoteText"); const txt=((ta?ta.value:N.text)||"").trim();
+      const fi=document.getElementById("wmNoteFiles"); const files=(fi&&fi.files)?Array.from(fi.files):[];
+      if(!txt&&!files.length) break;
+      if(!recordId){ N.err=es?"El registro aún no está listo.":"Record isn't ready yet."; render(); break; }
+      const key=module+":"+recordId;
+      N.text=txt; N.sending=true; N.err=""; N.okKey=""; N.prog=es?"Guardando…":"Saving…"; render();
+      const readB64=(f)=>new Promise((res,rej)=>{const rd=new FileReader();rd.onload=()=>res(String(rd.result));rd.onerror=()=>rej(rd.error||new Error("read failed"));rd.readAsDataURL(f);});
+      (async()=>{
+        try{
+          if(txt){ const r=await fetch("/api/zoho-add-note",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({recordId,module,title:"Coordinator note",content:txt})}); const j=await r.json(); if(!j||!j.ok) throw new Error((j&&(j.error||j.message))||(es?"No se pudo agregar la nota.":"Couldn't add note.")); }
+          let done=0,failed=0,big=0;
+          for(let i=0;i<files.length;i++){ const f=files[i]; if(!/^image\//.test(f.type||"")){ failed++; continue; }
+            if(f.size>3*1024*1024){ big++; failed++; continue; } // >3MB → base64 body exceeds Vercel's ~4.5MB cap; skip client-side
+            const cur0=S.note; if(cur0){ cur0.prog=(es?"Subiendo foto ":"Uploading photo ")+(i+1)+"/"+files.length; render(); }
+            try{ const dataBase64=await readB64(f); const r=await fetch("/api/zoho-attach",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({recordId,module,filename:f.name||"photo.jpg",contentType:f.type||"image/jpeg",dataBase64})}); const j=await r.json(); if(j&&j.ok) done++; else failed++; }catch(e){ failed++; }
+          }
+          const cur=S.note; cur.sending=false; cur.text=""; cur.okKey=key;
+          const parts=[]; if(txt) parts.push(es?"Nota agregada":"Note added"); if(done) parts.push(done+" 📷 "+(es?(done===1?"foto":"fotos"):(done===1?"photo":"photos")));
+          cur.prog=parts.join(" · ")||(es?"Listo":"Done");
+          const errBits=[]; if(big) errBits.push(big+" "+(es?"foto(s) >3MB omitida(s)":"photo(s) >3MB skipped")); if(failed>big) errBits.push((failed-big)+" "+(es?"foto(s) fallaron":"photo(s) failed"));
+          cur.err=errBits.join("; ");
+          render();
+        }catch(e){ const cur=S.note; if(cur){ cur.sending=false; cur.prog=""; cur.err=String(e&&e.message||e); render(); } }
+      })();
+      break;
+    }
+    case "svcEditStart": {
+      const es=S.lang==="es"; const rid=String(el.getAttribute("data-rid")||"").replace(/[^0-9]/g,""); if(!rid) break;
+      const rc=S.svc.rec[rid];
+      if(!rc||rc.status!=="live"||!rc.rec){ alert(es?"El ticket aún no está listo. Intenta de nuevo en un momento.":"Ticket isn't ready yet. Try again in a moment."); break; }
+      loadServiceFields();
+      const rec=rc.rec, form={};
+      SERVICE_EDIT_FIELDS.forEach(fd=>{ if(fd.ro) return; let v=rec[fd.k]; if(fd.dt) v=svcDTLocal(v); if(v==null) v=""; form[fd.k]=v; });
+      S.svc.edit={rid,saving:false,err:"",form,orig:JSON.parse(JSON.stringify(form)),_rec:rec};
+      S.svc.savedMsg=null; render(); break;
+    }
+    case "svcEditCancel": S.svc.edit=null; render(); break;
+    case "svcSave": {
+      const es=S.lang==="es", E=S.svc.edit; if(!E||E.saving) break;
+      const payload={}, labels=[];
+      SERVICE_EDIT_FIELDS.forEach(fd=>{ if(fd.ro) return; const meta=(S.svc.fields.map||{})[fd.k]||{}; if(meta.read_only) return;
+        let nv=E.form[fd.k], ov=E.orig[fd.k]; const cmpN=(nv==null?"":String(nv)), cmpO=(ov==null?"":String(ov)); if(cmpN===cmpO) return;
+        let out=nv; if(fd.dt) out=svcDTZoho(nv); else if(nv==="") out=null;
+        payload[fd.k]=out;
+        let disp=fd.dt?(nv||"(empty)"):(out==null||out===""?"(empty)":out);
+        labels.push("• "+(es?fd.es:fd.en)+": "+disp);
+      });
+      const keys=Object.keys(payload);
+      if(!keys.length){ E.err=es?"No hay cambios para guardar.":"No changes to save."; render(); break; }
+      if(!confirm((es?"¿Guardar estos cambios en el ticket de Zoho? (Escribe en producción)\n\n":"Save these changes to the Zoho ticket? (Writes to production)\n\n")+labels.join("\n"))) break;
+      E.saving=true; E.err=""; render();
+      const rid=E.rid, n=keys.length;
+      fetch("/api/zoho-update",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({recordId:rid,module:"Service_Ticket",fields:payload})}).then(r=>r.json()).then(j=>{
+        const cur=S.svc.edit; if(!cur||cur.rid!==rid) return;
+        if(j&&j.ok){ S.svc.edit=null; S.svc.savedMsg={rid,n,t:Date.now()}; loadServiceRec(rid,true); render(); }
+        else { cur.saving=false; cur.err=(j&&(j.error||j.message))||(es?"No se pudo guardar.":"Save failed."); render(); }
+      }).catch(e=>{ const cur=S.svc.edit; if(cur&&cur.rid===rid){ cur.saving=false; cur.err=String(e&&e.message||e); render(); } });
       break;
     }
     case "coordEditStart": {
@@ -2600,12 +2789,15 @@ document.addEventListener("click",e=>{
     case "calClearTeams": S.cal.teamFilter=[]; render(); break;
     case "calSearchClear": S.cal.q=""; S.zx.cal={q:"",status:"idle",list:[],err:""}; render(); break;
     case "calSelectJob": { S.cal.selected=id; const _jr=S.cal.records.find(x=>x.id===id);
-      if(_jr&&_jr.type!=="service"&&_jr.dlNumber){ loadBomNotes(_jr.dlNumber);
-        // Reuse the Coordinator's Installation editor for calendar installs: reset editor state + fetch the full editable record + field metadata.
-        S.coord.edit=null; S.coord.savedMsg=null; S.coord.addNote={text:"",sending:false,err:"",okDl:""}; loadCoordNotes(_jr.dlNumber); loadCoordFields(); }
+      // Reset shared editor/note state on any selection; load the right editor for the job kind.
+      S.coord.edit=null; S.coord.savedMsg=null; S.svc.edit=null; S.svc.savedMsg=null; S.note={text:"",sending:false,err:"",okKey:"",prog:""}; loadAttachScope();
+      if(_jr&&_jr.type==="service"){ if(_jr.recordId){ loadServiceRec(_jr.recordId); loadServiceFields(); loadSvcScope(); } }
+      else if(_jr&&_jr.dlNumber){ loadBomNotes(_jr.dlNumber);
+        // Reuse the Coordinator's Installation editor for calendar installs: fetch the full editable record + field metadata.
+        loadCoordNotes(_jr.dlNumber); loadCoordFields(); }
       render(); break; }
     case "calDay": S.cal.dayPanel=Number(id); render(); break;
-    case "calClose": S.cal.selected=null; S.cal.dayPanel=null; S.coord.edit=null; S.coord.addNote={text:"",sending:false,err:"",okDl:""}; render(); break;
+    case "calClose": S.cal.selected=null; S.cal.dayPanel=null; S.coord.edit=null; S.svc.edit=null; S.note={text:"",sending:false,err:"",okKey:"",prog:""}; render(); break;
     case "calRefresh": loadOpsCal(); break;
     case "noop": break;
     case "selectJob": S.selectedJob=id; render(); break;
@@ -2690,8 +2882,9 @@ document.addEventListener("input",function(e){
   if(e.target.id==="calSearch"){ S.cal.q=e.target.value; zohoAugment("cal",e.target.value); render(); }
   else if(e.target.id==="projSearch"){ S.proj.q=e.target.value; zohoAugment("proj",e.target.value); render(); }
   else if(e.target.id==="coordSearch"){ S.coord.q=e.target.value; render(); }
-  else if(e.target.id==="coordNoteText"){ if(S.coord.addNote){ S.coord.addNote.text=e.target.value; if(S.coord.addNote.okDl||S.coord.addNote.err){ S.coord.addNote.okDl=""; S.coord.addNote.err=""; } } } // no render → keep focus/caret
+  else if(e.target.id==="wmNoteText"){ if(S.note){ S.note.text=e.target.value; if(S.note.okKey||S.note.err){ S.note.okKey=""; S.note.err=""; } } } // no render → keep focus/caret
   else if(e.target.hasAttribute&&e.target.hasAttribute("data-cf")){ if(S.coord.edit) S.coord.edit.form[e.target.getAttribute("data-cf")]=e.target.value; } // no render → keep focus/caret
+  else if(e.target.hasAttribute&&e.target.hasAttribute("data-sf")){ if(S.svc.edit) S.svc.edit.form[e.target.getAttribute("data-sf")]=e.target.value; } // service editor field — no render → keep focus/caret
   else if(e.target.id==="recSearch"){ S.crewRec.q=e.target.value; render(); }
   else if(e.target.hasAttribute&&e.target.hasAttribute("data-cnew")){ S.sc.cnew[e.target.getAttribute("data-cnew")]=e.target.value; const pv=document.getElementById("scNamePreview"); if(pv){ pv.textContent=((S.sc.cnew.dl||"")+" "+(S.sc.cnew.customer||"")).trim()||"(enter a DL #)"; } }
   else if(e.target.id==="scSearch"){ S.sc.q=e.target.value; render(); }
@@ -2699,6 +2892,7 @@ document.addEventListener("input",function(e){
 });
 document.addEventListener("change",function(e){
   if(e.target.hasAttribute&&e.target.hasAttribute("data-cf")){ if(S.coord.edit){ const k=e.target.getAttribute("data-cf"); if(e.target.type==="checkbox"){ S.coord.edit.form[k]=e.target.checked; render(); } else { S.coord.edit.form[k]=e.target.value; } } return; }
+  if(e.target.hasAttribute&&e.target.hasAttribute("data-sf")){ if(S.svc.edit){ S.svc.edit.form[e.target.getAttribute("data-sf")]=e.target.value; } return; }
   if(e.target.id==="recUserSel"){ S.crewRec.user=e.target.value; render(); return; }
   if(e.target.id==="wxCity"){ S.wx.cityIdx=Number(e.target.value); S.wx.current=null; S.wx.days=[]; S.wx.live=false; loadWeather(); return; }
   if(e.target.id==="scType"){ S.sc.nfType=e.target.value; render(); return; }

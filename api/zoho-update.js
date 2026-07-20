@@ -1,7 +1,7 @@
-// /api/zoho-update.js — update editable fields on a Zoho Installation record (Coordinator tab edits).
+// /api/zoho-update.js — update editable fields on a Zoho Installation OR Service_Ticket record (Coordinator/Calendar edits).
 // POST { recordId, module?, fields:{ ApiName: value, ... } }  (module defaults "Installation")
-// GET  ?diag=1  → probe whether the Zoho login can UPDATE module records (writes nothing real).
-// Only an allowlist of coordinator-safe fields is ever written.
+// GET  ?diag=1[&module=Service_Ticket]  → probe whether the Zoho login can UPDATE that module (writes nothing real).
+// Only a per-module allowlist of coordinator-safe fields is ever written.
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
 const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
@@ -10,7 +10,7 @@ const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
 // metadata). Anything else in the payload is ignored. Note: the stage field is "Stage"
 // (there is no Installation_Stage); planned-days is "..._default_2"; VIP_Installation is
 // read-only in Zoho so it is intentionally NOT writable. Installation_Team is a lookup.
-const ALLOWED = new Set([
+const ALLOWED_INSTALL = new Set([
   "Installation_Notes", "Roof_Notes", "AHJ_Specific_Install_Notes",
   "Stage", "Installation_Team",
   "Installation_Proposed_Date", "Installation_Confirmed_Date", "Installation_Start_Date",
@@ -18,6 +18,14 @@ const ALLOWED = new Set([
   "Number_of_Days_Needed", "Number_of_Days_Planned_for_Install_default_2",
   "Customer_Access_Granted", "Drone_No_Fly_Zone", "Language_Preference",
 ]);
+// Service_Ticket (CustomModule40) coordinator-safe fields. Ticket_Status is the "Stage".
+// Type_of_Service (multiselect) + Assigned_Technician (lookup/user) are intentionally NOT
+// writable here — they are shown read-only in the editor to avoid clobbering multi-value /
+// lookup data with an invalid single value.
+const ALLOWED_SERVICE = new Set([
+  "Ticket_Status", "Priority", "Service_Description", "Scheduled_Visit_1",
+]);
+const ALLOWED_BY_MODULE = { Installation: ALLOWED_INSTALL, Service_Ticket: ALLOWED_SERVICE };
 const LOOKUP_FIELDS = new Set(["Installation_Team"]); // sent as { id } to Zoho
 
 let cachedToken = null, tokenExpiry = 0;
@@ -41,14 +49,15 @@ export default async function handler(req, res) {
     const token = await getAccessToken();
 
     // Scope probe — PUT with an empty record; Zoho checks OAuth scope before data validation,
-    // so a scope-mismatch surfaces here without changing anything.
+    // so a scope-mismatch surfaces here without changing anything. ?module= selects which module.
     if (req.method === "GET" && req.query.diag) {
-      const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/Installation/1`, {
+      const dmod = String(req.query.module || "Installation").replace(/[^A-Za-z0-9_]/g, "") || "Installation";
+      const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(dmod)}/1`, {
         method: "PUT", headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ data: [{}] }),
       });
       const txt = await r.text();
-      return res.status(200).json({ diag: true, canUpdate: !/OAUTH_SCOPE_MISMATCH/i.test(txt), httpStatus: r.status, sample: txt.slice(0, 220) });
+      return res.status(200).json({ diag: true, module: dmod, canUpdate: !/OAUTH_SCOPE_MISMATCH/i.test(txt), httpStatus: r.status, sample: txt.slice(0, 220) });
     }
 
     if (req.method !== "POST") return res.status(200).json({ ok: false, error: "POST required" });
@@ -57,6 +66,8 @@ export default async function handler(req, res) {
     const recordId = String(body.recordId || "").replace(/[^0-9]/g, "");
     if (!recordId) return res.status(200).json({ ok: false, error: "recordId required" });
     const module = body.module || "Installation";
+    const ALLOWED = ALLOWED_BY_MODULE[module];
+    if (!ALLOWED) return res.status(200).json({ ok: false, error: "unsupported module" });
     const inFields = (body.fields && typeof body.fields === "object") ? body.fields : {};
     const fields = {};
     for (const k of Object.keys(inFields)) {

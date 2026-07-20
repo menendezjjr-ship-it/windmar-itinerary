@@ -41,7 +41,21 @@ const STAGE_PICKS = [
   "On Hold  - Need Financing", "On Hold - Need HOA", "On Hold - Need Roof", "On Hold - See Notes",
   "QA Complete - Move To Final Inspection",
 ];
+// Service_Ticket (CustomModule40) baseline. settings/fields is scope-blocked, so the
+// Ticket_Status / Priority / Type_of_Service picklist VALUES are DISCOVERED at request time
+// by sampling live records (discoverServicePicklists) — every offered value is therefore a
+// real, valid picklist entry (no invalid writes). Type_of_Service (multiselect) and
+// Assigned_Technician (lookup/user) are read-only in the editor.
+const SERVICE_BASELINE = {
+  Ticket_Status: { data_type: "picklist", read_only: false, picklist: [] },
+  Priority: { data_type: "picklist", read_only: false, picklist: [] },
+  Service_Description: { data_type: "textarea", read_only: false },
+  Scheduled_Visit_1: { data_type: "datetime", read_only: false },
+  Type_of_Service: { data_type: "multiselectpicklist", read_only: true, picklist: [] },
+  Assigned_Technician: { data_type: "lookup", read_only: true },
+};
 const BASELINE = {
+  Service_Ticket: SERVICE_BASELINE,
   Installation: {
     Installation_Notes: { data_type: "textarea", read_only: false },
     Roof_Notes: { data_type: "textarea", read_only: false },
@@ -72,6 +86,31 @@ async function fetchLookup(module, token) {
     const rows = (await r.json()).data || [];
     return rows.map((x) => ({ id: String(x.id), name: (x.Name || "").trim() })).filter((x) => x.id && x.name);
   } catch (e) { return []; }
+}
+
+// Discover Service_Ticket picklist VALUES by sampling live records (module READ scope, which
+// IS granted). Fills Ticket_Status / Priority / Type_of_Service with the distinct values that
+// actually occur — guaranteeing only-valid options for the Stage/Priority dropdowns without the
+// settings.fields scope. Never throws (returns baseline unchanged on error).
+async function discoverServicePicklists(fields, token) {
+  try {
+    const flds = "Ticket_Status,Priority,Type_of_Service";
+    const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/Service_Ticket?fields=${encodeURIComponent(flds)}&per_page=200&page=1`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+    if (r.status === 204 || !r.ok) return false;
+    const rows = (await r.json()).data || [];
+    const st = new Set(), pr = new Set(), tos = new Set();
+    for (const x of rows) {
+      if (x.Ticket_Status) st.add(String(x.Ticket_Status).trim());
+      if (x.Priority) pr.add(String(x.Priority).trim());
+      const tv = x.Type_of_Service;
+      (Array.isArray(tv) ? tv : [tv]).forEach((v) => { if (v) tos.add(String(v).trim()); });
+    }
+    if (st.size && fields.Ticket_Status) fields.Ticket_Status.picklist = [...st].sort();
+    if (pr.size && fields.Priority) fields.Priority.picklist = [...pr].sort();
+    if (tos.size && fields.Type_of_Service) fields.Type_of_Service.picklist = [...tos].sort();
+    return true;
+  } catch (e) { return false; }
 }
 
 // Best-effort upgrade of picklist values / read-only flags from live settings/fields.
@@ -106,6 +145,8 @@ export default async function handler(req, res) {
     const token = await getAccessToken();
     // Deep-copy the baseline so the cached module object is never mutated across requests.
     const fields = JSON.parse(JSON.stringify(base));
+    // Service_Ticket: settings/fields is scope-blocked, so discover picklist values from records.
+    if (module === "Service_Ticket") await discoverServicePicklists(fields, token);
     const live = await tryLiveOverride(module, fields, token);
     const lookups = {};
     for (const k of Object.keys(fields)) {

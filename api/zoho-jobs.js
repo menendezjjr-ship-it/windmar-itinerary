@@ -185,6 +185,7 @@ export function mapService(r, todayISO) {
   const svc = Array.isArray(r.Type_of_Service) ? r.Type_of_Service.join(", ") : (r.Type_of_Service || "");
   return {
     id: deal.num ? `${deal.num} · ${r.Name}` : r.Name,
+    recordId: r.id,           // real Zoho Service_Ticket record id (for editing/attachments)
     num: deal.num || r.Name,
     kind: "service",
     code: "S",
@@ -256,9 +257,49 @@ async function lookupDL(dl, token) {
   };
 }
 
+// Editable Service_Ticket fields surfaced to the Coordinator/Calendar editor. Ticket_Status is
+// the "Stage". Type_of_Service (multiselect) + Assigned_Technician (lookup) are returned for
+// read-only display; only Ticket_Status/Priority/Service_Description/Scheduled_Visit_1 are writable.
+const SERVICE_EDIT_FIELDS = [
+  "Ticket_Status", "Priority", "Type_of_Service", "Service_Description",
+  "Scheduled_Visit_1", "Assigned_Technician",
+];
+
+// Fetch one Service_Ticket record by id and return its editable fields (Calendar/Coordinator
+// service editor). A DL can carry both an install and a service ticket, so callers resolve the
+// exact ticket by its recordId (not by DL). Returns { recordId, module, rec }.
+async function lookupService(recordId, token) {
+  const path = `Service_Ticket/${encodeURIComponent(recordId)}?fields=${encodeURIComponent(SERVICE_EDIT_FIELDS.join(","))}`;
+  const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+  if (r.status === 204) return { recordId: "", module: "Service_Ticket", rec: null, count: 0 };
+  if (!r.ok) throw new Error(`Zoho Service_Ticket ${r.status}: ${(await r.text()).slice(0, 200)}`);
+  const row = ((await r.json()).data || [])[0] || null;
+  if (!row) return { recordId: "", module: "Service_Ticket", rec: null, count: 0 };
+  const rec = {};
+  for (const k of SERVICE_EDIT_FIELDS) {
+    const v = row[k];
+    if (k === "Assigned_Technician") rec[k] = (v && typeof v === "object") ? { id: String(v.id || ""), name: v.name || "" } : (v || null);
+    else if (k === "Type_of_Service") rec[k] = Array.isArray(v) ? v : (v == null ? [] : [v]);
+    else rec[k] = (v === undefined ? null : v);
+  }
+  return { recordId: String(row.id), module: "Service_Ticket", rec, count: 1 };
+}
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=120");
   if (!hasCreds()) return res.status(200).json({ configured: false, ok: false, jobs: [] });
+
+  // Single Service_Ticket editable-record lookup (Calendar/Coordinator service editor): ?svc=<recordId>
+  const svc = String(req.query.svc || "").replace(/[^0-9]/g, "");
+  if (svc) {
+    try {
+      const token = await getAccessToken();
+      const out = await lookupService(svc, token);
+      return res.status(200).json({ configured: true, ok: true, ...out });
+    } catch (e) {
+      return res.status(200).json({ configured: true, ok: false, recordId: "", module: "Service_Ticket", rec: null, error: String(e && e.message || e) });
+    }
+  }
 
   // Single-DL Installation-Notes lookup (Coordinator detail): /api/zoho-jobs?dl=DL8467
   const dl = String(req.query.dl || "").trim();
