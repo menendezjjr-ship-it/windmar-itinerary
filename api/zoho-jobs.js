@@ -115,7 +115,31 @@ function normCrew(raw) {
   return { id, label };
 }
 
-const INSTALL_FIELDS = "Name,Installation_Start_Date,Installation_Complete_Date,Installation_Team,Deal,MSP_Upgrade_Required,Battery_Type,Language_Preference,Number_of_Days_Needed,Permit_Package,BOM,Installation_Notes";
+// Editable Installation fields surfaced to the Coordinator/Calendar/Projects editor (Zoho API
+// names VERIFIED live). "Stage" is the stage field; VIP_Installation is read-only in Zoho.
+// Installation_Team is a lookup ({id,name}).
+const INSTALL_EDIT_FIELDS = [
+  "Installation_Notes", "Roof_Notes", "AHJ_Specific_Install_Notes",
+  "Stage", "Installation_Team",
+  "Installation_Proposed_Date", "Installation_Confirmed_Date", "Installation_Start_Date",
+  "Installation_Continuation_Date", "Installation_Complete_Date", "R_R_Completed_Date",
+  "Number_of_Days_Needed", "Number_of_Days_Planned_for_Install_default_2",
+  "Customer_Access_Granted", "Drone_No_Fly_Zone", "VIP_Installation", "Language_Preference",
+];
+// Build the editable-record shape from a raw Installation row (shared by mapInstall — so the editor
+// loads synchronously from the feed — and by the ?dl= word-search lookup fallback).
+function buildInstallRec(row) {
+  const rec = {};
+  for (const k of INSTALL_EDIT_FIELDS) {
+    const v = row[k];
+    if (k === "Installation_Team") rec[k] = (v && typeof v === "object") ? { id: String(v.id || ""), name: v.name || "" } : null;
+    else rec[k] = (v === undefined ? null : v);
+  }
+  return rec;
+}
+// Feed field list = display/scope/file fields + every editable field (so the editor loads from the feed).
+const INSTALL_FIELDS = ["Name", "Deal", "MSP_Upgrade_Required", "Battery_Type", "Permit_Package", "BOM"]
+  .concat(INSTALL_EDIT_FIELDS).filter((v, i, a) => a.indexOf(v) === i).join(",");
 // A Zoho file-upload field is an array of file objects; return the latest (newest-first).
 function latestFile(field) {
   if (!Array.isArray(field)) return null;
@@ -183,6 +207,7 @@ export function mapInstall(r, todayISO) {
     geo: null,
     scope: scopeBits.join(" · ") || "Installation",
     installNotes: (r.Installation_Notes || "").trim(), // coordinator gate codes / pending-install to-dos (shown on hover + Coordinator detail)
+    installRec: buildInstallRec(r), // editable fields embedded so the install editor loads synchronously (no per-open token refresh)
   };
 }
 
@@ -230,25 +255,11 @@ export function mapService(r, todayISO) {
   };
 }
 
-// Editable Installation fields surfaced to the Coordinator editor. VERIFIED against
-// live Zoho: the Stage field is "Stage" (NOT Installation_Stage); planned-days is
-// "Number_of_Days_Planned_for_Install_default_2"; VIP is "VIP_Installation" (read-only);
-// Installation_Team is a lookup (returned as {id,name}).
-const EDIT_FIELDS = [
-  "Installation_Notes", "Roof_Notes", "AHJ_Specific_Install_Notes",
-  "Stage", "Installation_Team",
-  "Installation_Proposed_Date", "Installation_Confirmed_Date", "Installation_Start_Date",
-  "Installation_Continuation_Date", "Installation_Complete_Date", "R_R_Completed_Date",
-  "Number_of_Days_Needed", "Number_of_Days_Planned_for_Install_default_2",
-  "Customer_Access_Granted", "Drone_No_Fly_Zone", "VIP_Installation", "Language_Preference",
-];
-
-// Look up a single DL's Installation record (word-search the Installation module).
-// Used by the Coordinator detail view: a Ready-to-Schedule install often has no start
-// date yet, so it won't appear in the date-windowed feed — this fetches it directly.
-// Returns recordId + installNotes (kept for the hover tip) + the full editable `rec`.
+// Look up a single DL's Installation record (word-search the Installation module) — a FALLBACK
+// for the editor when the feed's embedded installRec is unavailable (e.g. a Projects deal not in
+// the calendar/ready feeds). Returns recordId + installNotes (hover tip) + the full editable `rec`.
 async function lookupDL(dl, token) {
-  const flds = ["Deal"].concat(EDIT_FIELDS).filter((v, i, a) => a.indexOf(v) === i);
+  const flds = ["Deal"].concat(INSTALL_EDIT_FIELDS).filter((v, i, a) => a.indexOf(v) === i);
   const path = `Installation/search?word=${encodeURIComponent(dl)}` +
     `&fields=${encodeURIComponent(flds.join(","))}&per_page=20`;
   const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
@@ -261,15 +272,7 @@ async function lookupDL(dl, token) {
   const pool = exact.length ? exact : rows;
   const withNotes = pool.filter((x) => (x.Installation_Notes || "").trim());
   const pick = withNotes[0] || pool[0] || null;
-  let rec = null;
-  if (pick) {
-    rec = {};
-    for (const k of EDIT_FIELDS) {
-      const v = pick[k];
-      if (k === "Installation_Team") rec[k] = (v && typeof v === "object") ? { id: String(v.id || ""), name: v.name || "" } : null;
-      else rec[k] = (v === undefined ? null : v);
-    }
-  }
+  const rec = pick ? buildInstallRec(pick) : null;
   return {
     installNotes: pick ? (pick.Installation_Notes || "").trim() : "",
     recordId: pick ? pick.id : "",

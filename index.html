@@ -535,7 +535,7 @@ function calTMin(r){ if(!r) return 1e9;
   var m=s.match(/(\d{1,2}):(\d{2})\s*([AaPp][Mm])?/); if(!m) return 1e9;
   var hh=+m[1], mm=+m[2], ap=(m[3]||"").toUpperCase(); if(ap==="PM"&&hh!==12)hh+=12; if(ap==="AM"&&hh===12)hh=0; return hh*60+mm;
 }
-function calRec(j){ return { type:j.kind, id:j.id, recordId:j.recordId||"", plan:j.plan||null, bom:j.bom||null, team:j.crewLabel||"Unassigned", startDate:j.date, daysNeeded:j.days||1, hhmm:j.hhmm||"", startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", desc:j.desc||"", code:j.code||"", msp:!!j.msp, phone:j.phone||"", installNotes:j.installNotes||"", svcRec:j.svcRec||null, cat:jobCat(j) }; }
+function calRec(j){ return { type:j.kind, id:j.id, recordId:j.recordId||"", plan:j.plan||null, bom:j.bom||null, team:j.crewLabel||"Unassigned", startDate:j.date, daysNeeded:j.days||1, hhmm:j.hhmm||"", startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", desc:j.desc||"", code:j.code||"", msp:!!j.msp, phone:j.phone||"", installNotes:j.installNotes||"", svcRec:j.svcRec||null, installRec:j.installRec||null, cat:jobCat(j) }; }
 // Multi-day jobs: ISO dates a record occupies (start day + continuation days).
 function calSpan(r){ if(!r.startDate)return []; const n=Math.max(1,Math.min(21,parseInt(r.daysNeeded,10)||1)); const base=new Date(r.startDate+"T12:00:00"); const out=[]; for(let i=0;i<n;i++){const x=new Date(base);x.setDate(base.getDate()+i);out.push(calYMD(x));} return out; }
 async function loadOpsCal(silent){
@@ -1335,6 +1335,18 @@ function loadCoordNotes(dl,force){ const key=String(dl||"").toUpperCase().replac
     refreshTip(); if(["coordinator","calendar","projects"].includes(S.tab)) render(true);
   }).catch(()=>{ S.coord.notes[key]={status:"error",text:"",recordId:"",rec:null}; refreshTip(); if(["coordinator","calendar","projects"].includes(S.tab)) render(true); });
 }
+// Populate the per-DL install cache SYNCHRONOUSLY from a feed-embedded editable record (installRec) —
+// no per-open /api/zoho-jobs?dl= fetch, so no Zoho token refresh (avoids the shared-token rate limit).
+function setInstallRecSync(dl,rec,recordId){ const key=String(dl||"").toUpperCase().replace(/\s+/g,""); if(!key||!rec) return false;
+  S.coord.notes[key]={status:"live",text:(rec.Installation_Notes||"").trim(),recordId:String(recordId||"").replace(/[^0-9]/g,""),rec:rec}; return true; }
+// Find an embedded install record for a DL from already-loaded feeds (calendar + ready) — used by the
+// Projects detail, whose own feed (Deals) doesn't carry installRec.
+function findInstallRec(dl){ const key=String(dl||"").toUpperCase().replace(/\s+/g,""); if(!key) return null;
+  const c=(S.cal.records||[]).find(r=>r.type!=="service"&&r.installRec&&String(r.dlNumber||"").toUpperCase().replace(/\s+/g,"")===key);
+  if(c) return {rec:c.installRec,recordId:c.recordId};
+  const rd=(S.coord.ready.list||[]).find(j=>j.kind==="install"&&j.installRec&&String(j.num||"").toUpperCase().replace(/\s+/g,"")===key);
+  if(rd) return {rec:rd.installRec,recordId:rd.recordId};
+  return null; }
 // Field metadata (picklist values + Installation_Team lookup records) for safe editor inputs. Loaded once.
 function loadCoordFields(){ const F=S.coord.fields; if(F.status==="loading"||F.status==="live") return;
   S.coord.fields={status:"loading",map:F.map||{},team:F.team||[]};
@@ -1448,7 +1460,7 @@ function coordItems(){
     out.push({ key:"r|"+(j.id||j.num), source:"ready", bucket, kind:j.kind,
       num:j.num||"", name:j.project||(p&&p.name)||"", address:j.address||(p&&p.address)||"",
       ahj:(p&&p.ahj)||"", stage:j.stage||"", crewLabel:j.crewLabel||"", scope:j.scope||"",
-      recordId:j.recordId||"", svcRec:j.svcRec||null, msp:j.msp, code:j.code, job:j, p:p, it:null });
+      recordId:j.recordId||"", svcRec:j.svcRec||null, installRec:j.installRec||null, msp:j.msp, code:j.code, job:j, p:p, it:null });
   });
   const DEAD=/closed\s*lost|dead|cancell?ed/i; // guard: never surface a dead sale as ready
   inspEntries().filter(e=>e.it.status==="ready"&&!DEAD.test(e.p.stage||"")).forEach(e=>{
@@ -2627,7 +2639,7 @@ document.addEventListener("click",e=>{
     case "notifClose": S.notif.open=false; render(); break;
     case "notifOpen": { S.notif.open=false; S.tab="projects"; S.proj.selected=id; S.proj.noteFrom=null; S.proj.stageFilter="all"; loadProjectNotes(id); loadProjectAttachments(id);
       S.coord.edit=null; S.svc.edit=null; S.note={text:"",sending:false,err:"",okKey:"",prog:""};
-      const _np=(S.proj.list||[]).find(x=>x.id===id); if(_np&&_np.num){ loadCoordNotes(_np.num); loadCoordFields(); loadAttachScope(); }
+      const _np=(S.proj.list||[]).find(x=>x.id===id); if(_np&&_np.num){ const f=findInstallRec(_np.num); if(f) setInstallRecSync(_np.num,f.rec,f.recordId); else loadCoordNotes(_np.num); loadCoordFields(); loadAttachScope(); }
       render(); break; }
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
@@ -2637,14 +2649,16 @@ document.addEventListener("click",e=>{
     case "selectProject": { S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); loadProjectAttachments(id);
       // Feature B: reuse the shared Installation editor on the Projects detail — reset editor/note state + fetch the record + field metadata for this project's DL.
       S.coord.edit=null; S.coord.savedMsg=null; S.svc.edit=null; S.note={text:"",sending:false,err:"",okKey:"",prog:""};
-      const _pp=(S.proj.list||[]).find(x=>x.id===id); if(_pp&&_pp.num){ loadCoordNotes(_pp.num); loadCoordFields(); loadAttachScope(); }
+      const _pp=(S.proj.list||[]).find(x=>x.id===id); if(_pp&&_pp.num){ const f=findInstallRec(_pp.num); if(f) setInstallRecSync(_pp.num,f.rec,f.recordId); else loadCoordNotes(_pp.num); loadCoordFields(); loadAttachScope(); }
       render(); break; }
     case "projStageFocus": S.proj.noteFrom=(id&&S.proj.noteFrom!==id)?id:null; render(); break;
     case "closeProject": S.proj.selected=null; S.proj.noteFrom=null; render(); break;
     case "coordSelect": { S.coord.selected=id; S.coord.edit=null; S.coord.savedMsg=null; S.svc.edit=null; S.svc.savedMsg=null; S.note={text:"",sending:false,err:"",okKey:"",prog:""}; loadAttachScope(); const item=coordSelectedItem();
       if(item&&item.kind==="service"){ const rid=String(item.recordId||"").replace(/[^0-9]/g,""); const sr=item.svcRec||(item.job&&item.job.svcRec)||null;
         if(rid){ if(sr) S.svc.rec[rid]={status:"live",rec:sr,module:"Service_Ticket"}; else loadServiceRec(rid); loadServiceFields(); loadSvcScope(); } }
-      else if(item&&item.num){ loadCoordNotes(item.num); loadCoordFields(); }
+      else if(item&&item.num){ const ir=item.installRec||(item.job&&item.job.installRec)||null;
+        if(ir) setInstallRecSync(item.num,ir,item.recordId); else loadCoordNotes(item.num); // sync from feed; ?dl= fallback (inspections have no installRec)
+        loadCoordFields(); }
       render(); break; }
     case "coordToggle": { const b=el.getAttribute("data-bucket"); if(b){ S.coord.collapsed=S.coord.collapsed||{}; S.coord.collapsed[b]=!S.coord.collapsed[b]; } render(); break; }
     case "coordToggleAll": { const grp={}; coordItems().forEach(it=>{grp[it.bucket]=1;}); const buckets=COORD_BUCKETS.filter(x=>grp[x]); const anyCollapsed=buckets.some(x=>S.coord.collapsed&&S.coord.collapsed[x]); S.coord.collapsed={}; if(!anyCollapsed) buckets.forEach(x=>{S.coord.collapsed[x]=true;}); render(); break; }
@@ -2752,7 +2766,11 @@ document.addEventListener("click",e=>{
       const dl=E.dl, recordId=E.recordId, n=keys.length;
       fetch("/api/zoho-update",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({recordId,module:"Installation",fields:payload})}).then(r=>r.json()).then(j=>{
         const cur=S.coord.edit; if(!cur||cur.dl!==dl) return; // editor changed/closed
-        if(j&&j.ok){ S.coord.edit=null; S.coord.savedMsg={dl,n,t:Date.now()}; loadCoordNotes(dl,true); render(); }
+        if(j&&j.ok){ // merge saved values into the cached rec (no token-refreshing re-fetch)
+          const rc=S.coord.notes[dl]; if(rc&&rc.rec){ Object.keys(payload).forEach(k=>{ let v=payload[k];
+            if(k==="Installation_Team"){ const tt=(S.coord.fields.team||[]).find(x=>String(x.id)===String(v)); v=v?{id:String(v),name:tt?tt.name:""}:null; }
+            rc.rec[k]=v; if(k==="Installation_Notes") rc.text=(v||"").toString().trim(); }); }
+          S.coord.edit=null; S.coord.savedMsg={dl,n,t:Date.now()}; render(); }
         else { cur.saving=false; cur.err=(j&&(j.error||j.message))||(es?"No se pudo guardar.":"Save failed."); render(); }
       }).catch(e=>{ const cur=S.coord.edit; if(cur&&cur.dl===dl){ cur.saving=false; cur.err=String(e&&e.message||e); render(); } });
       break;
@@ -2799,8 +2817,9 @@ document.addEventListener("click",e=>{
         // opens on THIS ticket's current stage with no async gap and no per-open Zoho token refresh.
         if(rid){ if(_jr.svcRec) S.svc.rec[rid]={status:"live",rec:_jr.svcRec,module:"Service_Ticket"}; else loadServiceRec(rid); loadServiceFields(); loadSvcScope(); } }
       else if(_jr&&_jr.dlNumber){ loadBomNotes(_jr.dlNumber);
-        // Reuse the Coordinator's Installation editor for calendar installs: fetch the full editable record + field metadata.
-        loadCoordNotes(_jr.dlNumber); loadCoordFields(); }
+        // Install editor loads SYNCHRONOUSLY from the feed-embedded record (no per-open ?dl= token refresh); ?dl= only as fallback.
+        if(_jr.installRec) setInstallRecSync(_jr.dlNumber,_jr.installRec,_jr.recordId); else loadCoordNotes(_jr.dlNumber);
+        loadCoordFields(); }
       render(); break; }
     case "calDay": S.cal.dayPanel=Number(id); render(); break;
     case "calClose": S.cal.selected=null; S.cal.dayPanel=null; S.coord.edit=null; S.svc.edit=null; S.note={text:"",sending:false,err:"",okKey:"",prog:""}; render(); break;

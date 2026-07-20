@@ -128,7 +128,25 @@ function normCrew(raw) {
   return { id, label };
 }
 
-const INSTALL_FIELDS = "Name,Stage,Installation_Team,Deal,MSP_Upgrade_Required,Battery_Type,Number_of_Days_Needed,Installation_Notes,Installation_Start_Date";
+// Editable Installation fields for the Coordinator/Calendar/Projects install editor (mirrors zoho-jobs.js).
+const INSTALL_EDIT_FIELDS = [
+  "Installation_Notes", "Roof_Notes", "AHJ_Specific_Install_Notes",
+  "Stage", "Installation_Team",
+  "Installation_Proposed_Date", "Installation_Confirmed_Date", "Installation_Start_Date",
+  "Installation_Continuation_Date", "Installation_Complete_Date", "R_R_Completed_Date",
+  "Number_of_Days_Needed", "Number_of_Days_Planned_for_Install_default_2",
+  "Customer_Access_Granted", "Drone_No_Fly_Zone", "VIP_Installation", "Language_Preference",
+];
+function buildInstallRec(row) {
+  const rec = {};
+  for (const k of INSTALL_EDIT_FIELDS) {
+    const v = row[k];
+    if (k === "Installation_Team") rec[k] = (v && typeof v === "object") ? { id: String(v.id || ""), name: v.name || "" } : null;
+    else rec[k] = (v === undefined ? null : v);
+  }
+  return rec;
+}
+const INSTALL_FIELDS = ["Name", "Deal", "MSP_Upgrade_Required", "Battery_Type"].concat(INSTALL_EDIT_FIELDS).filter((v, i, a) => a.indexOf(v) === i).join(",");
 const SERVICE_FIELDS = "Name,Scheduled_Visit_1,Assigned_Technician,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description,Priority";
 
 // Editable Service_Ticket fields for the Coordinator/Calendar service editor (mirrors zoho-jobs.js).
@@ -173,6 +191,7 @@ function mapReadyInstall(r) {
     geo: null,
     scope: scopeBits.join(" · ") || "Installation",
     installNotes: (r.Installation_Notes || "").trim(),
+    installRec: buildInstallRec(r), // editable fields embedded so the install editor loads synchronously
     ready: true,
   };
 }
