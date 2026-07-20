@@ -2649,7 +2649,7 @@ document.addEventListener("click",e=>{
       render(); break; }
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
-    case "setTab": S.tab=id; try{localStorage.setItem("wm_itin_tab",id);}catch(e){} if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="coordinator"){ loadProjects(S.proj.status!=="idle",true); loadCoordReady(S.coord.ready.status!=="idle"&&S.coord.ready.status!=="error"); } if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); if(id==="instmap"&&S.instMap.status==="idle") loadInstallMap(); render(); break;
+    case "setTab": S.tab=id; try{if(window.wmReportView)wmReportView();}catch(e){} try{localStorage.setItem("wm_itin_tab",id);}catch(e){} if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="coordinator"){ loadProjects(S.proj.status!=="idle",true); loadCoordReady(S.coord.ready.status!=="idle"&&S.coord.ready.status!=="error"); } if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); if(id==="instmap"&&S.instMap.status==="idle") loadInstallMap(); render(); break;
     case "jobsRefresh": loadJobs(); break;
     case "projRefresh": loadProjects(false,true); break;
     case "selectProject": { S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); loadProjectAttachments(id);
@@ -3042,6 +3042,21 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
   var CLIENT_ID="be321099-c551-42ba-94e9-887752ebba8b", TENANT="657cda0d-a035-4c3f-a228-3d6362dad07d";
   var SB="https://lmlixmzmzpzgeggvywwb.supabase.co", KEY="sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
   var H={apikey:KEY,Authorization:"Bearer "+KEY,"Content-Type":"application/json"};
+  // Force sign-out: admin sets app_access.force_logout_at; log out once per distinct value (keyed in localStorage by email) so re-login does NOT loop.
+  function wmForceLogoutCheck(rec, em){
+    try{
+      if(!rec||!rec.force_logout_at) return false;
+      var key='wm_forced_'+String(em||'').toLowerCase();
+      if(String(rec.force_logout_at)!==(localStorage.getItem(key)||'')){
+        localStorage.setItem(key,String(rec.force_logout_at));
+        try{ msalApp&&msalApp.logoutRedirect&&msalApp.logoutRedirect(); }catch(e){}
+        return true;
+      }
+    }catch(e){}
+    return false;
+  }
+  // Report current view to app_access (best-effort; columns may not exist yet → ignore all errors).
+  window.wmReportView=function(){ try{ var acct=(msalApp&&msalApp.getAllAccounts&&msalApp.getAllAccounts()[0]); if(!acct)return; var em=(acct.username||"").toLowerCase(); fetch(SB+"/rest/v1/app_access?email=eq."+encodeURIComponent(em),{method:"PATCH",headers:Object.assign({},H,{Prefer:"return=minimal"}),body:JSON.stringify({last_view:"Itinerary: "+((typeof S!=="undefined"&&S&&S.tab)||""),last_view_at:new Date().toISOString(),last_seen:new Date().toISOString()})}).catch(function(){}); }catch(e){} };
   var STAFF_CODE="Windmar2026!"; var staffMode=(location.hash.indexOf("staff")>=0)||(location.search.indexOf("staff")>=0);
   var ROLE_APPS={admin:["fieldhub","itinerary","serviceapp","plananalyzer"],coordinator:["fieldhub","itinerary","serviceapp","plananalyzer"],crew:["fieldhub","itinerary","serviceapp"],viewer:["fieldhub"]};
   function appsFor(r){return (r&&r.apps&&r.apps.length)?r.apps:(ROLE_APPS[(r&&r.role)||"crew"]||ROLE_APPS.crew);}
@@ -3079,10 +3094,12 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
     fetch(SB+"/rest/v1/app_access?on_conflict=email",{method:"POST",headers:Object.assign({},H,{Prefer:"resolution=merge-duplicates,return=representation"}),body:JSON.stringify({email:email,name:acct.name||null,last_seen:new Date().toISOString()})})
       .then(function(r){return r.ok?r.json():null;}).then(function(rows){
         var rec=(rows&&rows[0])||null;
+        if(wmForceLogoutCheck(rec, email)) return;
         if(rec&&rec.status==="disabled"){ showDenied(email); return; }
         if(rec&&appsFor(rec).indexOf(APP_KEY)<0){ showDenied(email); return; }
         try{ window.wmRole=(rec&&rec.role)||""; window.wmUser=email; if(typeof render==="function"){try{render(true);}catch(e){}} }catch(e){}
         pass();
+        try{ wmReportView(); }catch(e){}
       }).catch(function(){ pass(); });
   }
   var msalApp;
@@ -3092,6 +3109,8 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
     var acct=(resp&&resp.account)||msalApp.getAllAccounts()[0];
     if(acct){ check(acct); } else { showLogin(); }
   }).catch(function(){ showLogin(); });
+  // Re-check the force-logout flag every 60s so a signed-in user is kicked within a minute of the admin setting it.
+  setInterval(function(){ var acct=(msalApp&&msalApp.getAllAccounts&&msalApp.getAllAccounts()[0]); if(!acct)return; var em=(acct.username||"").toLowerCase(); fetch(SB+"/rest/v1/app_access?email=eq."+encodeURIComponent(em)+"&select=force_logout_at",{headers:H}).then(function(r){return r.ok?r.json():[];}).then(function(rows){ wmForceLogoutCheck(rows&&rows[0], em); }).catch(function(){}); }, 60000);
 })();
 </script>
 <!-- ═══ WindMar seasonal flair (month-by-month, non-blocking) ═══ -->
