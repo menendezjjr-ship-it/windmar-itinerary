@@ -44,6 +44,29 @@ async function searchAll(module, criteria, fields, token) {
   return all;
 }
 
+// Resolve each inspection-relevant deal's Post-Installation record (module Final_Inspectin =
+// CustomModule11; records named FI####). Each FI record has a `Deal` lookup back to its deal.
+// Batched: ≤10 (Deal:equals:) conditions per search (Zoho allows max 15) — one shared token,
+// never per-deal. Returns { dealId: {id, name} }. Never throws — an FI hiccup must not break the feed.
+async function resolveFinalInspections(dealIds, token) {
+  const byDeal = {};
+  for (let i = 0; i < dealIds.length; i += 10) {
+    const chunk = dealIds.slice(i, i + 10);
+    const criteria = "(" + chunk.map((id) => `(Deal:equals:${id})`).join("or") + ")";
+    const path = `Final_Inspectin/search?criteria=${encodeURIComponent(criteria)}&fields=${encodeURIComponent("Deal,Name")}&per_page=200`;
+    try {
+      const res = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+      if (res.status === 204 || !res.ok) continue;
+      const data = await res.json();
+      (data.data || []).forEach((r) => {
+        const did = r.Deal && r.Deal.id;
+        if (did && !byDeal[did]) byDeal[did] = { id: r.id, name: r.Name || "" };
+      });
+    } catch (e) { /* skip this chunk; leave those deals without an FI id */ }
+  }
+  return byDeal;
+}
+
 const lookup = (v) => (v && typeof v === "object" ? v.name : v) || "";
 const clean = (s) => String(s || "").replace(/[\s,]+$/, "").trim();
 
@@ -149,6 +172,8 @@ export function mapDeal(r) {
     stageModified: r.Stage_Modified_Time || null,
     modifiedBy: lookup(r.Modified_By) || "",
     insp: inspStatus(r),
+    postInstallId: "",   // Final_Inspectin (CustomModule11) record id — filled for inspection-relevant deals
+    postInstallName: "", // e.g. "FI8496"
     timeline,
   };
 }
@@ -175,6 +200,16 @@ export default async function handler(req, res) {
     const criteria = "(" + STAGES.map((s) => `(Stage:equals:${s})`).join("or") + ")";
     const deals = await searchAll("Deals", criteria, FIELDS, token);
     const projects = deals.map(mapDeal).sort((a, b) => a.stageIdx - b.stageIdx || String(a.num).localeCompare(String(b.num)));
+    // Point inspection "Open in Zoho" links at the Post-Installation (Final_Inspectin) record.
+    // Only the inspection-relevant deals (Install / Post-Installation stage) — the set the
+    // inspection UI derives from — batched ≤10 per Final_Inspectin search on the shared token.
+    try {
+      const inspDealIds = projects.filter((p) => p.stage === "Install" || p.stage === "Post-Installation").map((p) => p.id);
+      if (inspDealIds.length) {
+        const fiByDeal = await resolveFinalInspections(inspDealIds, token);
+        projects.forEach((p) => { const fi = fiByDeal[p.id]; if (fi) { p.postInstallId = fi.id; p.postInstallName = fi.name; } });
+      }
+    } catch (e) { /* leave postInstallId empty — inspection links fall back to their current target */ }
     const byStage = {};
     STAGES.forEach((s) => (byStage[s] = 0));
     projects.forEach((p) => { if (byStage[p.stage] != null) byStage[p.stage]++; });
