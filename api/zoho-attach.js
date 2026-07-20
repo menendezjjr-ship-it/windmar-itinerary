@@ -50,6 +50,20 @@ export default async function handler(req, res) {
       return res.status(200).json({ diag: true, module: dmod, canAttach: !/OAUTH_SCOPE_MISMATCH/i.test(txt), httpStatus: r.status, sample: txt.slice(0, 220) });
     }
 
+    // TEMPORARY one-off cleanup: remove an attachment. (Removed again right after use — see PR notes.)
+    if (req.method === "DELETE") {
+      const dmod = ALLOWED_MODULES.has(String(req.query.module || "")) ? String(req.query.module) : "Installation";
+      const rid = String(req.query.id || "").replace(/[^0-9]/g, "");
+      const aid = String(req.query.aid || "").replace(/[^0-9]/g, "");
+      if (!rid || !aid) return res.status(200).json({ ok: false, error: "id and aid required" });
+      const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${dmod}/${rid}/Attachments/${aid}`, {
+        method: "DELETE", headers: { Authorization: `Zoho-oauthtoken ${token}` },
+      });
+      const txt = await r.text(); let d; try { d = JSON.parse(txt); } catch (e) { d = { raw: txt }; }
+      const rec = d && d.data && d.data[0];
+      return res.status(200).json({ ok: !!(rec && rec.code === "SUCCESS"), status: r.status, sample: txt.slice(0, 220) });
+    }
+
     if (req.method !== "POST") return res.status(200).json({ ok: false, error: "POST required" });
     let body = req.body; if (typeof body === "string") { try { body = JSON.parse(body); } catch (e) { body = {}; } }
     body = body || {};
