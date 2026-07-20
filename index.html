@@ -3066,7 +3066,11 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
   try{ if(staffMode&&localStorage.getItem("wm_gate_code")==="1"){ pass(); return; } }catch(e){}
   function check(acct){
     var email=(acct.username||"").toLowerCase();
-    try{ if(!sessionStorage.getItem("wm_login_logged")){ sessionStorage.setItem("wm_login_logged","1"); fetch(SB+"/rest/v1/login_events",{method:"POST",headers:Object.assign({},H,{Prefer:"return=minimal"}),body:JSON.stringify({email:email,name:acct.name||null,app:APP_LABEL})}).catch(function(){}); } }catch(e){}
+    try{ if(!sessionStorage.getItem("wm_login_logged")){ sessionStorage.setItem("wm_login_logged","1");
+      var _logPost=function(lat,lon,city){ try{ fetch(SB+"/rest/v1/login_events",{method:"POST",headers:Object.assign({},H,{Prefer:"return=minimal"}),body:JSON.stringify({email:email,name:acct.name||null,app:APP_LABEL,lat:(lat==null?null:lat),lon:(lon==null?null:lon),city:city||null})}).catch(function(){}); }catch(e){} };
+      var _logFinish=function(lat,lon){ if(lat==null){ _logPost(); return; } fetch("https://api.bigdatacloud.net/data/reverse-geocode-client?latitude="+lat+"&longitude="+lon+"&localityLanguage=en").then(function(r){return r.json();}).then(function(d){ _logPost(lat,lon,[d.city||d.locality,d.principalSubdivisionCode||d.principalSubdivision].filter(Boolean).join(", ")); }).catch(function(){ _logPost(lat,lon,""); }); };
+      if(navigator&&navigator.geolocation){ navigator.geolocation.getCurrentPosition(function(p){_logFinish(p.coords.latitude,p.coords.longitude);}, function(){_logPost();}, {timeout:8000,maximumAge:300000}); } else { _logPost(); }
+    } }catch(e){}
     fetch(SB+"/rest/v1/app_access?on_conflict=email",{method:"POST",headers:Object.assign({},H,{Prefer:"resolution=merge-duplicates,return=representation"}),body:JSON.stringify({email:email,name:acct.name||null,last_seen:new Date().toISOString()})})
       .then(function(r){return r.ok?r.json():null;}).then(function(rows){
         var rec=(rows&&rows[0])||null;
