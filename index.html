@@ -293,6 +293,31 @@ const SUPERVISORS=[
   {name:"Jose Baldaguez",role:"Warehouse Manager",initials:"JB",color:"#06B6D4",phone:"863-555-2004"},
   {name:"Joalismar Willim",role:"Safety Representative",initials:"JW",color:"#A855F7",phone:"863-555-2005"},
 ];
+// Real contact directory — fed from the Field HUB (/contacts.json). Embedded copy is the
+// fallback; the live fetch below overrides it so updates in the Field HUB propagate here.
+window.WM_CONTACTS=[
+  {name:"Jose Menendez",phone:"407-202-2732",email:"J.menendez@windmarhome.com"},
+  {name:"Carlos Acevedo",phone:"321-848-1214",email:"carlos.acevedo@windmarhome.com"},
+  {name:"Luis G Ortiz",phone:"689-213-8210",email:"luis.ortiz@windmarhome.com"},
+  {name:"Joalismar Willim",phone:"321-746-2654",email:"joalismar.willim@windmarhome.com"},
+  {name:"Jose Baldaguez",phone:"787-565-9424",email:"jose.baldaguez@windmarhome.com"},
+  {name:"Angel Rivera Carballo",phone:"407-989-4068",email:"angel.rivera@windmarhome.com"},
+  {name:"Johana Villa",phone:"321-332-3408",email:"johana.villa@windmarhome.com"},
+  {name:"Tailor Herrera",phone:"689-287-5308",email:"tailor.herrera@windmarhome.com"},
+  {name:"Maykel Pimentel",phone:"323-571-8710",email:"maykel.pimientel@windmarhome.com"},
+  {name:"William Sierra",phone:"787-550-7884",email:"william.sierra@windmarhome.com"},
+  {name:"Luis Vargas",phone:"407-202-0746",email:"luis.matos@windmarhome.com"},
+  {name:"Leonardo Torres",phone:"407-497-4669",email:"leonardo.trujillo@windmarhome.com"},
+  {name:"David Radke",phone:"407-883-0866",email:"david.radke@windmarhome.com"},
+  {name:"Luis Morales",phone:"689-500-5715",email:"luis.morales@windmarhome.com"},
+  {name:"Douglas Olivera",phone:"689-318-3944",email:""},
+  {name:"Anderson Terra",phone:"689-266-9757",email:""}
+];
+function wmContactFor(nm){ if(!nm)return null; var q=String(nm).toLowerCase().replace(/[^a-z\s]/g," ").replace(/\s+/g," ").trim(); if(!q)return null; var L=window.WM_CONTACTS||[],i,rn,last,qt=q.split(" ");
+  for(i=0;i<L.length;i++){ rn=String(L[i].name||"").toLowerCase().replace(/[^a-z\s]/g," ").replace(/\s+/g," ").trim(); if(rn===q)return L[i]; }
+  for(i=0;i<L.length;i++){ rn=String(L[i].name||"").toLowerCase().replace(/[^a-z\s]/g," ").trim().split(" ").filter(Boolean); last=rn[rn.length-1]; if(last&&last.length>2&&qt.indexOf(last)>=0)return L[i]; }
+  return null; }
+try{ fetch("https://project-g7v0r.vercel.app/contacts.json",{cache:"no-store"}).then(function(r){return r.ok?r.json():null;}).then(function(d){ if(Array.isArray(d)&&d.length){ window.WM_CONTACTS=d; if(typeof S!=="undefined"&&S.tab==="crews"&&typeof render==="function")render(true); } }).catch(function(){}); }catch(e){}
 const FL_CITIES={"orlando":{lat:28.5383,lon:-81.3792},"kissimmee":{lat:28.2920,lon:-81.4076},"lakeland":{lat:28.0395,lon:-81.9498},"winter haven":{lat:28.0222,lon:-81.7329},"tampa":{lat:27.9506,lon:-82.4572},"okeechobee":{lat:27.2439,lon:-80.8298},"vero beach":{lat:27.6386,lon:-80.3973},"pine castle":{lat:28.4626,lon:-81.3853},"union park":{lat:28.5700,lon:-81.2700},"meadow woods":{lat:28.3800,lon:-81.4200},"lake nona":{lat:28.3700,lon:-81.2700},"sanford":{lat:28.8003,lon:-81.2731},"titusville":{lat:28.6122,lon:-80.8076},"melbourne":{lat:28.0836,lon:-80.6081},"sebring":{lat:27.4956,lon:-81.4409},"saint petersburg":{lat:27.7676,lon:-82.6403},"st petersburg":{lat:27.7676,lon:-82.6403},"ocala":{lat:29.1872,lon:-82.1401},"bartow":{lat:27.8964,lon:-81.8431},"saint cloud":{lat:28.2489,lon:-81.2812},"st cloud":{lat:28.2489,lon:-81.2812},"kindred":{lat:28.2760,lon:-81.2140},"narcoossee":{lat:28.3000,lon:-81.1800},"harmony":{lat:28.2300,lon:-81.1450},"celebration":{lat:28.3255,lon:-81.5330},"clermont":{lat:28.5494,lon:-81.7729},"davenport":{lat:28.1614,lon:-81.6018},"haines city":{lat:28.1147,lon:-81.6206},"poinciana":{lat:28.1236,lon:-81.4915},"four corners":{lat:28.3200,lon:-81.6300},"deltona":{lat:28.9005,lon:-81.2637},"apopka":{lat:28.6934,lon:-81.5322},"winter garden":{lat:28.5653,lon:-81.5862},"ocoee":{lat:28.5692,lon:-81.5440},"clarcona":{lat:28.6200,lon:-81.4900}};
 
 /* ---- jobs use real WindMar codes (DL/RDL/RL/S/MSP) ---- */
@@ -2035,23 +2060,32 @@ function crewsHTML(){
   const rows=src.map(c=>{
     const n=nearestOther(c); const hq=miles(c.gps,HQ);
     const speed=c.mph>0?`<span class="pill" style="background:var(--jc-DL)">${c.mph} mph</span>`:`<span class="pill" style="background:#3a4a6e">${t("cr_idle")}</span>`;
+    const person=(crewName(c).match(/\(([^)]+)\)/)||[])[1]||c.lead||crewName(c);
+    const ct=wmContactFor(person); const ph=(ct&&ct.phone)||c.phone||""; const em=(ct&&ct.email)||"";
+    const contactLine=(ph||em)?`<div style="font-size:11.5px;margin-top:3px;color:var(--text-dim)">${ph?"📞 "+esc(ph):""}${ph&&em?" · ":""}${em?"✉️ "+esc(em):""}</div>`:"";
+    const actions=(ph||em)
+      ?`${ph?`<a href="tel:${esc(ph.replace(/[^0-9+]/g,""))}" class="btn3d grey sm" style="text-decoration:none" title="${esc(ph)}">📞</a>`:""}${em?`<a href="mailto:${esc(em)}" class="btn3d grey sm" style="text-decoration:none" title="${esc(em)}">✉️</a>`:""}`
+      :`<button class="btn3d grey sm" data-action="callCrew" data-id="${c.id}">📞</button>`;
     return `<div class="card" style="padding:13px;display:flex;align-items:center;gap:12px">
       <span style="width:12px;height:52px;border-radius:4px;background:${c.color}"></span>
       <div style="flex:1;min-width:0">
         <div style="font-weight:900;font-size:14.5px">${esc(crewName(c))}</div>
         <div style="font-size:12px;color:var(--text-dim)">${esc(c.addr)}</div>
         <div style="font-size:12px;margin-top:5px;color:var(--text-dim)">${S.crews.showDist?`🧭 <b style="color:var(--jc-DL)">${n.d.toFixed(1)} mi</b> → ${esc(n.crew?crewName(n.crew):"—")} · 📍 HQ: <b style="color:var(--wh-orange)">${hq.toFixed(1)} mi</b> · `:""}${c.ping}</div>
+        ${contactLine}
       </div>
       ${speed}
-      <button class="btn3d grey sm" data-action="callCrew" data-id="${c.id}">📞</button></div>`;
+      <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">${actions}</div></div>`;
   }).join("");
   const mapBlock=hasMap
     ?`<div id="crewMap" style="height:380px;border-radius:16px;overflow:hidden;border:1px solid var(--line)"></div>`
     :`<div class="radar" style="height:380px"><div class="sweep"></div>${src.map((c,i)=>`<div class="blip" style="width:13px;height:13px;left:${16+i*12}%;top:${26+(i%3)*18}%;background:${c.color}"></div>`).join("")}<div style="position:absolute;left:10px;bottom:10px;font-size:11px;color:var(--text-dim)">🛰 ${t("cr_sub")}</div></div>`;
-  const supers=SUPERVISORS.map(sp=>`<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line)">
-    <span style="width:34px;height:34px;border-radius:50%;background:${sp.color};display:grid;place-items:center;font-weight:800;font-size:12.5px;color:#fff">${sp.initials}</span>
-    <div style="flex:1"><div style="font-weight:700;font-size:13.5px">${esc(sp.name)}</div><div style="font-size:11.5px;color:var(--text-dim)">${esc(sp.role)}</div></div>
-    <a href="tel:${sp.phone}" class="btn3d grey sm" style="text-decoration:none">📞</a></div>`).join("");
+  const supers=SUPERVISORS.map(sp=>{ const ct=wmContactFor(sp.name); const ph=(ct&&ct.phone)||sp.phone||""; const em=ct&&ct.email;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--line)">
+    <span style="width:34px;height:34px;border-radius:50%;background:${sp.color};display:grid;place-items:center;font-weight:800;font-size:12.5px;color:#fff;flex-shrink:0">${sp.initials}</span>
+    <div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13.5px">${esc(sp.name)}</div><div style="font-size:11.5px;color:var(--text-dim)">${esc(sp.role)}</div>${(ph||em)?`<div style="font-size:11px;color:var(--text-dim);margin-top:2px;overflow:hidden;text-overflow:ellipsis">${ph?esc(ph):""}${ph&&em?" · ":""}${em?esc(em):""}</div>`:""}</div>
+    ${ph?`<a href="tel:${esc(ph.replace(/[^0-9+]/g,""))}" class="btn3d grey sm" style="text-decoration:none;flex-shrink:0" title="${esc(ph)}">📞</a>`:""}
+    ${em?`<a href="mailto:${esc(em)}" class="btn3d grey sm" style="text-decoration:none;flex-shrink:0" title="${esc(em)}">✉️</a>`:""}</div>`; }).join("");
   return `<div class="fade">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap">
       <div><h2 style="margin:0 0 4px;font-size:24px">${t("cr_title")} ${stBadge}</h2><div style="color:var(--text-dim)">${t("cr_sub")}</div></div>
