@@ -373,6 +373,7 @@ export async function POST(req){
 /* ============================================================================
    APP STATE
    ============================================================================ */
+window.WM_VIEWER=false; // viewer-role users are view-only (set true by the login gate); default false so it's defined before login
 const S={
   lang:"en", theme:"dark", tab:(function(){try{return localStorage.getItem("wm_itin_tab")||"itinerary";}catch(e){return "itinerary";}})(), dayOffset:0, selectedJob:null, itinView:"board", boardFilter:"all",
   live:{status:"idle",ok:false,jobs:[],updated:null,err:""},
@@ -1557,7 +1558,7 @@ function installEditorParts(dlKey){
       ${coordGroupHTML((es?"⚙️ Otros":"⚙️ Other"),"other",rec,editing)}</div>`;
   editBanner=editing&&E&&E.err?`<div style="grid-column:1/-1;margin-top:10px;background:rgba(239,68,68,.12);border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--warn)">⚠ ${esc(E.err)}</div>`:"";
   savedFlash=(!editing&&S.coord.savedMsg&&S.coord.savedMsg.dl===dlKey)?`<div style="margin-top:12px;background:rgba(34,197,94,.12);border:1px solid var(--ok);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--ok)">✓ ${es?"Guardado en Zoho":"Saved to Zoho"} (${S.coord.savedMsg.n} ${es?"campo(s)":"field(s)"})</div>`:"";
-  const canEdit=nc.status==="live"&&nc.recordId&&rec;
+  const canEdit=nc.status==="live"&&nc.recordId&&rec&&!window.WM_VIEWER; // viewers are view-only → no Edit button
   actionsRO=canEdit?`<button class="btn3d sm" data-action="coordEditStart" style="background:#0EA5E9">✏️ ${es?"Editar":"Edit"}</button>`:"";
   fieldsLoading=editing&&S.coord.fields.status==="loading"?`<div style="grid-column:1/-1;font-size:11.5px;color:var(--text-dim);margin-top:6px">⟳ ${es?"Cargando opciones de campos…":"Loading field options…"}</div>`:"";
   actionsEdit=editing?`<div style="display:flex;gap:10px;margin-top:16px"><button class="btn3d green" data-action="coordSave" ${E&&E.saving?"disabled":""} style="flex:1;padding:12px;font-size:14px">${E&&E.saving?"⟳ "+(es?"Guardando…":"Saving…"):"💾 "+(es?"Guardar cambios":"Save changes")}</button><button class="btn3d grey" data-action="coordEditCancel" ${E&&E.saving?"disabled":""} style="padding:12px 18px;font-size:14px">${es?"Cancelar":"Cancel"}</button></div>`:"";
@@ -1568,7 +1569,8 @@ function installEditorParts(dlKey){
 // via /api/zoho-add-note, then uploads each selected photo via /api/zoho-attach to the SAME
 // record. The photo picker only appears when the Attachments CREATE scope is present (self-gating
 // — never ships a broken control). module = Installation | Service_Ticket.
-function noteBoxHTML(module,recordId){ const es=S.lang==="es", N=S.note, key=module+":"+recordId, okThis=N.okKey===key;
+function noteBoxHTML(module,recordId){ if(window.WM_VIEWER) return ""; // viewers are view-only → no add-note/photo control
+  const es=S.lang==="es", N=S.note, key=module+":"+recordId, okThis=N.okKey===key;
   const canAttach=S.attachScope.canAttach;
   return `<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
     <div style="font-size:11px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">➕ ${es?"Agregar una nota":"Add a note"}</div>
@@ -1636,7 +1638,7 @@ function serviceEditorParts(recordId){ const es=S.lang==="es", rid=String(record
   editBanner=editing&&E&&E.err?`<div style="grid-column:1/-1;margin-top:10px;background:rgba(239,68,68,.12);border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--warn)">⚠ ${esc(E.err)}</div>`:"";
   savedFlash=(!editing&&S.svc.savedMsg&&S.svc.savedMsg.rid===rid)?`<div style="margin-top:12px;background:rgba(34,197,94,.12);border:1px solid var(--ok);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--ok)">✓ ${es?"Guardado en Zoho":"Saved to Zoho"} (${S.svc.savedMsg.n} ${es?"campo(s)":"field(s)"})</div>`:"";
   const canUpd=S.svc.scope.status==="live"?S.svc.scope.canUpdate:true; // optimistic until probe returns; save still fails-safe
-  const canEdit=rc.status==="live"&&rec&&canUpd;
+  const canEdit=rc.status==="live"&&rec&&canUpd&&!window.WM_VIEWER; // viewers are view-only → no Edit button
   actionsRO=canEdit?`<button class="btn3d sm" data-action="svcEditStart" data-rid="${esc(rid)}" style="background:#0EA5E9">✏️ ${es?"Editar":"Edit"}</button>`:"";
   if(rc.status==="live"&&rec&&!canUpd&&S.svc.scope.status==="live") recBlock+=`<div style="grid-column:1/-1;margin-top:8px;font-size:11.5px;color:var(--text-dim)">🔒 ${es?"Edición de tickets deshabilitada (falta permiso de Zoho).":"Ticket editing disabled (Zoho scope missing)."}</div>`;
   fieldsLoading=editing&&S.svc.fields.status==="loading"?`<div style="grid-column:1/-1;font-size:11.5px;color:var(--text-dim);margin-top:6px">⟳ ${es?"Cargando opciones…":"Loading field options…"}</div>`:"";
@@ -2354,7 +2356,7 @@ function siteCaptureHTML(){
     <div style="margin-top:12px;padding:9px 12px;border-radius:10px;background:var(--bg-2);border:1px solid var(--line);font-size:12.5px;color:var(--text-dim)">\ud83d\udccc Will create in SiteCapture as <b id="scNamePreview" style="color:var(--text)">${esc(cName||"(enter a DL #)")}</b> <span class="pill" style="background:var(--wh-blue);font-size:9px">FL</span></div>
     ${S.sc.canCreate?"":`<div style="margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--warn-bg);border:1px solid var(--warn);font-size:12.5px;color:var(--warn)">\u26a0 One-time setup needed to create: add <b>SITECAPTURE_USER</b> + <b>SITECAPTURE_PASS</b> in Vercel \u2192 Settings \u2192 Environment Variables.</div>`}
     <div style="margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-      <button class="btn3d green" data-action="scCreate">${S.sc.creating?t("sc_creating"):"\u2795 Create Project"}</button>
+      ${window.WM_VIEWER?"":`<button class="btn3d green" data-action="scCreate">${S.sc.creating?t("sc_creating"):"\u2795 Create Project"}</button>`}
       ${S.sc.createMsg?`<span style="font-weight:800;color:${/error|\u26a0/i.test(S.sc.createMsg)?'var(--warn)':'var(--jc-DL)'}">${esc(S.sc.createMsg)}</span>`:""}
     </div></div>`:"";
   let detail="";
@@ -2621,6 +2623,7 @@ document.addEventListener("click",e=>{
     case "crewAck": stageAck(id); render(); break;
     case "crewUnack": stageUnack(id); render(); break;
     case "crewRevert": {
+      if(window.WM_VIEWER){ try{ alert(S&&S.lang==="es"?"Solo lectura — no tienes permiso para editar.":"View only — you don't have permission to make changes."); }catch(e){} return; }
       const es=S.lang==="es";
       if(!confirm(es?"¿Revertir este estado? Se eliminará del feed y de los registros.":"Revert this status? It will be removed from the feed and records.")) break;
       const st=el.getAttribute("data-status")||"";
@@ -2671,6 +2674,7 @@ document.addEventListener("click",e=>{
     case "coordRefresh": loadProjects(S.proj.status!=="idle",true); loadCoordReady(false); break;
     case "coordClose": S.coord.selected=null; S.coord.edit=null; S.svc.edit=null; S.note={text:"",sending:false,err:"",okKey:"",prog:""}; render(); break;
     case "noteAdd": {
+      if(window.WM_VIEWER){ try{ alert(S&&S.lang==="es"?"Solo lectura — no tienes permiso para editar.":"View only — you don't have permission to make changes."); }catch(e){} return; }
       // Unified add-note + photo attach (install AND service). Posts the note text to
       // /api/zoho-add-note, then uploads each selected photo to /api/zoho-attach on the SAME record.
       const es=S.lang==="es", N=S.note; if(N.sending) break;
@@ -2714,6 +2718,7 @@ document.addEventListener("click",e=>{
     }
     case "svcEditCancel": S.svc.edit=null; render(); break;
     case "svcSave": {
+      if(window.WM_VIEWER){ try{ alert(S&&S.lang==="es"?"Solo lectura — no tienes permiso para editar.":"View only — you don't have permission to make changes."); }catch(e){} return; }
       const es=S.lang==="es", E=S.svc.edit; if(!E||E.saving) break;
       const payload={}, labels=[];
       SERVICE_EDIT_FIELDS.forEach(fd=>{ if(fd.ro) return; const meta=(S.svc.fields.map||{})[fd.k]||{}; if(meta.read_only) return;
@@ -2749,6 +2754,7 @@ document.addEventListener("click",e=>{
     }
     case "coordEditCancel": S.coord.edit=null; render(); break;
     case "coordSave": {
+      if(window.WM_VIEWER){ try{ alert(S&&S.lang==="es"?"Solo lectura — no tienes permiso para editar.":"View only — you don't have permission to make changes."); }catch(e){} return; }
       const es=S.lang==="es", E=S.coord.edit; if(!E||E.saving) break;
       // Collect ONLY changed, editable fields.
       const payload={}, changedLabels=[];
@@ -2872,6 +2878,7 @@ document.addEventListener("click",e=>{
     case "scOpenDetail": S.sc.detail=id; loadSCDetail(id); render(); break;
     case "scCloseDetail": S.sc.detail=null; render(); break;
     case "scCreate": {
+      if(window.WM_VIEWER){ try{ alert(S&&S.lang==="es"?"Solo lectura — no tienes permiso para editar.":"View only — you don't have permission to make changes."); }catch(e){} return; }
       const txt=document.getElementById("scTemplateKey"); const sel=document.getElementById("scTemplate"); const tk=(txt&&txt.value.trim())||(sel&&sel.value)||"";
       if(!tk){ S.sc.createMsg="Pick a template"; render(); break; }
       const cn=S.sc.cnew||{}; const dl=(cn.dl||"").trim(); const cust=(cn.customer||"").trim(); const addr=(cn.address||"").trim();
@@ -3097,7 +3104,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
         if(wmForceLogoutCheck(rec, email)) return;
         if(rec&&rec.status==="disabled"){ showDenied(email); return; }
         if(rec&&appsFor(rec).indexOf(APP_KEY)<0){ showDenied(email); return; }
-        try{ window.wmRole=(rec&&rec.role)||""; window.wmUser=email; if(typeof render==="function"){try{render(true);}catch(e){}} }catch(e){}
+        try{ window.wmRole=(rec&&rec.role)||""; window.wmUser=email; window.WM_VIEWER=(rec&&rec.role==="viewer"); if(typeof render==="function"){try{render(true);}catch(e){}} }catch(e){}
         pass();
         try{ wmReportView(); }catch(e){}
       }).catch(function(){ pass(); });
