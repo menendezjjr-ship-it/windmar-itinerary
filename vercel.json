@@ -25,6 +25,10 @@
     {
       "path": "/api/push-cron",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/onsite-cron",
+      "schedule": "*/3 * * * *"
     }
   ]
 }
