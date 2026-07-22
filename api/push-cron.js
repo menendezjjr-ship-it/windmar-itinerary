@@ -87,8 +87,44 @@ async function syncBomNotes(events) {
   return out;
 }
 
+// Fire any due lunch alarms (independent of the crew-update/BOM batch; runs every invocation).
+// Contract: table `lunch_alarms` (email,name,endpoint,p256dh,auth,fire_at,sent). A row with
+// sent=false and fire_at<=now means "ring this subscription now". Marks each row sent even on
+// failure (incl. 404/410 gone) so a bad subscription can't cause infinite retries.
+async function fireLunchAlarms() {
+  const out = { lunchFired: 0, lunchErrors: 0, lunchDue: 0 };
+  try {
+    if (!PRIV) return out; // gated on VAPID exactly like the crew-update push
+    webpush.setVapidDetails(SUBJECT, PUB, PRIV);
+    const nowIso = new Date().toISOString();
+    const dueR = await sb("lunch_alarms?sent=eq.false&fire_at=lte." + encodeURIComponent(nowIso) + "&select=*");
+    const rows = await dueR.json();
+    if (!Array.isArray(rows) || !rows.length) return out;
+    out.lunchDue = rows.length;
+    const payload = JSON.stringify({ title: "🍽 Lunch's over", body: "Time to get back to work.", tag: "wm-lunch" });
+    for (const row of rows) {
+      const subscription = { endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth } };
+      try {
+        await webpush.sendNotification(subscription, payload, { urgency: "high", TTL: 3600 });
+        out.lunchFired++;
+      } catch (e) { out.lunchErrors++; }
+      // Mark done regardless of send outcome (prevents infinite retries on gone/expired subs).
+      try {
+        const sel = row.id != null
+          ? "lunch_alarms?id=eq." + encodeURIComponent(row.id)
+          : "lunch_alarms?endpoint=eq." + encodeURIComponent(row.endpoint) + "&sent=eq.false";
+        await sb(sel, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ sent: true }) });
+      } catch (_) {}
+    }
+  } catch (e) { out.lunchError = String(e && e.message || e); }
+  return out;
+}
+
 export default async function handler(req, res) {
   try {
+    // 0) lunch alarms — independent job, runs every invocation (before the no-events early return)
+    const lunch = await fireLunchAlarms();
+
     // 1) cursor (last event we already processed)
     const curR = await sb("push_cursor?id=eq.1&select=last_created_at");
     const curJ = await curR.json();
@@ -97,7 +133,7 @@ export default async function handler(req, res) {
     // 2) new events since the cursor (shared by push + BOM sync)
     const evR = await sb("job_status_events?created_at=gt." + encodeURIComponent(since) + "&order=created_at.asc&select=*&limit=25");
     const events = await evR.json();
-    if (!Array.isArray(events) || !events.length) return res.status(200).json({ ok: true, sent: 0, bomSynced: 0, since });
+    if (!Array.isArray(events) || !events.length) return res.status(200).json({ ok: true, sent: 0, bomSynced: 0, since, ...lunch });
 
     // 3) BOM sync (runs regardless of VAPID; never breaks push or the cursor advance)
     const bom = await syncBomNotes(events);
@@ -139,7 +175,7 @@ export default async function handler(req, res) {
     const newest = events[events.length - 1].created_at;
     await sb("push_cursor?id=eq.1", { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_created_at: newest }) });
 
-    return res.status(200).json({ ok: true, events: events.length, pushEnabled, subscriptions: subsCount, sent, pruned, advancedTo: newest, ...bom });
+    return res.status(200).json({ ok: true, events: events.length, pushEnabled, subscriptions: subsCount, sent, pruned, advancedTo: newest, ...bom, ...lunch });
   } catch (e) {
     return res.status(200).json({ ok: false, error: String(e && e.message || e) });
   }
