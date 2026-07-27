@@ -412,7 +412,7 @@ const S={
   instMap:{status:"idle",items:[],pinState:{status:"idle"}},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
   dispatch:{ open:false, updated:null, sig:null, geo:{status:"idle"} },
-  coord:{ q:"", selected:null, collapsed:{}, notes:{}, fields:{status:"idle",map:{},team:[]}, edit:null, savedMsg:null, addNote:{text:"",sending:false,err:"",okDl:""}, ready:{status:"idle",list:[],err:""} }, // Coordinator tab: search, open detail key, per-section collapsed state, per-DL record cache, field metadata, active editor, /api/zoho-ready feed (Pending-Schedule installs + Need-Schedule services)
+  coord:{ q:"", selected:null, collapsed:{}, notes:{}, fields:{status:"idle",map:{},team:[]}, edit:null, savedMsg:null, addNote:{text:"",sending:false,err:"",okDl:""}, ready:{status:"idle",list:[],err:""}, view:"type", geo:{status:"idle"}, geoSig:"" }, // view: "type" (by job type) | "area" (by geographic proximity for route scheduling) // Coordinator tab: search, open detail key, per-section collapsed state, per-DL record cache, field metadata, active editor, /api/zoho-ready feed (Pending-Schedule installs + Need-Schedule services)
   svc:{ rec:{}, fields:{status:"idle",map:{}}, edit:null, savedMsg:null, scope:{status:"idle",canUpdate:false} }, // Service_Ticket editor: per-recordId editable-record cache, field metadata (picklists), active editor, UPDATE-scope probe
   attachScope:{status:"idle",canAttach:false}, // Attachments CREATE scope probe (gates the photo picker so no broken button ever ships)
   note:{ text:"", sending:false, err:"", okKey:"", prog:"" }, // unified note+photo box (install AND service), keyed by module:recordId
@@ -1535,9 +1535,23 @@ function coordinatorHTML(){
   else if(errored&&!total) body=`<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudo cargar.":"Couldn't load."} ${esc(R.err||P.err||"")}</div>`;
   else if(!items.length) body=`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">${q?(es?"Sin coincidencias":"No matches"):(es?"Nada listo para programar 🎉":"Nothing ready to schedule 🎉")}</div>`;
   else {
-    const anyCollapsed=shownBuckets.some(b=>C.collapsed&&C.collapsed[b]);
-    const toggleAll=`<div style="display:flex;justify-content:flex-end;margin:-4px 0 4px"><button class="btn3d sm" data-action="coordToggleAll" style="font-size:11px">${anyCollapsed?(es?"▾ Expandir todo":"▾ Expand all"):(es?"▸ Colapsar todo":"▸ Collapse all")}</button></div>`;
-    body=toggleAll+`<div class="coord-report">${shownBuckets.map(b=>coordSectionHTML(b,groups[b],searching)).join("")}</div>`;
+    const areaMode=C.view==="area";
+    const clusters=areaMode?coordAreaClusters(items):[];
+    const sectionKeys=areaMode?clusters.map((_,ix)=>"area:"+ix):shownBuckets;
+    const anyCollapsed=sectionKeys.some(k=>C.collapsed&&C.collapsed[k]);
+    const viewBtns=[["type","🗂",es?"Por tipo":"By Type"],["area","📍",es?"Por zona":"By Area"]].map(v=>{const on=(C.view||"type")===v[0];return `<button data-action="coordView" data-id="${v[0]}" style="padding:6px 12px;border-radius:7px;border:none;cursor:pointer;font-size:12px;font-weight:${on?800:500};background:${on?'linear-gradient(135deg,var(--wh-blue),var(--wh-orange))':'transparent'};color:${on?'#fff':'var(--text-dim)'}">${v[1]} ${v[2]}</button>`;}).join("");
+    const controls=`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:-4px 0 4px">
+      <div style="display:inline-flex;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:2px;gap:2px">${viewBtns}</div>
+      <button class="btn3d sm" data-action="coordToggleAll" style="font-size:11px">${anyCollapsed?(es?"▾ Expandir todo":"▾ Expand all"):(es?"▸ Colapsar todo":"▸ Collapse all")}</button></div>`;
+    if(areaMode){
+      const G=C.geo||{status:"idle"};
+      const geocoding=G.status==="geocoding";
+      const note=geocoding?`<div style="font-size:12px;color:var(--text-dim);margin:2px 0 6px">📍 ${es?"Ubicando trabajos":"Locating jobs"}… ${(G.done||0)}/${G.total||items.length}</div>`
+        :`<div style="font-size:12px;color:var(--text-dim);margin:2px 0 6px">${es?"Trabajos agrupados por cercanía — toca 🧭 Ruta para abrir todas las paradas de una zona en Google Maps.":"Jobs grouped by how close they are — tap 🧭 Route to open a whole area's stops in Google Maps."}</div>`;
+      body=controls+note+`<div class="coord-report">${clusters.map((cl,ix)=>coordAreaSectionHTML(cl,ix,searching)).join("")}</div>`;
+    } else {
+      body=controls+`<div class="coord-report">${shownBuckets.map(b=>coordSectionHTML(b,groups[b],searching)).join("")}</div>`;
+    }
   }
   return `<div class="fade">${head}${body}${C.selected?coordDetailModal():""}</div>`;
 }
@@ -1574,6 +1588,58 @@ function coordItemRow(it,i){ const es=S.lang==="es", m=coordBucketMeta(it.bucket
     ${city?`<span style="color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px">📍 ${esc(city)}</span>`:""}
     ${vip}${mspBadge}${statusPill}
     <span style="color:${crewDim};margin-left:auto;font-size:12px;flex-shrink:0">${crew}</span></div>`;
+}
+// ── Coordinator "By Area" (proximity) view — cluster ready jobs geographically so a coordinator
+// can schedule a whole route in one trip. Reads coords from GEO_CACHE (populated by geocodeInto).
+function coordAreaClusters(items){
+  const es=S.lang==="es";
+  const withGeo=[], noGeo=[];
+  items.forEach(it=>{ const g=GEO_CACHE[geoKey(it.address)]; if(g&&g.lat!=null&&g.lon!=null){ withGeo.push(Object.assign({},it,{lat:g.lat,lon:g.lon})); } else { noGeo.push(it); } });
+  // Single-linkage clustering: two jobs are in the same area if within TH miles of any member.
+  const TH=15, used=new Array(withGeo.length).fill(false), clusters=[];
+  for(let i=0;i<withGeo.length;i++){ if(used[i])continue; const cl=[withGeo[i]]; used[i]=true; let grew=true;
+    while(grew){ grew=false; for(let j=0;j<withGeo.length;j++){ if(used[j])continue;
+      if(cl.some(m=>haversineMi(m.lat,m.lon,withGeo[j].lat,withGeo[j].lon)<=TH)){ cl.push(withGeo[j]); used[j]=true; grew=true; } } } clusters.push(cl); }
+  // Nearest-neighbour order within a cluster, starting from the job closest to HQ.
+  const nnOrder=(cl)=>{ if(cl.length<=1) return cl.slice(); const rem=cl.slice(), path=[];
+    let si=0,sd=Infinity; rem.forEach((p,ix)=>{const d=haversineMi(HQ.lat,HQ.lon,p.lat,p.lon); if(d<sd){sd=d;si=ix;}});
+    let cur=rem.splice(si,1)[0]; path.push(cur);
+    while(rem.length){ let bi=0,bd=Infinity; rem.forEach((p,ix)=>{const d=haversineMi(cur.lat,cur.lon,p.lat,p.lon); if(d<bd){bd=d;bi=ix;}}); cur=rem.splice(bi,1)[0]; path.push(cur); } return path; };
+  const out=clusters.map(cl=>{
+    const ordered=nnOrder(cl);
+    const clat=cl.reduce((s,p)=>s+p.lat,0)/cl.length, clon=cl.reduce((s,p)=>s+p.lon,0)/cl.length;
+    let spread=0; for(let a=0;a<cl.length;a++)for(let b=a+1;b<cl.length;b++){const d=haversineMi(cl[a].lat,cl[a].lon,cl[b].lat,cl[b].lon); if(d>spread)spread=d;}
+    const freq={}; cl.forEach(p=>{const c=cityFromAddr(p.address); if(c)freq[c]=(freq[c]||0)+1;});
+    const top=Object.keys(freq).sort((a,b)=>freq[b]-freq[a])[0]||(es?"Zona":"Area");
+    const label=Object.keys(freq).length>1?(top+" "+(es?"y alrededores":"area")):top;
+    return { items:ordered, label, count:cl.length, spread, clat, clon, unmapped:false };
+  });
+  out.sort((a,z)=>haversineMi(HQ.lat,HQ.lon,a.clat,a.clon)-haversineMi(HQ.lat,HQ.lon,z.clat,z.clon)); // nearest-to-base first
+  if(noGeo.length) out.push({ items:noGeo, label:(es?"Ubicación desconocida":"Location unknown"), count:noGeo.length, spread:0, unmapped:true });
+  return out;
+}
+// Google Maps multi-stop route: HQ → each job in order (≤9 waypoints + destination).
+function coordRouteLink(ordered){
+  const pts=(ordered||[]).filter(p=>p.lat!=null&&p.lon!=null).map(p=>p.lat+","+p.lon); if(!pts.length) return "";
+  const dest=pts[pts.length-1], wp=pts.slice(0,-1).slice(0,9);
+  let url="https://www.google.com/maps/dir/?api=1&origin="+HQ.lat+","+HQ.lon+"&destination="+encodeURIComponent(dest);
+  if(wp.length) url+="&waypoints="+wp.map(encodeURIComponent).join("|"); return url;
+}
+function coordAreaSectionHTML(cl, idx, searching){
+  const es=S.lang==="es", key="area:"+idx;
+  const collapsed=!searching&&!!(S.coord.collapsed&&S.coord.collapsed[key]);
+  const col=cl.unmapped?"var(--wh-grey)":"#F59E0B";
+  const spreadTxt=(!cl.unmapped&&cl.count>1&&cl.spread>=1)?`~${Math.round(cl.spread)} ${es?"mi":"mi"}`:(!cl.unmapped&&cl.count>1?(es?"muy cerca":"very close"):"");
+  const route=(!cl.unmapped&&cl.count>1)?`<a href="${coordRouteLink(cl.items)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="padding:4px 9px;border-radius:7px;background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff;font-weight:800;font-size:11px;text-decoration:none;white-space:nowrap">🧭 ${es?"Ruta":"Route"}</a>`:"";
+  const hdr=`<div data-action="coordToggle" data-bucket="${esc(key)}" style="display:flex;align-items:center;gap:9px;margin-top:14px;padding:9px 12px;cursor:pointer;border-radius:10px;background:var(--panel);border:1px solid var(--line);border-left:4px solid ${col};user-select:none">
+    <span style="font-size:13px;color:var(--text-dim);width:12px;flex-shrink:0">${collapsed?"▸":"▾"}</span>
+    <span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:${col};color:${textOn(col)};font-size:13px;flex-shrink:0">📍</span>
+    <span style="font-weight:900;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(cl.label)}</span>
+    ${spreadTxt?`<span style="color:var(--text-dim);font-size:11.5px;flex-shrink:0">${spreadTxt}</span>`:""}
+    <span style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-shrink:0">${route}<span class="pill" style="background:${col};color:${textOn(col)};font-size:11px">${cl.count}</span></span></div>`;
+  if(collapsed) return hdr;
+  const rows=cl.items.map((it,i)=>coordItemRow(it,i)).join("");
+  return hdr+`<div style="border:1px solid var(--line);border-top:none;border-radius:0 0 10px 10px;overflow:hidden;margin-bottom:4px">${rows}</div>`;
 }
 // ── Shared editable-Installation editor (Schedule + Stage fields, Save, Add-note) ──────────
 // Used by BOTH the Coordinator detail modal and the Calendar install detail modal. Keyed by
@@ -2634,6 +2700,14 @@ function _render(noAnim){
       setTimeout(()=>initPinMap("calPinMap",pm.pins,"_calPinMap",{color:(p)=>p.type==="service"?"#06b6d4":teamColor(p.team),radius:7,onClick:(p)=>{S.cal.selected=p.id;render();},popup:(p)=>`<b>${esc(p.dlNumber||"")}</b> ${esc(p.customerName||"")}<br>${esc(p.address||"")}<br><span style="color:#888">${p.type==="service"?"🔧 ":""}${esc(p.team||"")}${p.startDate?" · "+esc(p.startDate):""}</span>${dirLink(p)}`}),0);
     }
   }
+  // Coordinator "By Area": geocode the ready jobs so they can be clustered by proximity.
+  if(S.tab==="coordinator" && S.coord.view==="area"){
+    const citems=coordItems(), sig=citems.map(i=>geoKey(i.address)).join("|"), G=S.coord.geo||{status:"idle"};
+    if(citems.length && G.status!=="geocoding" && S.coord.geoSig!==sig){
+      S.coord.geoSig=sig; S.coord.geo={status:"geocoding",done:0,total:citems.length,pins:[]};
+      setTimeout(()=>geocodeInto(S.coord.geo, citems, ()=>{ if(S.tab==="coordinator"&&S.coord.view==="area") render(true); }),0);
+    }
+  }
   // Schedule Nearest Crew dispatch (Projects → Inspections)
   if(S.tab==="projects" && S.proj.stageFilter==="inspections" && S.dispatch.open){
     const items=dispatchItems(), sig=items.map(i=>i.id+":"+geoKey(i.address)).join("|"), G=S.dispatch.geo||{status:"idle"};
@@ -2716,8 +2790,9 @@ document.addEventListener("click",e=>{
         if(ir) setInstallRecSync(item.num,ir,item.recordId); else loadCoordNotes(item.num); // sync from feed; ?dl= fallback (inspections have no installRec)
         loadCoordFields(); }
       render(); break; }
+    case "coordView": { const v=el.getAttribute("data-id"); if(v==="type"||v==="area"){ S.coord.view=v; } render(); break; }
     case "coordToggle": { const b=el.getAttribute("data-bucket"); if(b){ S.coord.collapsed=S.coord.collapsed||{}; S.coord.collapsed[b]=!S.coord.collapsed[b]; } render(); break; }
-    case "coordToggleAll": { const grp={}; coordItems().forEach(it=>{grp[it.bucket]=1;}); const buckets=COORD_BUCKETS.filter(x=>grp[x]); const anyCollapsed=buckets.some(x=>S.coord.collapsed&&S.coord.collapsed[x]); S.coord.collapsed={}; if(!anyCollapsed) buckets.forEach(x=>{S.coord.collapsed[x]=true;}); render(); break; }
+    case "coordToggleAll": { let keys; if(S.coord.view==="area"){ const q=(S.coord.q||"").trim().toLowerCase(); let its=coordItems(); if(q) its=its.filter(it=>(((it.name||"")+" "+(it.num||"")+" "+(it.address||"")).toLowerCase().indexOf(q)>=0)); keys=coordAreaClusters(its).map((_,ix)=>"area:"+ix); } else { const grp={}; coordItems().forEach(it=>{grp[it.bucket]=1;}); keys=COORD_BUCKETS.filter(x=>grp[x]); } const anyCollapsed=keys.some(x=>S.coord.collapsed&&S.coord.collapsed[x]); S.coord.collapsed={}; if(!anyCollapsed) keys.forEach(x=>{S.coord.collapsed[x]=true;}); render(); break; }
     case "coordRefresh": loadProjects(S.proj.status!=="idle",true); loadCoordReady(false); break;
     case "coordClose": S.coord.selected=null; S.coord.edit=null; S.svc.edit=null; S.note={text:"",sending:false,err:"",okKey:"",prog:""}; render(); break;
     case "noteAdd": {
