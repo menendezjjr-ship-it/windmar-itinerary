@@ -546,15 +546,16 @@ function dedupCalRecs(recs){
   recs.forEach(r=>{
     const dl=String(r.dlNumber||"").toUpperCase().trim();
     if(!dl){ order.push(r); return; }
-    // Key by TYPE too: an install and a separate service ticket on the same DL/day are
-    // different jobs — keep both. Only true same-type repeats (rare double-entry) collapse.
-    const key=dl+"|"+(r.startDate||"")+"|"+(r.type||"");
+    // A DL entered as BOTH an install and a service ticket on the SAME day is one job
+    // double-entered — collapse to a SINGLE card so it doesn't appear twice. Merge both
+    // records' info onto the survivor so nothing is lost, and keep different days separate.
+    const key=dl+"|"+(r.startDate||"");
     const cur=byKey[key];
     if(!cur){ byKey[key]=r; order.push(r); return; }
     const win=calPickBetter(cur,r), lose=win===cur?r:cur;
-    if(!win.plan&&lose.plan) win.plan=lose.plan;          // keep install docs
-    if(!win.bom&&lose.bom) win.bom=lose.bom;
-    if(!win.recordId&&lose.recordId) win.recordId=lose.recordId;
+    // Carry anything the winner lacks so the one card is complete (docs, notes, editable recs).
+    ["plan","bom","recordId","desc","installNotes","svcRec","installRec","priority","address","customerName","phone"].forEach(f=>{ if(!win[f]&&lose[f]) win[f]=lose[f]; });
+    if((!win.scope||win.scope==="Installation")&&lose.scope&&lose.scope!=="Installation") win.scope=lose.scope;
     if(win!==cur){ const i=order.indexOf(cur); if(i>=0) order[i]=win; byKey[key]=win; }
   });
   return order;
