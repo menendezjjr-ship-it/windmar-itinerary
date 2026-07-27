@@ -572,8 +572,10 @@ function calSpan(r){ if(!r.startDate)return []; const n=Math.max(1,Math.min(21,p
 async function loadOpsCal(silent){
   if(!silent){ S.cal.status="loading"; render(); }
   let from,to;
-  if(S.cal.view==="week"||S.cal.view==="grid"||S.cal.view==="map"){ const ws=S.cal.weekStartISO?new Date(S.cal.weekStartISO+"T00:00:00"):calStartOfWeek(new Date()); from=calYMD(ws); to=calYMD(calAddDays(ws,6)); }
-  else { from=S.cal.y+"-"+String(S.cal.m).padStart(2,"0")+"-01"; const last=new Date(S.cal.y,S.cal.m,0).getDate(); to=S.cal.y+"-"+String(S.cal.m).padStart(2,"0")+"-"+String(last).padStart(2,"0"); }
+  // Pull `from` back 20 days beyond the visible window so multi-day installs that STARTED
+  // before the window (max span 21d) but continue INTO it are still returned by Zoho.
+  if(S.cal.view==="week"||S.cal.view==="grid"||S.cal.view==="map"){ const ws=S.cal.weekStartISO?new Date(S.cal.weekStartISO+"T00:00:00"):calStartOfWeek(new Date()); from=calYMD(calAddDays(ws,-20)); to=calYMD(calAddDays(ws,6)); }
+  else { from=calYMD(new Date(S.cal.y,S.cal.m-1,1-20)); const last=new Date(S.cal.y,S.cal.m,0).getDate(); to=S.cal.y+"-"+String(S.cal.m).padStart(2,"0")+"-"+String(last).padStart(2,"0"); }
   try{
     const r=await fetch("/api/zoho-jobs?from="+from+"&to="+to,{cache:"no-store"});
     const j=await r.json();
@@ -726,14 +728,16 @@ function calDetailHTML(r){
 function opsCalHTML(){
   const c=S.cal, M=calM(), D=calD(), today=new Date();
   const ws=c.weekStartISO?new Date(c.weekStartISO+"T00:00:00"):calStartOfWeek(today), we=calAddDays(ws,6);
-  const inView=(r)=>{ if(!r.startDate)return false; const d=new Date(r.startDate+"T12:00:00"); if(c.view==="week"||c.view==="grid"||c.view==="map")return d>=ws&&d<calAddDays(ws,7); return d.getMonth()+1===c.m&&d.getFullYear()===c.y; };
+  // A record is "in view" if ANY day of its (possibly multi-day) span falls in the window,
+  // so a job that started before the window but continues into it still shows on its later days.
+  const inView=(r)=>{ if(!r.startDate)return false; const sp=calSpan(r); if(!sp.length)return false; if(c.view==="week"||c.view==="grid"||c.view==="map"){ const a=calYMD(ws), b=calYMD(we); return sp.some(iso=>iso>=a&&iso<=b); } const pre=c.y+"-"+String(c.m).padStart(2,"0"); return sp.some(iso=>iso.slice(0,7)===pre); };
   const q=(c.q||"").trim();
   const scoped=c.records.filter(r=>inView(r)&&(!c.teamFilter.length||c.teamFilter.indexOf(r.team)>=0)&&calQMatch(r,q));
   const installCount=scoped.filter(r=>r.type==="install").length, serviceCount=scoped.filter(r=>r.type==="service").length;
   const typed=scoped.filter(r=>c.typeFilter==="all"||r.type===c.typeFilter);
-  // De-dupe: same DL marked as BOTH install and service on the same day → keep install, drop the service copy.
-  const _instKeys=new Set(typed.filter(r=>r.type==="install"&&r.dlNumber&&r.startDate).map(r=>r.dlNumber+"|"+r.startDate));
-  const visible=typed.filter(r=>!(r.type==="service"&&r.dlNumber&&_instKeys.has(r.dlNumber+"|"+r.startDate)));
+  // An install and a separate service ticket on the same DL/day are DIFFERENT jobs — show both
+  // (dedupCalRecs already collapsed true same-type double-entries at load). Do NOT drop services here.
+  const visible=typed;
   const tpm={}; c.records.filter(r=>inView(r)&&(c.typeFilter==="all"||r.type===c.typeFilter)&&calQMatch(r,q)).forEach(r=>{tpm[r.team]=(tpm[r.team]||0)+1;});
   const teamsPresent=Object.keys(tpm).map(k=>[k,tpm[k]]).sort((a,b)=>b[1]-a[1]);
   const byDate={}; visible.forEach(r=>{ calSpan(r).forEach(isoD=>{ const dd=new Date(isoD+"T12:00:00"); if(dd.getMonth()+1===c.m&&dd.getFullYear()===c.y)(byDate[dd.getDate()]=byDate[dd.getDate()]||[]).push(r); }); });

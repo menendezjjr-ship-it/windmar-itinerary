@@ -107,7 +107,10 @@ function canonTeam(raw) {
   if (/crew #?3s|luis morales/.test(n)) return "Crew #3S";
   if (/crew h|holi/.test(n)) return "Crew H";
   if (/roofing/.test(n)) return "Windmar Roofing";
-  return s.replace(/^t\d+\s*[-–]\s*/i, "").trim() || "Unassigned"; // strip stray "T2 - " tech prefix
+  // Unmapped crew: normalize from `n` (case/spacing/hyphen-collapsed) so "In House #4" and
+  // "In-House #4" don't split into two rows; strip stray "T2 - " tech prefix; Title-Case for display.
+  const base = n.replace(/^t\d+\s*[-–]\s*/i, "").trim();
+  return base ? base.replace(/\b\w/g, (ch) => ch.toUpperCase()) : "Unassigned";
 }
 function normCrew(raw) {
   const label = canonTeam(raw);
@@ -328,7 +331,9 @@ export default async function handler(req, res) {
   const shift = (n) => { const d = new Date(today); d.setDate(d.getDate() + n); return iso(d); };
   const from = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || "") ? req.query.from : shift(-14);
   const to = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to || "") ? req.query.to : shift(45);
-  const todayISO = iso(today);
+  // Florida wall-clock date (handles EDT/EST) — the server runs in UTC, so iso(today) would
+  // flip to "tomorrow" after ~8 PM local and mislabel today's jobs as past-due. Use FL time.
+  const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 
   try {
     const token = await getAccessToken();
