@@ -546,7 +546,9 @@ function dedupCalRecs(recs){
   recs.forEach(r=>{
     const dl=String(r.dlNumber||"").toUpperCase().trim();
     if(!dl){ order.push(r); return; }
-    const key=dl+"|"+(r.startDate||"");
+    // Key by TYPE too: an install and a separate service ticket on the same DL/day are
+    // different jobs — keep both. Only true same-type repeats (rare double-entry) collapse.
+    const key=dl+"|"+(r.startDate||"")+"|"+(r.type||"");
     const cur=byKey[key];
     if(!cur){ byKey[key]=r; order.push(r); return; }
     const win=calPickBetter(cur,r), lose=win===cur?r:cur;
