@@ -600,7 +600,10 @@ function jobType(r){
   const s=((r.scope||"")+" "+(r.dlNumber||"")).toLowerCase();
   if(code==="RM"||code==="RMV"||/\bremov|decommission|uninstall/.test(s)) return "removal";
   if(code==="RDL"||code==="RL"||/re-?install|re-?roof|reinstall/.test(s)) return "reinstall";
-  if(code==="MSP"||r.msp||/msp upgrade|panel upgrade/.test(s)) return "msp";
+  // MSP is a job TYPE only when the DEAL is MSP-coded (name "MSP####"). Do NOT type an
+  // install as MSP just because MSP_Upgrade_Required is set / its scope mentions a panel
+  // upgrade — that's a normal install that happens to include a panel upgrade.
+  if(code==="MSP") return "msp";
   return "install";
 }
 function jtInfo(r){ return JOB_TYPES[jobType(r)]||JOB_TYPES.install; }
