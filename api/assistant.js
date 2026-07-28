@@ -212,9 +212,9 @@ async function toolGetJobDetails(input) {
     daysNeeded: it.Number_of_Days_Needed || "",
     mspUpgrade: it.MSP_Upgrade_Required || "",
     vip: it.VIP_Installation || "",
-    installNotes: (it.Installation_Notes || "").trim(),
-    roofNotes: (it.Roof_Notes || "").trim(),
-    ahjNotes: (it.AHJ_Specific_Install_Notes || "").trim(),
+    installNotes: (it.Installation_Notes || "").trim().replace(/\s+/g, " ").slice(0, 300),
+    roofNotes: (it.Roof_Notes || "").trim().replace(/\s+/g, " ").slice(0, 200),
+    ahjNotes: (it.AHJ_Specific_Install_Notes || "").trim().replace(/\s+/g, " ").slice(0, 150), // usually permit boilerplate — keep short
   }));
 
   // Also pull CRM Notes attached to the Installation record(s) and merge with the Deal's notes.
@@ -224,7 +224,8 @@ async function toolGetJobDetails(input) {
   instNoteSets.forEach((set) => { notes = notes.concat(set); });
   const seen = new Set();
   notes = notes.filter((n) => { const k = (n.time || "") + "|" + (n.content || "").slice(0, 40); if (seen.has(k)) return false; seen.add(k); return true; })
-    .sort((a, b) => String(b.time || "").localeCompare(String(a.time || ""))).slice(0, 15);
+    .sort((a, b) => String(b.time || "").localeCompare(String(a.time || ""))).slice(0, 8)
+    .map((n) => ({ title: n.title, author: n.author, time: n.time, content: (n.content || "").replace(/\s+/g, " ").slice(0, 240) }));
 
   const tickets = (Array.isArray(services) ? services : []).map((s) => ({
     ticket: s.Name || "",
@@ -232,7 +233,7 @@ async function toolGetJobDetails(input) {
     scheduledVisit: s.Scheduled_Visit_1 || "",
     completedDate: s.Ticket_Completion_Date || s.Date_Complete || "",
     type: Array.isArray(s.Type_of_Service) ? s.Type_of_Service.join(", ") : (s.Type_of_Service || ""),
-    description: (s.Service_Description || "").trim(),
+    description: (s.Service_Description || "").trim().replace(/\s+/g, " ").slice(0, 320),
     // The ticket's OWN assigned tech (may be blank). NOT the install crew — never assume.
     tech: lookup(s.Assigned_Technician) || (Array.isArray(s.Technicians) ? s.Technicians.map((x) => x && x.name).filter(Boolean).join(", ") : lookup(s.Technicians)) || "",
     priority: s.Priority || "",
@@ -406,7 +407,9 @@ async function callNecBrain(question, history, lang, knowledgeContext) {
   if (!r) throw new Error("assistant brain timed out");
   const data = await r.json().catch(() => ({}));
   if (!r.ok || (!data.answer && data.error)) throw new Error((data && data.error) || `brain ${r.status}`);
-  return String(data.answer || "");
+  // source "knowledge-fallback" means Gemini failed/timed out and it echoed our context back —
+  // that's NOT a real answer; signal it so the caller can retry leaner instead of dumping raw text.
+  return { answer: String(data.answer || ""), source: data.source || "" };
 }
 
 // The NEC Assistant appends a "FOLLOWUPS: ..." line for the Field HUB's chip UI — strip it here.
@@ -449,7 +452,7 @@ async function gatherContext(text) {
     } catch (e) {}
   }
 
-  return { context: parts.join("\n\n").slice(0, 14000), used };
+  return { context: parts.join("\n\n").slice(0, 8000), used };
 }
 
 // Compact, accurate guide to the app so WinMI can walk users through anything (fed as knowledge).
@@ -504,9 +507,13 @@ export default async function handler(req, res) {
       : "You are WinMI, WindMar Home's warm, upbeat personal assistant droid — like a sharp, friendly coworker. Have a REAL conversation: be personable and encouraging, never dull or robotic. Give DIRECT, useful answers first (no filler), then when it helps, add a short friendly follow-up question in plain prose. You know this app inside-out (see the APP GUIDE in your knowledge) and can walk anyone through how to do anything in it. You also answer NEC/electrical/equipment questions. You are READ-ONLY: you look things up but never change data — if asked to edit/schedule, cheerfully explain that and point them to the Edit/Add-note button in the Coordinator or Calendar tab. Never invent project data; use only what's in your knowledge/tools. When someone asks about a specific job or project, give a clear report straight from the LIVE PROJECT DATA in your knowledge — its stage/status, key dates, crew, address, service tickets, inspection, and the most recent NOTES (summarize them). If the data does not contain the project, say so plainly and ask for the DL# or the exact customer name. Two accuracy rules: (1) a service ticket's technician is ONLY the ticket's own 'tech' field — if that's blank, don't name one and NEVER assume the install crew is the service tech; (2) for inspection status, use the deal-level 'dealInspectionStage'/'finalInspectionApproved' — not the sub-record — as the real status. Keep it concise and mobile-friendly. Use emojis sparingly. Do NOT output a 'FOLLOWUPS:' line.";
     const q = persona + "\n\nUser question: " + question;
 
-    let answer;
-    try { answer = stripFollowups(await callNecBrain(q, history, lang, knowledge)); }
-    catch (e) { return res.status(200).json({ ok: false, error: "assistant brain unavailable: " + String((e && e.message) || e) }); }
+    // Ask the brain; a "knowledge-fallback" source means Gemini failed and echoed our context —
+    // treat that as no-answer (never surface the raw dump), then retry once with a lean context.
+    const ask = async (kn) => { const r = await callNecBrain(q, history, lang, kn); return r.source === "knowledge-fallback" ? null : stripFollowups(r.answer); };
+    let answer = null;
+    try { answer = await ask(knowledge); } catch (e) {}
+    if (answer == null) { try { answer = await ask(context ? context.slice(0, 4500) : ""); } catch (e) {} }
+    if (answer == null) return res.status(200).json({ ok: false, error: lang === "es" ? "El asistente está ocupado — inténtalo de nuevo en un momento." : "The assistant is busy right now — please try again in a moment." });
 
     return res.status(200).json({ ok: true, answer: answer || (lang === "es" ? "Lo siento, no tengo una respuesta a eso." : "Sorry, I don't have an answer for that."), used: [...new Set(used)] });
   } catch (e) {
