@@ -3242,48 +3242,80 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
   setInterval(function(){ var acct=(msalApp&&msalApp.getAllAccounts&&msalApp.getAllAccounts()[0]); if(!acct)return; var em=(acct.username||"").toLowerCase(); fetch(SB+"/rest/v1/app_access?email=eq."+encodeURIComponent(em)+"&select=force_logout_at",{headers:H}).then(function(r){return r.ok?r.json():[];}).then(function(rows){ wmForceLogoutCheck(rows&&rows[0], em); }).catch(function(){}); }, 60000);
 })();
 </script>
-<!-- ═══ WindMar seasonal flair (month-by-month, non-blocking) ═══ -->
+<!-- ═══ WindMar seasonal flair (date-windowed holidays + rotating fun, non-blocking) ═══ -->
 <script>
 (function(){
-  var SEASON={
-    1:{p:["❄️","✨","🎉"],fall:1,crosser:"🎉✨🎉",label:"Happy New Year!"},
-    2:{p:["💖","💕","💗","🌹"],rise:1,corner:"💝",label:"Happy Valentine's"},
-    3:{p:["🍀","☘️","✨"],fall:1,corner:"🍀",label:"Happy St. Patrick's"},
-    4:{p:["🌸","🌷","🐣"],rise:1,corner:"🐰",label:"Happy Spring"},
-    5:{p:["🌼","🌸","🐝"],rise:1,corner:"🌺"},
-    6:{p:["☀️","🌴","🌊"],rise:1,corner:"🏖️",label:"Summer's here ☀️"},
-    7:{p:["🎆","🎇","⭐"],rise:1,fireworks:1,crosser:"🇺🇸",label:"Happy 4th of July!"},
-    8:{p:["☀️","🌴","🍦"],rise:1,corner:"😎"},
-    9:{p:["🍂","🍁","🌰"],fall:1,corner:"🍁",label:"Happy Fall"},
-    10:{p:["🍂","🦇","👻"],fall:1,crosser:"🦇🦇",corner:"🎃",label:"Happy Halloween"},
-    11:{p:["🍂","🍁","🌽"],fall:1,corner:"🦃",dance:1,label:"Happy Thanksgiving"},
-    12:{p:["❄️","❄","✨"],fall:1,crosser:"🎅🛷🦌🦌",label:"Merry Christmas! 🎄"}
+  var es=false; try{ es=(typeof S!=="undefined" && S.lang==="es"); }catch(e){}
+  function T(a,b){ return es?b:a; }
+  var now=new Date(), Y=now.getFullYear(), DAY=86400000;
+  // Computed US holidays: nth weekday / last weekday of a (0-based) month. wd: 0=Sun..6=Sat.
+  function nth(y,m,wd,n){ var d=new Date(y,m,1), a=(7+wd-d.getDay())%7; d.setDate(1+a+(n-1)*7); return d; }
+  function last(y,m,wd){ var d=new Date(y,m+1,0), s=(7+d.getDay()-wd)%7; d.setDate(d.getDate()-s); return d; }
+  var mk=function(m,d){ return new Date(Y,m-1,d); };
+  // lead = days BEFORE the date to start showing; after = days after to keep showing. c = accent color.
+  var HOL=[
+    {key:"newyear",  nm:T("New Year","Año Nuevo"),       date:mk(1,1),        lead:5, after:1, fw:1, c:"#7C3AED", p:["🎉","✨","🎊","🥳"], cross:"🎉✨🎊", msg:[T("Happy New Year!","¡Feliz Año Nuevo!"),T("New year, new watts ⚡","Año nuevo, nuevos vatios ⚡")]},
+    {key:"valentine",nm:T("Valentine's","San Valentín"), date:mk(2,14),       lead:7, after:0,       c:"#DB2777", p:["💖","💕","💗","🌹"], cross:"💌", msg:[T("Happy Valentine's 💕","¡Feliz San Valentín! 💕"),T("We ♥ clean energy","Amamos la energía limpia ♥")]},
+    {key:"stpat",    nm:T("St. Patrick's","San Patricio"),date:mk(3,17),       lead:6, after:0,       c:"#16A34A", p:["🍀","☘️","✨","🌈"], cross:"🌈🍀", msg:[T("Happy St. Patrick's ☘️","¡Feliz San Patricio! ☘️"),T("Lucky to power Florida 🍀","Con suerte de energizar Florida 🍀")]},
+    {key:"memorial", nm:T("Memorial Day","Día de los Caídos"), date:last(Y,4,1), lead:4, after:1, c:"#B91C1C", p:["🇺🇸","⭐","🎗️","🤍"], cross:"🇺🇸", msg:[T("Memorial Day 🇺🇸","Día de los Caídos 🇺🇸"),T("Honoring our heroes 🎗️","Honrando a nuestros héroes 🎗️")]},
+    {key:"july4",    nm:T("4th of July","4 de Julio"),    date:mk(7,4),        lead:7, after:1, fw:1, c:"#B91C1C", p:["🎆","🎇","⭐","🎉"], cross:"🇺🇸🎆🇺🇸", msg:[T("Happy 4th of July! 🎆","¡Feliz 4 de Julio! 🎆"),T("Independence & sunshine ☀️","Independencia y sol ☀️")]},
+    {key:"labor",    nm:T("Labor Day","Día del Trabajo"), date:nth(Y,8,1,1),   lead:4, after:1,       c:"#1D429B", p:["🇺🇸","🛠️","⭐","💪"], cross:"🛠️", msg:[T("Happy Labor Day 🛠️","¡Feliz Día del Trabajo! 🛠️"),T("For the hard workers 💪","¡Por los que trabajan duro! 💪")]},
+    {key:"halloween",nm:T("Halloween","Halloween"),       date:mk(10,31),      lead:8, after:0,       c:"#EA580C", p:["🎃","👻","🦇","🕸️"], cross:"👻🦇👻", msg:[T("Happy Halloween 🎃","¡Feliz Halloween! 🎃"),T("Spooky-good savings 👻","Ahorros de miedo 👻")]},
+    {key:"turkey",   nm:T("Thanksgiving","Acción de Gracias"), date:nth(Y,10,4,4), lead:6, after:1, c:"#B45309", p:["🦃","🍂","🍁","🌽"], cross:"🦃🍁", msg:[T("Happy Thanksgiving 🦃","¡Feliz Acción de Gracias! 🦃"),T("Grateful for our crews 🙏","Agradecidos por las cuadrillas 🙏")]},
+    {key:"xmas",     nm:T("Christmas","Navidad"),         date:mk(12,25),      lead:10,after:1, fw:1, c:"#15803D", p:["🎄","❄️","🎁","⭐"], cross:"🎅🛷🦌", msg:[T("Merry Christmas! 🎄","¡Feliz Navidad! 🎄"),T("Season's greetings ✨","¡Felices fiestas! ✨")]}
+  ];
+  var t0=new Date(Y,now.getMonth(),now.getDate()).getTime(), active=null, next=null, nextIn=1e9;
+  for(var i=0;i<HOL.length;i++){ var h=HOL[i], d0=new Date(h.date.getFullYear(),h.date.getMonth(),h.date.getDate()).getTime(), diff=Math.round((d0-t0)/DAY);
+    if(t0>=d0-(h.lead||5)*DAY && t0<=d0+(h.after||0)*DAY) active=h;
+    if(diff>(h.after||0) && diff<nextIn){ nextIn=diff; next=h; } }
+  if(!next){ next=HOL[0]; nextIn=Math.round((new Date(Y+1,0,1).getTime()-t0)/DAY); } // wrap to next New Year
+  // Seasonal fallback when no holiday is active.
+  var m=now.getMonth()+1, season=(m<=2||m===12)?"winter":(m<=5)?"spring":(m<=8)?"summer":"fall";
+  var SEA={
+    winter:{c:"#0EA5E9",p:["❄️","✨","⛄","❄"],cross:"❄️✨",msg:[T("Stay cozy ❄️","Abrígate ❄️"),T("Cool days, warm crews","Días fríos, cuadrillas cálidas")]},
+    spring:{c:"#16A34A",p:["🌸","🌷","🐝","🌼"],cross:"🐝🌸",msg:[T("Spring is here 🌸","¡Llegó la primavera! 🌸"),T("Fresh season, fresh installs 🌱","Nueva temporada, nuevas instalaciones 🌱")]},
+    summer:{c:"#F89B24",p:["☀️","🌴","🌊","🍦"],cross:"🌴☀️",msg:[T("Powered by sunshine ☀️","Impulsados por el sol ☀️"),T("Florida sun = free fuel 🌴","Sol de Florida = combustible gratis 🌴"),T("Another day, another kilowatt ⚡","Otro día, otro kilovatio ⚡")]},
+    fall:{c:"#B45309",p:["🍂","🍁","🌰","🍃"],cross:"🍁🍂",msg:[T("Cozy fall vibes 🍂","Vibras de otoño 🍂"),T("Falling leaves, rising savings 🍁","Caen hojas, suben ahorros 🍁")]}
   };
-  var month=new Date().getMonth()+1, cfg=SEASON[month];
-  if(!cfg) return;
-  try{ if(localStorage.getItem("wm_season_hide")===String(month)) return; }catch(e){}
+  var cfg=active||SEA[season], isHol=!!active, key=isHol?("h-"+active.key):("s-"+season);
+  try{ if(localStorage.getItem("wm_season_hide")===key) return; }catch(e){}
+  // Rotating messages: theme lines + (fun WindMar lines + a countdown to the next holiday) when not in a holiday.
+  var FUN=[T("Let's power Florida! ⚡","¡A energizar Florida! ⚡"),T("Go close some deals 💪","¡A cerrar ventas! 💪"),T("Sunny side up ☀️","Con el sol de frente ☀️")];
+  var msgs=(cfg.msg||[]).slice();
+  if(!isHol){ msgs=msgs.concat(FUN);
+    if(next && nextIn>0 && nextIn<=30){ msgs.push((next.p&&next.p[0]||"📅")+" "+nextIn+" "+(nextIn===1?T("day to","día para"):T("days to","días para"))+" "+next.nm); } }
+  var accent=cfg.c||"#1D429B";
   var reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var st=document.createElement("style");
-  st.textContent="@keyframes wmsFloat{0%,100%{transform:translate(-50%,-50%) translateY(0) rotate(-3.5deg)}50%{transform:translate(-50%,-50%) translateY(-6px) rotate(3.5deg)}}@keyframes wmsGlow{0%,100%{opacity:.45;transform:scale(.9)}50%{opacity:.95;transform:scale(1.1)}}@keyframes wmsSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}@keyframes wmsTwinkle{0%,100%{transform:scale(.8);opacity:.6}50%{transform:scale(1.25);opacity:1}}@keyframes wmsPop{0%{opacity:0;transform:scale(.55) translateY(-10px)}100%{opacity:1;transform:scale(1) translateY(0)}}";
+  st.textContent="@keyframes wmsFloat{0%,100%{transform:translate(-50%,-50%) translateY(0) rotate(-3.5deg)}50%{transform:translate(-50%,-50%) translateY(-6px) rotate(3.5deg)}}@keyframes wmsGlow{0%,100%{opacity:.45;transform:scale(.9)}50%{opacity:.95;transform:scale(1.1)}}@keyframes wmsSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}@keyframes wmsTwinkle{0%,100%{transform:scale(.8);opacity:.6}50%{transform:scale(1.25);opacity:1}}@keyframes wmsPop{0%{opacity:0;transform:scale(.55) translateY(-10px)}100%{opacity:1;transform:scale(1) translateY(0)}}@keyframes wmsCross{0%{left:-24px;opacity:0}12%{opacity:1}88%{opacity:1}100%{left:128px;opacity:0}}@keyframes wmsBurst{0%{transform:translate(-50%,-50%) rotate(var(--a)) translateY(0) scale(.4);opacity:1}100%{transform:translate(-50%,-50%) rotate(var(--a)) translateY(-46px) scale(1.15);opacity:0}}";
   document.head.appendChild(st);
-  // Small, lively TOP-RIGHT badge: the WindMar logo floats with a glow while the month's theme orbits it.
   var em=cfg.p.slice(0,4); while(em.length<4) em.push(cfg.p[em.length%cfg.p.length]);
   var slots=["top:-9px;left:50%;margin-left:-10px","right:-9px;top:50%;margin-top:-10px","bottom:-9px;left:50%;margin-left:-10px","left:-9px;top:50%;margin-top:-10px"];
   var ring="";
-  if(!reduce){ for(var i=0;i<4;i++){ ring+="<span style=\"position:absolute;"+slots[i]+";font-size:17px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.45));animation:wmsTwinkle "+(1.8+i*0.4).toFixed(1)+"s ease-in-out "+(i*0.25).toFixed(2)+"s infinite\">"+em[i]+"</span>"; } }
-  var glow=reduce?"":"<div style=\"position:absolute;inset:6px;border-radius:50%;background:radial-gradient(circle,rgba(248,155,36,.5),rgba(29,66,155,.28) 58%,transparent 72%);animation:wmsGlow 2.6s ease-in-out infinite\"></div>";
+  if(!reduce){ for(var i2=0;i2<4;i2++){ ring+="<span style=\"position:absolute;"+slots[i2]+";font-size:17px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.45));animation:wmsTwinkle "+(1.8+i2*0.4).toFixed(1)+"s ease-in-out "+(i2*0.25).toFixed(2)+"s infinite\">"+em[i2]+"</span>"; } }
+  var glow=reduce?"":"<div style=\"position:absolute;inset:6px;border-radius:50%;background:radial-gradient(circle,"+accent+"88,rgba(29,66,155,.28) 58%,transparent 72%);animation:wmsGlow 2.6s ease-in-out infinite\"></div>";
+  // A little emoji that flies across every few seconds (holiday flair).
+  var crosser=(!reduce&&cfg.cross)?"<div style=\"position:absolute;top:6px;left:-24px;font-size:19px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.4));animation:wmsCross "+(isHol?5.5:8)+"s ease-in-out "+(isHol?2:4)+"s infinite\">"+cfg.cross+"</div>":"";
   var lay=document.createElement("div"); lay.setAttribute("aria-hidden","true");
-  lay.style.cssText="position:fixed;top:72px;right:16px;width:128px;z-index:1500;pointer-events:none;text-align:center;"+(reduce?"":"animation:wmsPop .6s cubic-bezier(.22,1.25,.4,1) both");
-  lay.innerHTML="<div style=\"position:relative;width:108px;height:108px;margin:0 auto\">"+glow+
-    "<div style=\"position:absolute;inset:0;"+(reduce?"":"animation:wmsSpin "+(cfg.fireworks?8:11)+"s linear infinite")+"\">"+ring+"</div>"+
-    "<div style=\"position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:66px;height:66px;border-radius:16px;background:#fff;display:flex;align-items:center;justify-content:center;padding:7px;box-sizing:border-box;box-shadow:0 8px 18px -6px rgba(0,0,0,.6);"+(reduce?"":"animation:wmsFloat 3.4s ease-in-out infinite;")+"\"><img src=\"data:image/png;base64,"+LOGO_B64+"\" alt=\"WindMar\" draggable=\"false\" style=\"width:100%;height:auto\"/></div>"+
+  lay.style.cssText="position:fixed;top:72px;right:16px;width:128px;z-index:1500;pointer-events:none;text-align:center;overflow:visible;"+(reduce?"":"animation:wmsPop .6s cubic-bezier(.22,1.25,.4,1) both");
+  lay.innerHTML="<div style=\"position:relative;width:108px;height:108px;margin:0 auto;overflow:visible\">"+glow+crosser+
+    "<div style=\"position:absolute;inset:0;"+(reduce?"":"animation:wmsSpin "+(cfg.fw?8:11)+"s linear infinite")+"\">"+ring+"</div>"+
+    "<div id=\"wmsLogo\" style=\"position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:66px;height:66px;border-radius:16px;background:#fff;display:flex;align-items:center;justify-content:center;padding:7px;box-sizing:border-box;box-shadow:0 8px 18px -6px rgba(0,0,0,.6);cursor:pointer;pointer-events:auto;"+(reduce?"":"animation:wmsFloat 3.4s ease-in-out infinite;")+"\" title=\""+T("Tap for a little cheer!","¡Toca para celebrar!")+"\"><img src=\"data:image/png;base64,"+LOGO_B64+"\" alt=\"WindMar\" draggable=\"false\" style=\"width:100%;height:auto;pointer-events:none\"/></div>"+
     "</div>"+
-    (cfg.label?"<div style=\"display:inline-block;margin-top:2px;background:rgba(18,32,66,.94);color:#fff;font-size:11.5px;font-weight:800;padding:4px 10px;border-radius:20px;border:1px solid #1D429B66;font-family:Montserrat,system-ui,sans-serif;white-space:nowrap;box-shadow:0 6px 16px -6px rgba(0,0,0,.55)\">"+cfg.label+"</div>":"");
-  var x=document.createElement("button"); x.textContent="✕"; x.title="Hide seasonal animation";
+    "<div id=\"wmsMsg\" style=\"display:inline-block;margin-top:2px;background:"+accent+"F2;color:#fff;font-size:11.5px;font-weight:800;padding:4px 11px;border-radius:20px;border:1px solid #ffffff33;font-family:Montserrat,system-ui,sans-serif;white-space:nowrap;box-shadow:0 6px 16px -6px rgba(0,0,0,.55);transition:opacity .35s\">"+msgs[0]+"</div>";
+  var x=document.createElement("button"); x.textContent="✕"; x.title=T("Hide until the next occasion","Ocultar hasta la próxima ocasión");
   x.style.cssText="position:absolute;right:-2px;top:-6px;pointer-events:auto;width:20px;height:20px;border-radius:10px;border:none;background:rgba(18,32,66,.8);color:#A6C3E6;cursor:pointer;font-size:11px;line-height:1";
-  x.onclick=function(){ try{localStorage.setItem("wm_season_hide",String(month));}catch(e){} lay.remove(); };
+  x.onclick=function(){ try{localStorage.setItem("wm_season_hide",key);}catch(e){} lay.remove(); };
   lay.appendChild(x);
-  (function mount(){ if(document.body){document.body.appendChild(lay);}else{setTimeout(mount,30);} })();
+  (function mount(){ if(document.body){document.body.appendChild(lay);}else{setTimeout(mount,30);return;}
+    // Rotate the message every 7s (fade out/in).
+    if(!reduce && msgs.length>1){ var mi=0; setInterval(function(){ var el=document.getElementById("wmsMsg"); if(!el){return;} el.style.opacity="0"; setTimeout(function(){ mi=(mi+1)%msgs.length; el.textContent=msgs[mi]; el.style.opacity="1"; },360); },7000); }
+    // Click the logo → celebratory particle burst.
+    if(!reduce){ var lg=document.getElementById("wmsLogo"); if(lg){ lg.addEventListener("click",function(){
+      var host=lg.parentNode; for(var b=0;b<12;b++){ var s=document.createElement("span"); s.textContent=cfg.p[b%cfg.p.length];
+        s.style.cssText="position:absolute;top:50%;left:50%;font-size:16px;pointer-events:none;--a:"+(b*30)+"deg;animation:wmsBurst .9s ease-out forwards"; host.appendChild(s);
+        (function(node){ setTimeout(function(){ if(node&&node.remove)node.remove(); },950); })(s); } }); } }
+  })();
 })();
 </script>
 </body>
