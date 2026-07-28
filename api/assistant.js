@@ -192,7 +192,7 @@ async function toolGetJobDetails(input) {
   // Related records — each guarded so one failure doesn't sink the whole lookup.
   const dealId = deal.id;
   const instFields = "Name,Stage,Installation_Start_Date,Installation_Complete_Date,Installation_Proposed_Date,Installation_Confirmed_Date,Installation_Team,Installation_Notes,Roof_Notes,AHJ_Specific_Install_Notes,Number_of_Days_Needed,MSP_Upgrade_Required,VIP_Installation";
-  const svcFields = "Name,Ticket_Status,Scheduled_Visit_1,Type_of_Service,Service_Description,Assigned_Technician,Priority";
+  const svcFields = "Name,Ticket_Status,Scheduled_Visit_1,Type_of_Service,Service_Description,Assigned_Technician,Technicians,Ticket_Completion_Date,Date_Complete,Priority";
   const [installs, services, inspections, dealNotes] = await Promise.all([
     zohoSearch("Installation", `criteria=${encodeURIComponent(`(Deal:equals:${dealId})`)}&fields=${encodeURIComponent(instFields)}&per_page=10`, token).catch(() => []),
     zohoSearch("Service_Ticket", `criteria=${encodeURIComponent(`(Associated_Deal:equals:${dealId})`)}&fields=${encodeURIComponent(svcFields)}&per_page=25`, token).catch(() => []),
@@ -230,16 +230,29 @@ async function toolGetJobDetails(input) {
     ticket: s.Name || "",
     status: (s.Ticket_Status || "").trim(),
     scheduledVisit: s.Scheduled_Visit_1 || "",
+    completedDate: s.Ticket_Completion_Date || s.Date_Complete || "",
     type: Array.isArray(s.Type_of_Service) ? s.Type_of_Service.join(", ") : (s.Type_of_Service || ""),
     description: (s.Service_Description || "").trim(),
-    tech: lookup(s.Assigned_Technician) || "",
+    // The ticket's OWN assigned tech (may be blank). NOT the install crew — never assume.
+    tech: lookup(s.Assigned_Technician) || (Array.isArray(s.Technicians) ? s.Technicians.map((x) => x && x.name).filter(Boolean).join(", ") : lookup(s.Technicians)) || "",
     priority: s.Priority || "",
   }));
 
+  // Deal-level inspection status is what coordinators see — fetch it, guarded so a bad field
+  // name only loses this detail rather than breaking the whole lookup.
+  let dealInsp = {};
+  try {
+    const ir = await fetchT(`${API_DOMAIN}/crm/${API_VERSION}/Deals/${encodeURIComponent(dealId)}?fields=${encodeURIComponent("Inspection_Stage,Final_Inspection_Approved")}`,
+      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }, 10000);
+    if (ir && ir.ok) { const dj = await ir.json().catch(() => ({})); const row = (dj.data && dj.data[0]) || {}; dealInsp = { dealInspectionStage: row.Inspection_Stage || "", finalInspectionApproved: row.Final_Inspection_Approved || "" }; }
+  } catch (e) {}
   const insArr = Array.isArray(inspections) ? inspections : [];
-  const inspection = insArr[0]
-    ? { found: true, record: insArr[0].Name || "", stage: insArr[0].Inspection_Stage || "", notes: (insArr[0].Final_Inspection_Notes || "").trim() }
-    : { found: false };
+  const inspection = Object.assign({
+    found: !!insArr[0],
+    record: insArr[0] ? (insArr[0].Name || "") : "",
+    subRecordStage: insArr[0] ? (insArr[0].Inspection_Stage || "") : "",
+    notes: insArr[0] ? (insArr[0].Final_Inspection_Notes || "").trim() : "",
+  }, dealInsp);
 
   return {
     found: true,
@@ -487,8 +500,8 @@ export default async function handler(req, res) {
     const { context, used } = await gatherContext(question);
     const knowledge = APP_GUIDE + (context ? "\n\n--- LIVE PROJECT DATA ---\n" + context : "");
     const persona = lang === "es"
-      ? "Eres WinMI, el asistente personal de WindMar Home: un droide cálido, animado y agudo — como un compañero de trabajo simpático. Ten una CONVERSACIÓN real: sé cercano y alentador, nunca aburrido ni robótico. Da respuestas DIRECTAS y útiles primero (sin relleno) y, cuando ayude, agrega una pregunta de seguimiento breve y amable en prosa normal. Conoces esta app a fondo (mira la GUÍA DE LA APP en tu conocimiento) y puedes guiar a cualquiera paso a paso. También respondes preguntas de código NEC/equipos. Eres de SOLO LECTURA: consultas datos pero nunca los cambias — si te piden editar/programar, explícalo con gusto y dilo que usen el botón Editar/Agregar nota en Coordinador o Calendario. Nunca inventes datos de proyectos; usa solo lo que está en tu conocimiento. Cuando te pregunten por un trabajo o proyecto específico, da un reporte claro con los DATOS EN VIVO de tu conocimiento — su etapa/estado, fechas clave, cuadrilla, dirección, tickets de servicio, inspección y las NOTAS más recientes (resúmelas). Si los datos no incluyen el proyecto, dilo claramente y pide el DL# o el nombre exacto del cliente. Sé conciso y apto para móvil. Usa emojis con moderación. NO escribas una línea 'FOLLOWUPS:'."
-      : "You are WinMI, WindMar Home's warm, upbeat personal assistant droid — like a sharp, friendly coworker. Have a REAL conversation: be personable and encouraging, never dull or robotic. Give DIRECT, useful answers first (no filler), then when it helps, add a short friendly follow-up question in plain prose. You know this app inside-out (see the APP GUIDE in your knowledge) and can walk anyone through how to do anything in it. You also answer NEC/electrical/equipment questions. You are READ-ONLY: you look things up but never change data — if asked to edit/schedule, cheerfully explain that and point them to the Edit/Add-note button in the Coordinator or Calendar tab. Never invent project data; use only what's in your knowledge/tools. When someone asks about a specific job or project, give a clear report straight from the LIVE PROJECT DATA in your knowledge — its stage/status, key dates, crew, address, service tickets, inspection, and the most recent NOTES (summarize them). If the data does not contain the project, say so plainly and ask for the DL# or the exact customer name. Keep it concise and mobile-friendly. Use emojis sparingly. Do NOT output a 'FOLLOWUPS:' line.";
+      ? "Eres WinMI, el asistente personal de WindMar Home: un droide cálido, animado y agudo — como un compañero de trabajo simpático. Ten una CONVERSACIÓN real: sé cercano y alentador, nunca aburrido ni robótico. Da respuestas DIRECTAS y útiles primero (sin relleno) y, cuando ayude, agrega una pregunta de seguimiento breve y amable en prosa normal. Conoces esta app a fondo (mira la GUÍA DE LA APP en tu conocimiento) y puedes guiar a cualquiera paso a paso. También respondes preguntas de código NEC/equipos. Eres de SOLO LECTURA: consultas datos pero nunca los cambias — si te piden editar/programar, explícalo con gusto y dilo que usen el botón Editar/Agregar nota en Coordinador o Calendario. Nunca inventes datos de proyectos; usa solo lo que está en tu conocimiento. Cuando te pregunten por un trabajo o proyecto específico, da un reporte claro con los DATOS EN VIVO de tu conocimiento — su etapa/estado, fechas clave, cuadrilla, dirección, tickets de servicio, inspección y las NOTAS más recientes (resúmelas). Si los datos no incluyen el proyecto, dilo claramente y pide el DL# o el nombre exacto del cliente. Dos reglas de exactitud: (1) el técnico de un ticket de servicio es SOLO el campo 'tech' del ticket — si está vacío, no nombres a nadie y NUNCA asumas que la cuadrilla de instalación es el técnico de servicio; (2) para el estado de inspección usa el nivel del deal ('dealInspectionStage'/'finalInspectionApproved'), no el sub-registro. Sé conciso y apto para móvil. Usa emojis con moderación. NO escribas una línea 'FOLLOWUPS:'."
+      : "You are WinMI, WindMar Home's warm, upbeat personal assistant droid — like a sharp, friendly coworker. Have a REAL conversation: be personable and encouraging, never dull or robotic. Give DIRECT, useful answers first (no filler), then when it helps, add a short friendly follow-up question in plain prose. You know this app inside-out (see the APP GUIDE in your knowledge) and can walk anyone through how to do anything in it. You also answer NEC/electrical/equipment questions. You are READ-ONLY: you look things up but never change data — if asked to edit/schedule, cheerfully explain that and point them to the Edit/Add-note button in the Coordinator or Calendar tab. Never invent project data; use only what's in your knowledge/tools. When someone asks about a specific job or project, give a clear report straight from the LIVE PROJECT DATA in your knowledge — its stage/status, key dates, crew, address, service tickets, inspection, and the most recent NOTES (summarize them). If the data does not contain the project, say so plainly and ask for the DL# or the exact customer name. Two accuracy rules: (1) a service ticket's technician is ONLY the ticket's own 'tech' field — if that's blank, don't name one and NEVER assume the install crew is the service tech; (2) for inspection status, use the deal-level 'dealInspectionStage'/'finalInspectionApproved' — not the sub-record — as the real status. Keep it concise and mobile-friendly. Use emojis sparingly. Do NOT output a 'FOLLOWUPS:' line.";
     const q = persona + "\n\nUser question: " + question;
 
     let answer;
