@@ -3261,25 +3261,24 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
   var SR=window.SpeechRecognition||window.webkitSpeechRecognition||null;
   var muted=false; try{ muted=localStorage.getItem("wm_sunny_mute")==="1"; }catch(e){}
 
-  // ---- Sunny the droid (SVG): sun crown, glowing eyes, WindMar "W" chest ----
-  function rays(){ var s="",cx=60,cy=24,n=9; for(var i=0;i<n;i++){ var a=(-78+i*(156/(n-1)))*Math.PI/180,ux=Math.sin(a),uy=-Math.cos(a);
-    s+='<line x1="'+(cx+ux*4).toFixed(1)+'" y1="'+(cy+uy*4).toFixed(1)+'" x2="'+(cx+ux*17).toFixed(1)+'" y2="'+(cy+uy*17).toFixed(1)+'" stroke="url(#wmSunG)" stroke-width="3.4" stroke-linecap="round"/>'; } return s; }
-  function droid(px){ return '<svg viewBox="0 0 120 140" width="'+px+'" height="'+Math.round(px*1.16)+'" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="display:block;overflow:visible">'
+  // ---- WinMI the sun-bot (SVG): a SUN for a head (friendly face) + a small body with the WindMar "W" chest ----
+  function rays(){ var s="",cx=60,cy=44,n=12,r0=26,r1=39; for(var i=0;i<n;i++){ var a=(i*(360/n))*Math.PI/180,ux=Math.cos(a),uy=Math.sin(a);
+    s+='<line x1="'+(cx+ux*r0).toFixed(1)+'" y1="'+(cy+uy*r0).toFixed(1)+'" x2="'+(cx+ux*r1).toFixed(1)+'" y2="'+(cy+uy*r1).toFixed(1)+'" stroke="url(#wmSunG)" stroke-width="4" stroke-linecap="round"/>'; } return s; }
+  function droid(px){ return '<svg viewBox="0 0 120 150" width="'+px+'" height="'+Math.round(px*1.25)+'" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="display:block;overflow:visible">'
     +'<defs><linearGradient id="wmMetal" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b63b8"/><stop offset="1" stop-color="#1D429B"/></linearGradient>'
-    +'<radialGradient id="wmEye" cx="50%" cy="42%" r="60%"><stop offset="0" stop-color="#d9fbff"/><stop offset="55%" stop-color="#38e1ff"/><stop offset="100%" stop-color="#0aa6d6"/></radialGradient>'
-    +'<linearGradient id="wmSunG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD54A"/><stop offset="1" stop-color="#F89B24"/></linearGradient></defs>'
-    +'<g class="wmSunRays">'+rays()+'</g>'
-    +'<line x1="60" y1="20" x2="60" y2="7" stroke="#9fb4dd" stroke-width="3" stroke-linecap="round"/><circle class="wmSunTip" cx="60" cy="6" r="4" fill="#FFD54A"/>'
-    +'<rect x="26" y="22" width="68" height="52" rx="18" fill="url(#wmMetal)" stroke="#8fb0ee" stroke-width="2"/>'
-    +'<rect x="34" y="32" width="52" height="30" rx="14" fill="#0b1730"/>'
-    +'<circle class="wmSunEye" cx="50" cy="47" r="6.5" fill="url(#wmEye)"/><circle class="wmSunEye" cx="70" cy="47" r="6.5" fill="url(#wmEye)"/>'
-    +'<circle cx="38" cy="58" r="3" fill="#F89B24" opacity=".75"/><circle cx="82" cy="58" r="3" fill="#F89B24" opacity=".75"/>'
-    +'<rect x="52" y="72" width="16" height="8" fill="#274a91"/>'
-    +'<rect x="16" y="86" width="12" height="30" rx="6" fill="#274a91"/><rect x="92" y="86" width="12" height="30" rx="6" fill="#274a91"/>'
-    +'<rect x="30" y="78" width="60" height="50" rx="16" fill="url(#wmMetal)" stroke="#8fb0ee" stroke-width="2"/>'
-    +'<circle class="wmSunGlowC" cx="60" cy="104" r="14" fill="#F89B24" opacity="0"/>'
-    +'<rect x="44" y="90" width="32" height="28" rx="8" fill="#0b1730"/>'
-    +'<text class="wmSunW" x="60" y="111" text-anchor="middle" font-family="Montserrat,Arial,sans-serif" font-weight="900" font-size="20" fill="#F89B24">W</text>'
+    +'<linearGradient id="wmSunG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD54A"/><stop offset="1" stop-color="#F89B24"/></linearGradient>'
+    +'<radialGradient id="wmSunDisc" cx="50%" cy="42%" r="62%"><stop offset="0" stop-color="#FFE79A"/><stop offset="60%" stop-color="#FCB733"/><stop offset="100%" stop-color="#F89B24"/></radialGradient></defs>'
+    +'<g class="wmSunRays">'+rays()+'</g>'                                  // spinning sun rays
+    +'<rect x="16" y="90" width="11" height="26" rx="5.5" fill="#274a91"/><rect x="93" y="90" width="11" height="26" rx="5.5" fill="#274a91"/>' // arms
+    +'<rect x="54" y="64" width="12" height="22" fill="#274a91"/>'          // neck
+    +'<rect x="40" y="80" width="40" height="44" rx="13" fill="url(#wmMetal)" stroke="#8fb0ee" stroke-width="2"/>' // small body
+    +'<circle class="wmSunGlowC" cx="60" cy="103" r="13" fill="#F89B24" opacity="0"/>'
+    +'<rect x="47" y="90" width="26" height="26" rx="7" fill="#0b1730"/>'   // chest panel
+    +'<text class="wmSunW" x="60" y="110" text-anchor="middle" font-family="Montserrat,Arial,sans-serif" font-weight="900" font-size="19" fill="#F89B24">W</text>'
+    +'<circle cx="60" cy="44" r="25" fill="url(#wmSunDisc)" stroke="#F89B24" stroke-width="1.5"/>' // SUN head
+    +'<circle class="wmSunEye" cx="51" cy="43" r="4.6" fill="#0b1730"/><circle class="wmSunEye" cx="69" cy="43" r="4.6" fill="#0b1730"/>' // eyes
+    +'<circle cx="52.5" cy="41.4" r="1.3" fill="#fff"/><circle cx="70.5" cy="41.4" r="1.3" fill="#fff"/>' // eye sparkles
+    +'<path d="M50 53 Q60 61 70 53" fill="none" stroke="#0b1730" stroke-width="3" stroke-linecap="round"/>' // smile
     +'</svg>'; }
 
   var st=document.createElement("style");
@@ -3291,7 +3290,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
     "@keyframes wmSunTipP{0%,100%{opacity:.5}50%{opacity:1}}",
     "@keyframes wmSunRing{0%{transform:scale(.7);opacity:.6}100%{transform:scale(1.7);opacity:0}}",
     "@keyframes wmSunUp{from{opacity:0;transform:translateY(16px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}",
-    reduce?"":".wmSunRays{transform-box:view-box;transform-origin:60px 24px;animation:wmSunSpinR 18s linear infinite}",
+    reduce?"":".wmSunRays{transform-box:view-box;transform-origin:60px 44px;animation:wmSunSpinR 22s linear infinite}",
     reduce?"":".wmSunEye{transform-box:fill-box;transform-origin:center;animation:wmSunBlink 5.2s ease-in-out infinite}",
     reduce?"":".wmSunGlowC{animation:wmSunChestP 2.6s ease-in-out infinite}",
     reduce?"":".wmSunTip{animation:wmSunTipP 1.8s ease-in-out infinite}",
