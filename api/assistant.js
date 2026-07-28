@@ -498,21 +498,20 @@ export default async function handler(req, res) {
     const question = messages[messages.length - 1].content;
     const history = messages.slice(0, -1).map((m) => ({ role: m.role, text: m.content }));
 
-    // Enrich with live project data (best-effort). Always include the APP GUIDE so WinMI can
-    // walk users through the app; project data (if any) follows.
+    // Enrich with live project data (best-effort). Keep the brain payload LEAN (the brain shares
+    // a rate-limited key): send the PROJECT DATA for a project question, else the APP GUIDE for a
+    // how-to. One call — no double-retry — to minimize load on the shared AI.
     const { context, used } = await gatherContext(question);
-    const knowledge = APP_GUIDE + (context ? "\n\n--- LIVE PROJECT DATA ---\n" + context : "");
+    const knowledge = context ? ("LIVE PROJECT DATA (use as the source of truth):\n" + context) : APP_GUIDE;
     const persona = lang === "es"
       ? "Eres WinMI, el asistente personal de WindMar Home: un droide cálido, animado y agudo — como un compañero de trabajo simpático. Ten una CONVERSACIÓN real: sé cercano y alentador, nunca aburrido ni robótico. Da respuestas DIRECTAS y útiles primero (sin relleno) y, cuando ayude, agrega una pregunta de seguimiento breve y amable en prosa normal. Conoces esta app a fondo (mira la GUÍA DE LA APP en tu conocimiento) y puedes guiar a cualquiera paso a paso. También respondes preguntas de código NEC/equipos. Eres de SOLO LECTURA: consultas datos pero nunca los cambias — si te piden editar/programar, explícalo con gusto y dilo que usen el botón Editar/Agregar nota en Coordinador o Calendario. Nunca inventes datos de proyectos; usa solo lo que está en tu conocimiento. Cuando te pregunten por un trabajo o proyecto específico, da un reporte claro con los DATOS EN VIVO de tu conocimiento — su etapa/estado, fechas clave, cuadrilla, dirección, tickets de servicio, inspección y las NOTAS más recientes (resúmelas). Si los datos no incluyen el proyecto, dilo claramente y pide el DL# o el nombre exacto del cliente. Dos reglas de exactitud: (1) el técnico de un ticket de servicio es SOLO el campo 'tech' del ticket — si está vacío, no nombres a nadie y NUNCA asumas que la cuadrilla de instalación es el técnico de servicio; (2) para el estado de inspección usa el nivel del deal ('dealInspectionStage'/'finalInspectionApproved'), no el sub-registro. Sé conciso y apto para móvil. Usa emojis con moderación. NO escribas una línea 'FOLLOWUPS:'."
       : "You are WinMI, WindMar Home's warm, upbeat personal assistant droid — like a sharp, friendly coworker. Have a REAL conversation: be personable and encouraging, never dull or robotic. Give DIRECT, useful answers first (no filler), then when it helps, add a short friendly follow-up question in plain prose. You know this app inside-out (see the APP GUIDE in your knowledge) and can walk anyone through how to do anything in it. You also answer NEC/electrical/equipment questions. You are READ-ONLY: you look things up but never change data — if asked to edit/schedule, cheerfully explain that and point them to the Edit/Add-note button in the Coordinator or Calendar tab. Never invent project data; use only what's in your knowledge/tools. When someone asks about a specific job or project, give a clear report straight from the LIVE PROJECT DATA in your knowledge — its stage/status, key dates, crew, address, service tickets, inspection, and the most recent NOTES (summarize them). If the data does not contain the project, say so plainly and ask for the DL# or the exact customer name. Two accuracy rules: (1) a service ticket's technician is ONLY the ticket's own 'tech' field — if that's blank, don't name one and NEVER assume the install crew is the service tech; (2) for inspection status, use the deal-level 'dealInspectionStage'/'finalInspectionApproved' — not the sub-record — as the real status. Keep it concise and mobile-friendly. Use emojis sparingly. Do NOT output a 'FOLLOWUPS:' line.";
     const q = persona + "\n\nUser question: " + question;
 
-    // Ask the brain; a "knowledge-fallback" source means Gemini failed and echoed our context —
-    // treat that as no-answer (never surface the raw dump), then retry once with a lean context.
-    const ask = async (kn) => { const r = await callNecBrain(q, history, lang, kn); return r.source === "knowledge-fallback" ? null : stripFollowups(r.answer); };
+    // One brain call. A "knowledge-fallback" source means the AI failed and echoed our context —
+    // treat that as no-answer (never surface the raw dump) and fail gracefully.
     let answer = null;
-    try { answer = await ask(knowledge); } catch (e) {}
-    if (answer == null) { try { answer = await ask(context ? context.slice(0, 4500) : ""); } catch (e) {} }
+    try { const r = await callNecBrain(q, history, lang, knowledge); if (r.source !== "knowledge-fallback") answer = stripFollowups(r.answer); } catch (e) {}
     if (answer == null) return res.status(200).json({ ok: false, error: lang === "es" ? "El asistente está ocupado — inténtalo de nuevo en un momento." : "The assistant is busy right now — please try again in a moment." });
 
     return res.status(200).json({ ok: true, answer: answer || (lang === "es" ? "Lo siento, no tengo una respuesta a eso." : "Sorry, I don't have an answer for that."), used: [...new Set(used)] });
