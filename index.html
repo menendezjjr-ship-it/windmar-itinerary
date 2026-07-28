@@ -3251,7 +3251,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
   setInterval(function(){ var acct=(msalApp&&msalApp.getAllAccounts&&msalApp.getAllAccounts()[0]); if(!acct)return; var em=(acct.username||"").toLowerCase(); fetch(SB+"/rest/v1/app_access?email=eq."+encodeURIComponent(em)+"&select=force_logout_at",{headers:H}).then(function(r){return r.ok?r.json():[];}).then(function(rows){ wmForceLogoutCheck(rows&&rows[0], em); }).catch(function(){}); }, 60000);
 })();
 </script>
-<!-- ═══ WindMar AI Assistant "Sunny" — floating droid: chat + voice + first-visit tour ═══ -->
+<!-- ═══ WindMar AI Assistant "WinMI" — floating droid: chat + voice + first-visit tour ═══ -->
 <script>
 (function(){
   if(window.__wmSunny) return; window.__wmSunny=true;
@@ -3356,7 +3356,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
   function openPanel(){ if(panel){ return; } if(hi){ hi.remove(); hi=null; }
     panel=document.createElement("div"); panel.className="wmSunPanel";
     panel.innerHTML='<div class="wmSunHdr"><span style="flex-shrink:0">'+droid(30)+'</span>'
-      +'<div style="flex:1;min-width:0"><div style="font:800 14px Montserrat,system-ui,sans-serif;color:#fff">Sunny</div><div style="font-size:11px;color:#8fb0e6">'+T("WindMar Assistant · Zoho + SiteCapture","Asistente WindMar · Zoho + SiteCapture")+'</div></div>'
+      +'<div style="flex:1;min-width:0"><div style="font:800 14px Montserrat,system-ui,sans-serif;color:#fff">WinMI</div><div style="font-size:11px;color:#8fb0e6">'+T("WindMar Assistant · Zoho + SiteCapture","Asistente WindMar · Zoho + SiteCapture")+'</div></div>'
       +'<button id="wmSunMute" title="'+T("Voice replies","Respuestas por voz")+'" style="background:transparent;border:none;color:#8fb0e6;font-size:18px;cursor:pointer;width:34px;height:34px">'+(muted?"🔇":"🔊")+'</button>'
       +'<button id="wmSunClose" style="background:transparent;border:none;color:#8fb0e6;font-size:20px;cursor:pointer;width:34px;height:34px">✕</button></div>'
       +'<div class="wmSunBody" id="wmSunMsgs"></div>'
@@ -3364,7 +3364,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
       +(SR?'<button id="wmSunMic" class="wmSunBtn" title="'+T("Talk to me","Háblame")+'" style="background:#16294f;color:#8fb0e6">🎤</button>':"")
       +'<button id="wmSunSend" class="wmSunBtn" style="background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff">➤</button></div>';
     document.body.appendChild(panel);
-    var greet=addBubble("b",T("Hi, I'm Sunny 🤖 your WindMar assistant! Ask me about any project — status, address, notes, inspections — from Zoho or SiteCapture. You can type or tap 🎤 to talk.","¡Hola! Soy Sunny 🤖 tu asistente WindMar. Pregúntame sobre cualquier proyecto — estado, dirección, notas, inspecciones — de Zoho o SiteCapture. Escribe o toca 🎤 para hablar."));
+    var greet=addBubble("b",T("Hi, I'm WinMI 🤖 your WindMar assistant! Ask me about any project — status, address, notes, inspections — from Zoho or SiteCapture. You can type or tap 🎤 to talk.","¡Hola! Soy WinMI 🤖 tu asistente WindMar. Pregúntame sobre cualquier proyecto — estado, dirección, notas, inspecciones — de Zoho o SiteCapture. Escribe o toca 🎤 para hablar."));
     document.getElementById("wmSunMsgs").appendChild(quickChips());
     document.getElementById("wmSunClose").onclick=closePanel;
     document.getElementById("wmSunSend").onclick=function(){ var i=document.getElementById("wmSunInput"); send(i&&i.value); };
@@ -3392,7 +3392,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
 
   // ---- First-visit "how to use" tour (spotlight coach-marks, narrated by Sunny) ----
   function tourSteps(){
-    var steps=[{ sel:null, title:T("Meet Sunny 🤖","Te presento a Sunny 🤖"), body:T("I'm your assistant. Tap me in the corner anytime to ask about any project — by voice or text.","Soy tu asistente. Tócame en la esquina para preguntar sobre cualquier proyecto — por voz o texto.") }];
+    var steps=[{ sel:null, title:T("Meet WinMI 🤖","Te presento a WinMI 🤖"), body:T("I'm your assistant. Tap me in the corner anytime to ask about any project — by voice or text.","Soy tu asistente. Tócame en la esquina para preguntar sobre cualquier proyecto — por voz o texto.") }];
     var tabs=document.querySelectorAll("#root .tabbtn, nav .tabbtn");
     function findTab(rx){ for(var i=0;i<tabs.length;i++){ if(rx.test(tabs[i].textContent||"")) return tabs[i]; } return null; }
     var nav=document.querySelector("nav"); if(nav) steps.push({ el:nav, title:T("Your tabs","Tus pestañas"), body:T("Swipe across here to reach every section.","Desliza aquí para ver todas las secciones.") });
@@ -3426,7 +3426,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
     // First visit: a friendly nudge + offer the tour.
     var seen=true; try{ seen=localStorage.getItem("wm_tour_done")==="1"; }catch(e){}
     if(!seen){ setTimeout(function(){ if(panel) return; hi=document.createElement("div"); hi.className="wmSunHi";
-      hi.innerHTML='<b>'+T("Hi, I'm Sunny! 🤖","¡Hola, soy Sunny! 🤖")+'</b><br>'+T("Want a 20-sec tour?","¿Un tour de 20 seg?")
+      hi.innerHTML='<b>'+T("Hi, I'm WinMI! 🤖","¡Hola, soy WinMI! 🤖")+'</b><br>'+T("Want a 20-sec tour?","¿Un tour de 20 seg?")
         +'<div style="display:flex;gap:6px;margin-top:8px"><button id="wmHiYes" style="flex:1;background:linear-gradient(135deg,#1D429B,#F89B24);border:none;color:#fff;font:800 11.5px Montserrat;padding:6px;border-radius:8px;cursor:pointer">'+T("Yes!","¡Sí!")+'</button><button id="wmHiNo" style="background:#16294f;border:1px solid #2a4a86;color:#bcd2f5;font:600 11.5px Montserrat;padding:6px 10px;border-radius:8px;cursor:pointer">'+T("Later","Después")+'</button></div>';
       document.body.appendChild(hi);
       document.getElementById("wmHiYes").onclick=function(){ hi.remove(); hi=null; startTour(); };
