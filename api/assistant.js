@@ -3,16 +3,17 @@
 // Contract:
 //   POST { messages: [{role:"user"|"assistant", content:"..."}], lang?: "en"|"es" }
 //   ->  200 { ok:true, answer:"<text>", used:["tool",...] }              on success
-//       200 { ok:false, configured:false, error:"AI key not set" }        if ANTHROPIC_API_KEY missing
 //       200 { ok:false, error:"..." }                                     on any failure
 //   OPTIONS -> 200 (CORS preflight). Never throws an unhandled 500 — everything is wrapped.
 //
-// Sunny answers coordinator/crew questions about WindMar solar/roofing PROJECTS by looking up
-// LIVE data in Zoho CRM + SiteCapture via three READ-ONLY tools. It NEVER edits/schedules anything.
+// Sunny answers coordinator/crew questions about WindMar solar/roofing PROJECTS (live Zoho CRM +
+// SiteCapture, READ-ONLY) AND NEC/electrical/equipment questions. The itinerary has no AI key, so
+// the "brain" is the Field HUB's NEC Assistant (Gemini) at NEC_AI_URL — we send it the question +
+// history + lang + a knowledgeContext string we build from the READ-ONLY Zoho/SiteCapture lookups.
+// It NEVER edits/schedules anything.
 //
 // Env vars:
-//   ANTHROPIC_API_KEY  (required)  — Anthropic Messages API key
-//   ASSISTANT_MODEL    (optional)  — default "claude-sonnet-5"
+//   NEC_AI_URL         (optional)  — default the Field HUB nec-ai endpoint (the AI brain; its key lives there)
 //   ZOHO_CLIENT_ID / ZOHO_CLIENT_SECRET / ZOHO_REFRESH_TOKEN  (required for Zoho tools)
 //   ZOHO_ACCOUNTS_HOST (optional, default https://accounts.zoho.com)
 //   ZOHO_API_DOMAIN    (optional, default https://www.zohoapis.com)
@@ -28,7 +29,7 @@ const SC_FIXED = process.env.SITECAPTURE_API_KEY || "zapier-api-4320";
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = process.env.ASSISTANT_MODEL || "claude-sonnet-5";
 
-export const config = { maxDuration: 30 };
+export const config = { maxDuration: 60 };
 
 // ---- shared helpers ---------------------------------------------------------
 
@@ -307,16 +308,43 @@ function normalizeMessages(raw) {
   return out.slice(-20);
 }
 
-async function callAnthropic(apiKey, messages, system) {
-  const r = await fetchT(ANTHROPIC_URL, {
-    method: "POST",
-    headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({ model: MODEL, max_tokens: 1400, system, tools: TOOLS, messages }),
-  }, 30000);
-  if (!r) throw new Error("Anthropic request timed out");
-  const data = await r.json();
-  if (!r.ok) throw new Error(`Anthropic ${r.status}: ${(data && data.error && data.error.message) || JSON.stringify(data).slice(0, 200)}`);
-  return data;
+// ---- AI brain: the Field HUB's NEC Assistant (Gemini) --------------------------------------
+// The itinerary has NO AI key (org policy), so Sunny borrows the already-working NEC Assistant
+// on the Field HUB, which accepts { question, history, lang, knowledgeContext }. We feed it live
+// Zoho/SiteCapture data as knowledgeContext so it can also answer project questions.
+const NEC_AI_URL = process.env.NEC_AI_URL || "https://project-g7v0r.vercel.app/api/nec-ai";
+
+async function callNecBrain(question, history, lang, knowledgeContext) {
+  const r = await fetchT(NEC_AI_URL, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ question, history, lang, knowledgeContext }),
+  }, 42000);
+  if (!r) throw new Error("assistant brain timed out");
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok || (!data.answer && data.error)) throw new Error((data && data.error) || `brain ${r.status}`);
+  return String(data.answer || "");
+}
+
+// The NEC Assistant appends a "FOLLOWUPS: ..." line for the Field HUB's chip UI — strip it here.
+function stripFollowups(s) { return String(s || "").replace(/\n*FOLLOWUPS:.*$/is, "").trim(); }
+
+// Best-effort: pull live project data relevant to the question, formatted as knowledge context.
+async function gatherContext(text) {
+  const used = [], parts = [];
+  if (!hasZoho()) return { context: "", used };
+  const low = String(text || "").toLowerCase();
+  const uniqDls = [...new Set((String(text).match(/\bDL\s?\d{3,}\b/ig) || []).map(normDL))].slice(0, 3);
+  const jobs = await Promise.all(uniqDls.map((dl) =>
+    toolGetJobDetails({ dl }).then((r) => (r ? "PROJECT " + dl + ":\n" + (typeof r === "string" ? r : JSON.stringify(r)) : "")).catch(() => "")));
+  jobs.forEach((j) => { if (j) parts.push(j); });
+  if (jobs.some(Boolean)) used.push("get_job_details");
+  if (/site\s?capture/.test(low)) {
+    try { const r = await toolSearchSitecapture({ query: text }); if (r) { parts.push("SITECAPTURE RESULTS:\n" + (typeof r === "string" ? r : JSON.stringify(r))); used.push("search_sitecapture"); } } catch (e) {}
+  }
+  if (!uniqDls.length && /(status|project|customer|address|install|service|inspection|crew|stage|deal|proyecto|cliente|direcci|instalaci|servicio|inspecci|cuadrilla)/.test(low)) {
+    try { const r = await toolSearchProjects({ query: text }); if (r) { parts.push("PROJECT SEARCH RESULTS:\n" + (typeof r === "string" ? r : JSON.stringify(r))); used.push("search_projects"); } } catch (e) {}
+  }
+  return { context: parts.join("\n\n").slice(0, 9000), used };
 }
 
 // ---- handler ----------------------------------------------------------------
@@ -327,23 +355,13 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(200).end();
-  // GET diagnostic — confirms whether this deployment can see the key (no secret exposed).
+  // GET diagnostic — confirms the Field HUB brain is reachable + Zoho wired (no secret exposed).
   if (req.method === "GET") {
-    return res.status(200).json({
-      ok: true, service: "assistant",
-      hasAnthropicKey: !!process.env.ANTHROPIC_API_KEY,
-      anthropicKeyLen: (process.env.ANTHROPIC_API_KEY || "").length,
-      anthropicKeyLenTrimmed: (process.env.ANTHROPIC_API_KEY || "").trim().length,
-      looksAnthropic: /^sk-ant-/.test((process.env.ANTHROPIC_API_KEY || "").trim()),
-      model: MODEL,
-      hasZoho: !!process.env.ZOHO_REFRESH_TOKEN,
-      envMatches: Object.keys(process.env).filter((k) => /ANTHROPIC|CLAUDE/i.test(k)),
-    });
+    let brainReachable = false;
+    try { const r = await fetchT(NEC_AI_URL, { method: "GET" }, 10000); brainReachable = !!(r && r.ok); } catch (e) {}
+    return res.status(200).json({ ok: true, service: "assistant", brain: NEC_AI_URL, brainReachable, hasZoho: hasZoho() });
   }
   if (req.method !== "POST") return res.status(200).json({ ok: false, error: "POST only" });
-
-  const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim(); // trim stray whitespace/newline from the env value
-  if (!apiKey) return res.status(200).json({ ok: false, configured: false, error: "AI key not set" });
 
   try {
     // Parse the body safely — Vercel may hand us a string or an already-parsed object.
@@ -355,44 +373,22 @@ export default async function handler(req, res) {
     const messages = normalizeMessages(body.messages);
     if (!messages.length) return res.status(200).json({ ok: false, error: "no user message provided" });
 
-    const system = systemPrompt(lang);
-    const used = [];
+    const question = messages[messages.length - 1].content;
+    const history = messages.slice(0, -1).map((m) => ({ role: m.role, text: m.content }));
 
-    // Tool-use loop, capped at 5 iterations.
-    for (let iter = 0; iter < 5; iter++) {
-      const data = await callAnthropic(apiKey, messages, system);
-      const blocks = Array.isArray(data.content) ? data.content : [];
+    // Enrich with live project data (best-effort) and prepend a Sunny persona / read-only hint.
+    const { context, used } = await gatherContext(question);
+    const persona = lang === "es"
+      ? "Eres Sunny, el asistente droide de WindMar (SOLO LECTURA; nunca cambies datos — si te piden editar, di que usen la pestaña Coordinador o Calendario). Sé cálido y breve. NO agregues una línea 'FOLLOWUPS:'."
+      : "You are Sunny, WindMar's friendly droid assistant (READ-ONLY; never change data — if asked to edit, tell them to use the Coordinator or Calendar tab). Be warm and brief. Do NOT add a 'FOLLOWUPS:' line.";
+    const q = persona + "\n\nUser question: " + question;
 
-      if (data.stop_reason === "tool_use") {
-        const toolUses = blocks.filter((b) => b && b.type === "tool_use");
-        // Append the assistant's turn (tool_use blocks) verbatim.
-        messages.push({ role: "assistant", content: blocks });
-        // Execute each tool and collect matching tool_result blocks.
-        const results = [];
-        for (const tu of toolUses) {
-          if (tu.name) used.push(tu.name);
-          const out = await runTool(tu.name, tu.input || {});
-          results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(out).slice(0, 8000) });
-        }
-        messages.push({ role: "user", content: results });
-        continue; // ask the model again with the tool results
-      }
+    let answer;
+    try { answer = stripFollowups(await callNecBrain(q, history, lang, context)); }
+    catch (e) { return res.status(200).json({ ok: false, error: "assistant brain unavailable: " + String((e && e.message) || e) }); }
 
-      // Final turn — join the text blocks.
-      const answer = blocks.filter((b) => b && b.type === "text").map((b) => b.text).join("").trim();
-      return res.status(200).json({ ok: true, answer: answer || (lang === "es" ? "Lo siento, no tengo una respuesta." : "Sorry, I don't have an answer for that."), used: [...new Set(used)] });
-    }
-
-    // Hit the iteration cap — make one last non-tool call for a text answer.
-    try {
-      const finalData = await callAnthropic(apiKey, messages, system);
-      const blocks = Array.isArray(finalData.content) ? finalData.content : [];
-      const answer = blocks.filter((b) => b && b.type === "text").map((b) => b.text).join("").trim();
-      return res.status(200).json({ ok: true, answer: answer || (lang === "es" ? "Necesito más detalles para ayudarte." : "I need a bit more detail to help."), used: [...new Set(used)] });
-    } catch (e) {
-      return res.status(200).json({ ok: true, answer: lang === "es" ? "Estoy teniendo problemas para completar esa búsqueda. Intenta de nuevo." : "I'm having trouble completing that lookup. Please try again.", used: [...new Set(used)] });
-    }
+    return res.status(200).json({ ok: true, answer: answer || (lang === "es" ? "Lo siento, no tengo una respuesta a eso." : "Sorry, I don't have an answer for that."), used: [...new Set(used)] });
   } catch (e) {
-    return res.status(200).json({ ok: false, error: String(e && e.message || e) });
+    return res.status(200).json({ ok: false, error: String((e && e.message) || e) });
   }
 }
