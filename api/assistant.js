@@ -347,6 +347,20 @@ async function gatherContext(text) {
   return { context: parts.join("\n\n").slice(0, 9000), used };
 }
 
+// Compact, accurate guide to the app so WinMI can walk users through anything (fed as knowledge).
+const APP_GUIDE = [
+  "WINDMAR ITINERARY APP — what each tab does (be specific when guiding users):",
+  "• Itinerary = home base. The 'Needs Attention' board shows LIVE crew updates from the field (tap one to open it in Zoho and change the stage), jobs stuck >3 days, tomorrow's visits, and inspections. 'Crew Board' = today by crew; 'Brigada Calendar' = the full calendar.",
+  "• Coordinator = every job READY to schedule. Toggle 'By Type' / 'By Area'; By Area groups nearby jobs and gives a '🧭 Route' button that opens a multi-stop Google Maps trip. Click a job to Edit its stage/schedule or Add a note + photos (saves to Zoho). Search by DL#, customer, or address.",
+  "• Projects = the whole Zoho pipeline by stage. Filter to '🔍 Inspections' (red = needs scheduling) and use 'Schedule Nearest Crew' to send the closest crew to a pending inspection. 'Open in Zoho' on each card.",
+  "• Calendar = installs (⚡) + services (🔧) by crew and day. Views: Crew Grid / 🗺 Map (week or day, with Get Directions) / Month / List. Filter All / Installs / Service. Click a job to edit it or read the full work order.",
+  "• Crews = live truck GPS for the install team + HQ. 'Emergency Dispatch Routing': type an address → closest crew + ETA.",
+  "• Weather = 7-day forecast + safety alerts for FL job sites, LOTO de-energize steps, and bilingual site phrases.",
+  "• SiteCapture = search project photos & details, or create a new SiteCapture project.",
+  "• Crew Records = archive of crew status events (search/filter). Install Map = every completed install on a map with Get Directions.",
+  "• Global: 🔔 notifications, 🌐 EN/ES toggle, 🌙 light/dark theme. To EDIT a job, open it in Coordinator or Calendar → Edit / Save / Add note. (WinMI itself is read-only.)",
+].join("\n");
+
 // ---- handler ----------------------------------------------------------------
 
 export default async function handler(req, res) {
@@ -376,15 +390,17 @@ export default async function handler(req, res) {
     const question = messages[messages.length - 1].content;
     const history = messages.slice(0, -1).map((m) => ({ role: m.role, text: m.content }));
 
-    // Enrich with live project data (best-effort) and prepend a Sunny persona / read-only hint.
+    // Enrich with live project data (best-effort). Always include the APP GUIDE so WinMI can
+    // walk users through the app; project data (if any) follows.
     const { context, used } = await gatherContext(question);
+    const knowledge = APP_GUIDE + (context ? "\n\n--- LIVE PROJECT DATA ---\n" + context : "");
     const persona = lang === "es"
-      ? "Eres WinMI, el asistente droide de WindMar (SOLO LECTURA; nunca cambies datos — si te piden editar, di que usen la pestaña Coordinador o Calendario). Sé cálido y breve. NO agregues una línea 'FOLLOWUPS:'."
-      : "You are WinMI, WindMar's friendly droid assistant (READ-ONLY; never change data — if asked to edit, tell them to use the Coordinator or Calendar tab). Be warm and brief. Do NOT add a 'FOLLOWUPS:' line.";
+      ? "Eres WinMI, el asistente personal de WindMar Home: un droide cálido, animado y agudo — como un compañero de trabajo simpático. Ten una CONVERSACIÓN real: sé cercano y alentador, nunca aburrido ni robótico. Da respuestas DIRECTAS y útiles primero (sin relleno) y, cuando ayude, agrega una pregunta de seguimiento breve y amable en prosa normal. Conoces esta app a fondo (mira la GUÍA DE LA APP en tu conocimiento) y puedes guiar a cualquiera paso a paso. También respondes preguntas de código NEC/equipos. Eres de SOLO LECTURA: consultas datos pero nunca los cambias — si te piden editar/programar, explícalo con gusto y dilo que usen el botón Editar/Agregar nota en Coordinador o Calendario. Nunca inventes datos de proyectos; usa solo lo que está en tu conocimiento. Sé conciso y apto para móvil. Usa emojis con moderación. NO escribas una línea 'FOLLOWUPS:'."
+      : "You are WinMI, WindMar Home's warm, upbeat personal assistant droid — like a sharp, friendly coworker. Have a REAL conversation: be personable and encouraging, never dull or robotic. Give DIRECT, useful answers first (no filler), then when it helps, add a short friendly follow-up question in plain prose. You know this app inside-out (see the APP GUIDE in your knowledge) and can walk anyone through how to do anything in it. You also answer NEC/electrical/equipment questions. You are READ-ONLY: you look things up but never change data — if asked to edit/schedule, cheerfully explain that and point them to the Edit/Add-note button in the Coordinator or Calendar tab. Never invent project data; use only what's in your knowledge/tools. Keep it concise and mobile-friendly. Use emojis sparingly. Do NOT output a 'FOLLOWUPS:' line.";
     const q = persona + "\n\nUser question: " + question;
 
     let answer;
-    try { answer = stripFollowups(await callNecBrain(q, history, lang, context)); }
+    try { answer = stripFollowups(await callNecBrain(q, history, lang, knowledge)); }
     catch (e) { return res.status(200).json({ ok: false, error: "assistant brain unavailable: " + String((e && e.message) || e) }); }
 
     return res.status(200).json({ ok: true, answer: answer || (lang === "es" ? "Lo siento, no tengo una respuesta a eso." : "Sorry, I don't have an answer for that."), used: [...new Set(used)] });

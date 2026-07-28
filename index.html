@@ -3392,13 +3392,28 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
 
   // ---- First-visit "how to use" tour (spotlight coach-marks, narrated by Sunny) ----
   function tourSteps(){
-    var steps=[{ sel:null, title:T("Meet WinMI 🤖","Te presento a WinMI 🤖"), body:T("I'm your assistant. Tap me in the corner anytime to ask about any project — by voice or text.","Soy tu asistente. Tócame en la esquina para preguntar sobre cualquier proyecto — por voz o texto.") }];
     var tabs=document.querySelectorAll("#root .tabbtn, nav .tabbtn");
     function findTab(rx){ for(var i=0;i<tabs.length;i++){ if(rx.test(tabs[i].textContent||"")) return tabs[i]; } return null; }
-    var nav=document.querySelector("nav"); if(nav) steps.push({ el:nav, title:T("Your tabs","Tus pestañas"), body:T("Swipe across here to reach every section.","Desliza aquí para ver todas las secciones.") });
-    var coord=findTab(/coordinator|coordinador/i); if(coord) steps.push({ el:coord, title:T("Coordinator","Coordinador"), body:T("Everything ready to schedule. Try 'By Area' to plan a whole route at once!","Todo listo para programar. ¡Prueba 'Por zona' para planear una ruta completa!") });
-    var cal=findTab(/calendar|calendario/i); if(cal) steps.push({ el:cal, title:T("Calendar","Calendario"), body:T("See installs & services by crew and day.","Ve instalaciones y servicios por cuadrilla y día.") });
-    steps.push({ sel:null, title:T("You're all set! ⚡","¡Listo! ⚡"), body:T("I'm always in the corner. Let's power Florida!","Siempre estoy en la esquina. ¡A energizar Florida!") });
+    var steps=[{ sel:null, title:T("Hey, I'm WinMI! 👋","¡Hola, soy WinMI! 👋"), body:T("Give me ~30 seconds and I'll show you what this app can do. You can skip anytime — let's go!","Dame ~30 segundos y te muestro lo que hace esta app. Puedes saltar cuando quieras. ¡Vamos!") }];
+    var add=function(rx,title,body){ var el=findTab(rx); if(el) steps.push({ el:el, title:title, body:body }); };
+    add(/itinerary|itinerario/i, T("🏠 Itinerary — your home base","🏠 Itinerario — tu base"),
+      T("The 'Needs Attention' board up top shows live crew updates, jobs stuck over 3 days, tomorrow's visits and inspections. Tap a crew update to open it in Zoho and change the stage.","El tablero 'Requiere Atención' muestra actualizaciones de cuadrillas en vivo, trabajos atascados +3 días, visitas de mañana e inspecciones. Toca una actualización para abrirla en Zoho y cambiar la etapa."));
+    add(/coordinator|coordinador/i, T("📋 Coordinator — schedule with ease","📋 Coordinador — programa fácil"),
+      T("Every job ready to schedule, in one list. Flip to '📍 By Area' and I'll group nearby jobs and give you a one-tap 🧭 Route in Google Maps. Click a job to edit its stage or add a note with photos.","Todos los trabajos listos para programar. Cambia a '📍 Por zona' y agrupo los cercanos con un botón 🧭 Ruta en Google Maps. Toca un trabajo para editar su etapa o agregar una nota con fotos."));
+    add(/calendar|calendario/i, T("🗓 Calendar — the whole week","🗓 Calendario — toda la semana"),
+      T("See every crew's week — installs ⚡ and services 🔧 by crew and day. Switch to 🗺 Map, Month or List. Tap any job to edit it or read the full work order.","Ve la semana de cada cuadrilla — instalaciones ⚡ y servicios 🔧 por cuadrilla y día. Cambia a 🗺 Mapa, Mes o Lista. Toca un trabajo para editarlo o leer la orden completa."));
+    add(/projects|proyectos/i, T("📊 Projects — the pipeline","📊 Proyectos — el flujo"),
+      T("Your whole Zoho pipeline by stage. Filter to 🔍 Inspections to see what needs scheduling, then use 'Schedule Nearest Crew' to send the closest crew.","Todo tu flujo de Zoho por etapa. Filtra a 🔍 Inspecciones para ver qué falta programar y usa 'Cuadrilla más cercana' para enviar la más cerca."));
+    add(/crews|cuadrillas/i, T("🚚 Crews — live GPS","🚚 Cuadrillas — GPS en vivo"),
+      T("Live truck locations for the whole install team. Emergency? Type an address in 'Emergency Dispatch Routing' and I'll find the closest crew + ETA.","Ubicación en vivo de todos los camiones del equipo. ¿Emergencia? Escribe una dirección en 'Ruta de Despacho' y encuentro la cuadrilla más cercana + tiempo estimado."));
+    add(/weather|clima/i, T("🌤 Weather — work safe","🌤 Clima — trabaja seguro"),
+      T("7-day forecast and safety alerts before rooftop work — plus LOTO steps and bilingual site phrases.","Pronóstico de 7 días y alertas de seguridad antes de trabajar en techo — además pasos LOTO y frases bilingües."));
+    add(/sitecapture|site capture/i, T("📷 SiteCapture — photos","📷 SiteCapture — fotos"),
+      T("Search a project's photos and details, or create a new SiteCapture project right here.","Busca fotos y detalles de un proyecto, o crea uno nuevo de SiteCapture aquí mismo."));
+    add(/install map|mapa de inst/i, T("🗺 Install Map","🗺 Mapa de Instalaciones"),
+      T("Every completed install on one map — great for spotting customers near a new job.","Cada instalación completada en un mapa — ideal para ver clientes cerca de un trabajo nuevo."));
+    steps.push({ sel:null, title:T("That's the tour! 🎉","¡Ese es el tour! 🎉"),
+      body:T("Anytime you need a project status, an NEC code answer, or directions — just tap me and ask, by text or 🎤 voice. Let's power Florida! ⚡","Cuando necesites el estado de un proyecto, una respuesta de código NEC o direcciones — tócame y pregúntame, por texto o 🎤 voz. ¡A energizar Florida! ⚡") });
     return steps;
   }
   function startTour(){ if(panel) closePanel(); stopSpeak(); var steps=tourSteps(), i=0;
