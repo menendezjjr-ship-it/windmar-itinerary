@@ -333,6 +333,8 @@ export default async function handler(req, res) {
       ok: true, service: "assistant",
       hasAnthropicKey: !!process.env.ANTHROPIC_API_KEY,
       anthropicKeyLen: (process.env.ANTHROPIC_API_KEY || "").length,
+      anthropicKeyLenTrimmed: (process.env.ANTHROPIC_API_KEY || "").trim().length,
+      looksAnthropic: /^sk-ant-/.test((process.env.ANTHROPIC_API_KEY || "").trim()),
       model: MODEL,
       hasZoho: !!process.env.ZOHO_REFRESH_TOKEN,
       envMatches: Object.keys(process.env).filter((k) => /ANTHROPIC|CLAUDE/i.test(k)),
@@ -340,7 +342,7 @@ export default async function handler(req, res) {
   }
   if (req.method !== "POST") return res.status(200).json({ ok: false, error: "POST only" });
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim(); // trim stray whitespace/newline from the env value
   if (!apiKey) return res.status(200).json({ ok: false, configured: false, error: "AI key not set" });
 
   try {
