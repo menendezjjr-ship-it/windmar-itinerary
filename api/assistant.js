@@ -118,10 +118,29 @@ async function fetchNotes(module, id, token) {
 // Stopwords so "what's the status of the Martinez install?" → "martinez install" for Zoho word-search.
 const STOP = new Set(("what whats what s is are am the a an of on for from me my mine show tell about job jobs project projects please who whom where when why how does do did can could would should you your check checking look looking see find finding get getting give any all this that these those it its with to in into and or at as by not no now today " +
   "info information detail details note notes report reports status update updates state stage schedule scheduled " +
+  "going happening up gonna wrong need needs also just still onto here there thing things something anything going-on " +
   "que cual cuales es esta este esto los las el la del de en para me mi por favor quien donde cuando como puede podria buscar encontrar dame muestra dime sobre trabajo trabajos proyecto proyectos info nota notas reporte reportes estado etapa informacion detalle detalles").split(/\s+/));
 function searchTermsFrom(text) {
   const toks = String(text || "").toLowerCase().replace(/[^\w\s#/-]/g, " ").split(/\s+/).filter(Boolean);
   return toks.filter((t) => t.length >= 2 && !STOP.has(t)).join(" ").trim();
+}
+
+// Zoho word-search ANDs every word, so a full sentence rarely matches. Build ordered query
+// candidates (proper nouns first, then each significant token) and return the FIRST that hits.
+async function smartProjectSearch(text) {
+  const cands = [];
+  const caps = (String(text).match(/\b[A-Z][a-zA-Z]{2,}\b/g) || []).filter((w) => !STOP.has(w.toLowerCase()));
+  if (caps.length > 1) cands.push(caps.join(" "));
+  caps.slice().sort((a, b) => b.length - a.length).forEach((w) => cands.push(w));
+  const stripped = searchTermsFrom(text);
+  if (stripped) cands.push(stripped);
+  stripped.split(" ").filter((t) => t.length >= 4).sort((a, b) => b.length - a.length).forEach((t) => cands.push(t));
+  const seen = new Set(), queries = [];
+  for (const q of cands) { const k = q.toLowerCase(); if (q && !seen.has(k)) { seen.add(k); queries.push(q); } if (queries.length >= 4) break; }
+  for (const q of queries) {
+    try { const res = await toolSearchProjects({ query: q }); if (res && Array.isArray(res.matches) && res.matches.length) return { res, query: q }; } catch (e) {}
+  }
+  return { res: { count: 0, matches: [] }, query: queries[0] || stripped || String(text) };
 }
 
 // ---- READ-ONLY tool implementations ----------------------------------------
@@ -402,22 +421,19 @@ async function gatherContext(text) {
   // (c) No DL, but it's clearly about a specific project (by name/address/status/notes/...) →
   //     search Zoho, then DEEP-fetch the top match(es) so WinMI gets notes + status, not one-liners.
   const projectish = /(status|note|report|update|stage|schedule|ready|pending|complete|past ?due|inspection|permit|bom|plan|install|service|crew|deal|project|job|customer|address|phone|when|where|who|estado|nota|reporte|etapa|program|list[oa]|pendiente|complet|inspecci|permiso|instalaci|servicio|cuadrilla|cliente|direcci|proyecto|trabajo)/i;
-  if (!uniqDls.length && projectish.test(low)) {
-    const terms = searchTermsFrom(text);
-    if (terms.length >= 2) {
-      try {
-        const res = await toolSearchProjects({ query: terms });
-        parts.push('PROJECT SEARCH for "' + terms + '":\n' + JSON.stringify(res));
-        used.push("search_projects");
-        const dls = (res && Array.isArray(res.matches) ? res.matches : []).map((m) => normDL(m.dl)).filter((d) => /^(?:RDL|RL|DL|MSP|S)\d{2,}$/.test(d));
-        const top = [...new Set(dls)].slice(0, 2);
-        if (top.length) {
-          const deep = await Promise.all(top.map((dl) => toolGetJobDetails({ dl }).catch((e) => ({ error: String((e && e.message) || e) }))));
-          deep.forEach((r, i) => parts.push("PROJECT " + top[i] + " (full Zoho record):\n" + JSON.stringify(r)));
-          if (used.indexOf("get_job_details") < 0) used.push("get_job_details");
-        }
-      } catch (e) {}
-    }
+  if (!uniqDls.length && projectish.test(low) && searchTermsFrom(text).length >= 2) {
+    try {
+      const { res, query } = await smartProjectSearch(text);
+      parts.push('PROJECT SEARCH for "' + query + '":\n' + JSON.stringify(res));
+      used.push("search_projects");
+      const dls = (res && Array.isArray(res.matches) ? res.matches : []).map((m) => normDL(m.dl)).filter((d) => /^(?:RDL|RL|DL|MSP|S)\d{2,}$/.test(d));
+      const top = [...new Set(dls)].slice(0, 2);
+      if (top.length) {
+        const deep = await Promise.all(top.map((dl) => toolGetJobDetails({ dl }).catch((e) => ({ error: String((e && e.message) || e) }))));
+        deep.forEach((r, i) => parts.push("PROJECT " + top[i] + " (full Zoho record):\n" + JSON.stringify(r)));
+        if (used.indexOf("get_job_details") < 0) used.push("get_job_details");
+      }
+    } catch (e) {}
   }
 
   return { context: parts.join("\n\n").slice(0, 14000), used };
