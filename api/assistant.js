@@ -95,6 +95,35 @@ function normDL(s) {
   return m ? m[1] : String(s || "").toUpperCase().replace(/\s+/g, "");
 }
 
+// Strip Zoho note HTML + @-mention tokens (crm[user#...]crm) into plain text.
+function stripHtml(s) {
+  return String(s || "")
+    .replace(/crm\[user#[^\]]*\]crm/g, "")
+    .replace(/<br\s*\/?>/gi, "\n").replace(/<\/(p|div|li)>/gi, "\n").replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&#?\w+;/g, " ").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+// All CRM Notes attached to a record (module/id) → [{title,content,author,time}], newest first.
+async function fetchNotes(module, id, token) {
+  if (!id) return [];
+  const r = await fetchT(`${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(module)}/${encodeURIComponent(id)}/Notes?fields=Note_Title,Note_Content,Created_Time,Owner&per_page=50&sort_by=Created_Time&sort_order=desc`,
+    { headers: { Authorization: `Zoho-oauthtoken ${token}` } }, 12000).catch(() => null);
+  if (!r || r.status === 204 || !r.ok) return [];
+  const d = await r.json().catch(() => ({}));
+  return (d.data || []).map((n) => ({ title: n.Note_Title || "", content: stripHtml(n.Note_Content), author: (n.Owner && n.Owner.name) || "", time: n.Created_Time || "" }))
+    .filter((n) => n.content || n.title);
+}
+
+// Stopwords so "what's the status of the Martinez install?" → "martinez install" for Zoho word-search.
+const STOP = new Set(("what whats what s is are am the a an of on for from me my mine show tell about job jobs project projects please who whom where when why how does do did can could would should you your check checking look looking see find finding get getting give any all this that these those it its with to in into and or at as by not no now today " +
+  "info information detail details note notes report reports status update updates state stage schedule scheduled " +
+  "que cual cuales es esta este esto los las el la del de en para me mi por favor quien donde cuando como puede podria buscar encontrar dame muestra dime sobre trabajo trabajos proyecto proyectos info nota notas reporte reportes estado etapa informacion detalle detalles").split(/\s+/));
+function searchTermsFrom(text) {
+  const toks = String(text || "").toLowerCase().replace(/[^\w\s#/-]/g, " ").split(/\s+/).filter(Boolean);
+  return toks.filter((t) => t.length >= 2 && !STOP.has(t)).join(" ").trim();
+}
+
 // ---- READ-ONLY tool implementations ----------------------------------------
 
 // 1) search_projects — word search across Zoho Deals (DL#, customer, or address).
@@ -143,23 +172,42 @@ async function toolGetJobDetails(input) {
 
   // Related records — each guarded so one failure doesn't sink the whole lookup.
   const dealId = deal.id;
-  const instFields = "Name,Stage,Installation_Start_Date,Installation_Complete_Date,Installation_Team,Installation_Notes";
+  const instFields = "Name,Stage,Installation_Start_Date,Installation_Complete_Date,Installation_Proposed_Date,Installation_Confirmed_Date,Installation_Team,Installation_Notes,Roof_Notes,AHJ_Specific_Install_Notes,Number_of_Days_Needed,MSP_Upgrade_Required,VIP_Installation";
   const svcFields = "Name,Ticket_Status,Scheduled_Visit_1,Type_of_Service,Service_Description,Assigned_Technician,Priority";
-  const [installs, services, inspections] = await Promise.all([
-    zohoSearch("Installation", `criteria=${encodeURIComponent(`(Deal:equals:${dealId})`)}&fields=${encodeURIComponent(instFields)}&per_page=10`, token).catch((e) => ({ __err: String(e && e.message || e) })),
-    zohoSearch("Service_Ticket", `criteria=${encodeURIComponent(`(Associated_Deal:equals:${dealId})`)}&fields=${encodeURIComponent(svcFields)}&per_page=25`, token).catch((e) => ({ __err: String(e && e.message || e) })),
-    zohoSearch("Final_Inspectin", `criteria=${encodeURIComponent(`(Deal:equals:${dealId})`)}&fields=${encodeURIComponent("Name")}&per_page=10`, token).catch((e) => ({ __err: String(e && e.message || e) })),
+  const [installs, services, inspections, dealNotes] = await Promise.all([
+    zohoSearch("Installation", `criteria=${encodeURIComponent(`(Deal:equals:${dealId})`)}&fields=${encodeURIComponent(instFields)}&per_page=10`, token).catch(() => []),
+    zohoSearch("Service_Ticket", `criteria=${encodeURIComponent(`(Associated_Deal:equals:${dealId})`)}&fields=${encodeURIComponent(svcFields)}&per_page=25`, token).catch(() => []),
+    zohoSearch("Final_Inspectin", `criteria=${encodeURIComponent(`(Deal:equals:${dealId})`)}&fields=${encodeURIComponent("Name,Inspection_Stage,Final_Inspection_Notes")}&per_page=10`, token).catch(() => []),
+    fetchNotes("Deals", dealId, token),
   ]);
 
-  const install = Array.isArray(installs) && installs[0] ? {
-    stage: installs[0].Stage || "",
-    startDate: installs[0].Installation_Start_Date || "",
-    completeDate: installs[0].Installation_Complete_Date || "",
-    crew: lookup(installs[0].Installation_Team) || "",
-    notes: (installs[0].Installation_Notes || "").trim(),
-  } : null;
+  const instArr = Array.isArray(installs) ? installs : [];
+  const install = instArr.map((it) => ({
+    record: it.Name || "",
+    stage: it.Stage || "",
+    startDate: it.Installation_Start_Date || "",
+    completeDate: it.Installation_Complete_Date || "",
+    proposedDate: it.Installation_Proposed_Date || "",
+    confirmedDate: it.Installation_Confirmed_Date || "",
+    crew: lookup(it.Installation_Team) || "",
+    daysNeeded: it.Number_of_Days_Needed || "",
+    mspUpgrade: it.MSP_Upgrade_Required || "",
+    vip: it.VIP_Installation || "",
+    installNotes: (it.Installation_Notes || "").trim(),
+    roofNotes: (it.Roof_Notes || "").trim(),
+    ahjNotes: (it.AHJ_Specific_Install_Notes || "").trim(),
+  }));
 
-  const tickets = Array.isArray(services) ? services.map((s) => ({
+  // Also pull CRM Notes attached to the Installation record(s) and merge with the Deal's notes.
+  let notes = Array.isArray(dealNotes) ? dealNotes.slice() : [];
+  const instIds = instArr.map((it) => it.id).filter(Boolean).slice(0, 2);
+  const instNoteSets = await Promise.all(instIds.map((iid) => fetchNotes("Installation", iid, token)));
+  instNoteSets.forEach((set) => { notes = notes.concat(set); });
+  const seen = new Set();
+  notes = notes.filter((n) => { const k = (n.time || "") + "|" + (n.content || "").slice(0, 40); if (seen.has(k)) return false; seen.add(k); return true; })
+    .sort((a, b) => String(b.time || "").localeCompare(String(a.time || ""))).slice(0, 15);
+
+  const tickets = (Array.isArray(services) ? services : []).map((s) => ({
     ticket: s.Name || "",
     status: (s.Ticket_Status || "").trim(),
     scheduledVisit: s.Scheduled_Visit_1 || "",
@@ -167,10 +215,11 @@ async function toolGetJobDetails(input) {
     description: (s.Service_Description || "").trim(),
     tech: lookup(s.Assigned_Technician) || "",
     priority: s.Priority || "",
-  })) : [];
+  }));
 
-  const inspection = Array.isArray(inspections) && inspections[0]
-    ? { record: inspections[0].Name || "", found: true }
+  const insArr = Array.isArray(inspections) ? inspections : [];
+  const inspection = insArr[0]
+    ? { found: true, record: insArr[0].Name || "", stage: insArr[0].Inspection_Stage || "", notes: (insArr[0].Final_Inspection_Notes || "").trim() }
     : { found: false };
 
   return {
@@ -178,12 +227,15 @@ async function toolGetJobDetails(input) {
     dl: p.num || dl,
     customer: p.customer || deal.Deal_Name || "",
     address,
+    phone: clean(deal.Client_Phone) || clean(deal.Client_Mobile) || "",
     ahj: lookup(deal.Authority_Having_Jurisdiction_AHJ) || "",
     dealStage: deal.Stage || "",
     systemKw: (deal.System_Size_kW1 != null && deal.System_Size_kW1 !== 0) ? deal.System_Size_kW1 : null,
-    install,
+    installations: install,
     serviceTickets: tickets,
     inspection,
+    notes,                       // real CRM Notes (coordinator/crew) attached to the Deal + Installation
+    noteCount: notes.length,
     zohoUrl: `https://crm.zoho.com/crm/${ORG}/tab/Potentials/${deal.id}`,
   };
 }
@@ -333,18 +385,42 @@ async function gatherContext(text) {
   const used = [], parts = [];
   if (!hasZoho()) return { context: "", used };
   const low = String(text || "").toLowerCase();
-  const uniqDls = [...new Set((String(text).match(/\bDL\s?\d{3,}\b/ig) || []).map(normDL))].slice(0, 3);
-  const jobs = await Promise.all(uniqDls.map((dl) =>
-    toolGetJobDetails({ dl }).then((r) => (r ? "PROJECT " + dl + ":\n" + (typeof r === "string" ? r : JSON.stringify(r)) : "")).catch(() => "")));
-  jobs.forEach((j) => { if (j) parts.push(j); });
-  if (jobs.some(Boolean)) used.push("get_job_details");
+
+  // (a) Explicit DL/RDL/RL/MSP numbers → deep lookup each (full record incl. notes).
+  const uniqDls = [...new Set((String(text).match(/\b(?:RDL|RL|DL|MSP)\s?\d{3,}\b/ig) || []).map(normDL))].slice(0, 3);
+  if (uniqDls.length) {
+    const jobs = await Promise.all(uniqDls.map((dl) => toolGetJobDetails({ dl }).catch((e) => ({ error: String((e && e.message) || e) }))));
+    jobs.forEach((r, i) => parts.push("PROJECT " + uniqDls[i] + " (full Zoho record):\n" + JSON.stringify(r)));
+    used.push("get_job_details");
+  }
+
+  // (b) SiteCapture, when asked.
   if (/site\s?capture/.test(low)) {
-    try { const r = await toolSearchSitecapture({ query: text }); if (r) { parts.push("SITECAPTURE RESULTS:\n" + (typeof r === "string" ? r : JSON.stringify(r))); used.push("search_sitecapture"); } } catch (e) {}
+    try { const r = await toolSearchSitecapture({ query: searchTermsFrom(text) || text }); parts.push("SITECAPTURE RESULTS:\n" + JSON.stringify(r)); used.push("search_sitecapture"); } catch (e) {}
   }
-  if (!uniqDls.length && /(status|project|customer|address|install|service|inspection|crew|stage|deal|proyecto|cliente|direcci|instalaci|servicio|inspecci|cuadrilla)/.test(low)) {
-    try { const r = await toolSearchProjects({ query: text }); if (r) { parts.push("PROJECT SEARCH RESULTS:\n" + (typeof r === "string" ? r : JSON.stringify(r))); used.push("search_projects"); } } catch (e) {}
+
+  // (c) No DL, but it's clearly about a specific project (by name/address/status/notes/...) →
+  //     search Zoho, then DEEP-fetch the top match(es) so WinMI gets notes + status, not one-liners.
+  const projectish = /(status|note|report|update|stage|schedule|ready|pending|complete|past ?due|inspection|permit|bom|plan|install|service|crew|deal|project|job|customer|address|phone|when|where|who|estado|nota|reporte|etapa|program|list[oa]|pendiente|complet|inspecci|permiso|instalaci|servicio|cuadrilla|cliente|direcci|proyecto|trabajo)/i;
+  if (!uniqDls.length && projectish.test(low)) {
+    const terms = searchTermsFrom(text);
+    if (terms.length >= 2) {
+      try {
+        const res = await toolSearchProjects({ query: terms });
+        parts.push('PROJECT SEARCH for "' + terms + '":\n' + JSON.stringify(res));
+        used.push("search_projects");
+        const dls = (res && Array.isArray(res.matches) ? res.matches : []).map((m) => normDL(m.dl)).filter((d) => /^(?:RDL|RL|DL|MSP|S)\d{2,}$/.test(d));
+        const top = [...new Set(dls)].slice(0, 2);
+        if (top.length) {
+          const deep = await Promise.all(top.map((dl) => toolGetJobDetails({ dl }).catch((e) => ({ error: String((e && e.message) || e) }))));
+          deep.forEach((r, i) => parts.push("PROJECT " + top[i] + " (full Zoho record):\n" + JSON.stringify(r)));
+          if (used.indexOf("get_job_details") < 0) used.push("get_job_details");
+        }
+      } catch (e) {}
+    }
   }
-  return { context: parts.join("\n\n").slice(0, 9000), used };
+
+  return { context: parts.join("\n\n").slice(0, 14000), used };
 }
 
 // Compact, accurate guide to the app so WinMI can walk users through anything (fed as knowledge).
@@ -395,8 +471,8 @@ export default async function handler(req, res) {
     const { context, used } = await gatherContext(question);
     const knowledge = APP_GUIDE + (context ? "\n\n--- LIVE PROJECT DATA ---\n" + context : "");
     const persona = lang === "es"
-      ? "Eres WinMI, el asistente personal de WindMar Home: un droide cálido, animado y agudo — como un compañero de trabajo simpático. Ten una CONVERSACIÓN real: sé cercano y alentador, nunca aburrido ni robótico. Da respuestas DIRECTAS y útiles primero (sin relleno) y, cuando ayude, agrega una pregunta de seguimiento breve y amable en prosa normal. Conoces esta app a fondo (mira la GUÍA DE LA APP en tu conocimiento) y puedes guiar a cualquiera paso a paso. También respondes preguntas de código NEC/equipos. Eres de SOLO LECTURA: consultas datos pero nunca los cambias — si te piden editar/programar, explícalo con gusto y dilo que usen el botón Editar/Agregar nota en Coordinador o Calendario. Nunca inventes datos de proyectos; usa solo lo que está en tu conocimiento. Sé conciso y apto para móvil. Usa emojis con moderación. NO escribas una línea 'FOLLOWUPS:'."
-      : "You are WinMI, WindMar Home's warm, upbeat personal assistant droid — like a sharp, friendly coworker. Have a REAL conversation: be personable and encouraging, never dull or robotic. Give DIRECT, useful answers first (no filler), then when it helps, add a short friendly follow-up question in plain prose. You know this app inside-out (see the APP GUIDE in your knowledge) and can walk anyone through how to do anything in it. You also answer NEC/electrical/equipment questions. You are READ-ONLY: you look things up but never change data — if asked to edit/schedule, cheerfully explain that and point them to the Edit/Add-note button in the Coordinator or Calendar tab. Never invent project data; use only what's in your knowledge/tools. Keep it concise and mobile-friendly. Use emojis sparingly. Do NOT output a 'FOLLOWUPS:' line.";
+      ? "Eres WinMI, el asistente personal de WindMar Home: un droide cálido, animado y agudo — como un compañero de trabajo simpático. Ten una CONVERSACIÓN real: sé cercano y alentador, nunca aburrido ni robótico. Da respuestas DIRECTAS y útiles primero (sin relleno) y, cuando ayude, agrega una pregunta de seguimiento breve y amable en prosa normal. Conoces esta app a fondo (mira la GUÍA DE LA APP en tu conocimiento) y puedes guiar a cualquiera paso a paso. También respondes preguntas de código NEC/equipos. Eres de SOLO LECTURA: consultas datos pero nunca los cambias — si te piden editar/programar, explícalo con gusto y dilo que usen el botón Editar/Agregar nota en Coordinador o Calendario. Nunca inventes datos de proyectos; usa solo lo que está en tu conocimiento. Cuando te pregunten por un trabajo o proyecto específico, da un reporte claro con los DATOS EN VIVO de tu conocimiento — su etapa/estado, fechas clave, cuadrilla, dirección, tickets de servicio, inspección y las NOTAS más recientes (resúmelas). Si los datos no incluyen el proyecto, dilo claramente y pide el DL# o el nombre exacto del cliente. Sé conciso y apto para móvil. Usa emojis con moderación. NO escribas una línea 'FOLLOWUPS:'."
+      : "You are WinMI, WindMar Home's warm, upbeat personal assistant droid — like a sharp, friendly coworker. Have a REAL conversation: be personable and encouraging, never dull or robotic. Give DIRECT, useful answers first (no filler), then when it helps, add a short friendly follow-up question in plain prose. You know this app inside-out (see the APP GUIDE in your knowledge) and can walk anyone through how to do anything in it. You also answer NEC/electrical/equipment questions. You are READ-ONLY: you look things up but never change data — if asked to edit/schedule, cheerfully explain that and point them to the Edit/Add-note button in the Coordinator or Calendar tab. Never invent project data; use only what's in your knowledge/tools. When someone asks about a specific job or project, give a clear report straight from the LIVE PROJECT DATA in your knowledge — its stage/status, key dates, crew, address, service tickets, inspection, and the most recent NOTES (summarize them). If the data does not contain the project, say so plainly and ask for the DL# or the exact customer name. Keep it concise and mobile-friendly. Use emojis sparingly. Do NOT output a 'FOLLOWUPS:' line.";
     const q = persona + "\n\nUser question: " + question;
 
     let answer;
