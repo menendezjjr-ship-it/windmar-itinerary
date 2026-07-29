@@ -856,7 +856,12 @@ function opsCalHTML(){
     ${view}${dayModal}${selModal}</div>`;
 }
 function calendarTabHTML(){ return opsCalHTML(); }
-setInterval(function(){ if(((S.tab==="itinerary"&&S.itinView==="brigada")||S.tab==="calendar")&&S.cal.status==="live") loadOpsCal(true); }, 90000);
+// Calendar stays fresh: poll every 30s while it's the visible tab, AND refetch INSTANTLY when the
+// coordinator returns to the tab (e.g. right after changing a status in Zoho) — no waiting.
+function calIsActive(){ return ((S.tab==="itinerary"&&S.itinView==="brigada")||S.tab==="calendar"); }
+setInterval(function(){ if(!document.hidden && calIsActive() && S.cal.status==="live") loadOpsCal(true); }, 30000);
+(function(){ var refreshOnReturn=function(){ if(!document.hidden && calIsActive() && S.cal.status!=="loading") loadOpsCal(true); };
+  document.addEventListener("visibilitychange",refreshOnReturn); window.addEventListener("focus",refreshOnReturn); })();
 
 /* ---------- LIVE Zoho jobs feed (Installations + Service Tickets) ---------- */
 async function loadJobs(silent){
