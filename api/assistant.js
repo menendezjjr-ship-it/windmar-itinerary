@@ -122,7 +122,7 @@ const STOP = new Set(("what whats what s is are am the a an of on for from me my
   "que cual cuales es esta este esto los las el la del de en para me mi por favor quien donde cuando como puede podria buscar encontrar dame muestra dime sobre trabajo trabajos proyecto proyectos info nota notas reporte reportes estado etapa informacion detalle detalles").split(/\s+/));
 function searchTermsFrom(text) {
   const toks = String(text || "").toLowerCase().replace(/[^\w\s#/-]/g, " ").split(/\s+/).filter(Boolean);
-  return toks.filter((t) => t.length >= 2 && !STOP.has(t)).join(" ").trim();
+  return toks.filter((t) => t.length >= 2 && !STOP.has(t) && !GENERIC.has(t)).join(" ").trim();
 }
 
 // Zoho word-search ANDs every word, so a full sentence rarely matches. Build ordered query
