@@ -471,14 +471,21 @@ async function callClaude(apiKey, question, history, lang) {
 
 // Claude VISION — analyze a field photo (equipment, panel, breaker box, roof, plan) with WindMar
 // expertise. Returns identification + specs + NEC/code notes + install guidance.
-async function callClaudeVision(apiKey, question, image, history, lang) {
+async function callClaudeVision(apiKey, question, att, history, lang) {
   const es = lang === "es";
-  const sys = systemPrompt(lang) + "\n\n" + (es
-    ? "MODO FOTO: Analiza la imagen del campo con máxima precisión. 1) Identifica CADA equipo visible: marca + modelo/número de parte + specs clave. 2) Señala problemas o violaciones de código (NEC 2020/2023 + código de Florida) con el artículo exacto. 3) Da recomendaciones de instalación accionables. Sé directo; si algo no se ve bien, dilo."
-    : "PHOTO MODE: Analyze the field image with maximum precision. 1) Identify EVERY piece of equipment: brand + model/part number + key specs. 2) Flag any problems or code violations (NEC 2020/2023 + Florida Building Code) with the exact article. 3) Give actionable install guidance. Be direct; if something can't be seen clearly, say so.") + "\n\n" + WINDMAR_KB;
+  const isDoc = /pdf/i.test(att.mediaType || "");
+  const mode = isDoc
+    ? (es ? "MODO DOCUMENTO: Lee el documento con cuidado y da una descripción/resumen DETALLADO y preciso. Si es un plano, BOM, hoja de especificaciones, permiso o reporte, extrae los datos clave (equipo, cantidades, valores, direcciones, fechas) y señala lo relevante al NEC 2020/2023 + código de Florida o estándares WindMar. Cita los detalles; no inventes."
+             : "DOCUMENT MODE: Read the attached document carefully and give a DETAILED, accurate description/summary. If it's a plan set, BOM, spec sheet, permit, or report, extract the key details (equipment, quantities, ratings, addresses, dates) and flag anything relevant to NEC 2020/2023 + Florida code or WindMar standards. Quote specifics; don't invent.")
+    : (es ? "MODO FOTO: Analiza la imagen con máxima precisión: identifica CADA equipo (marca + modelo + specs), señala problemas/violaciones de código con el artículo exacto, y da recomendaciones. Si algo no se ve, dilo."
+             : "PHOTO MODE: Analyze the field image with maximum precision. Identify EVERY piece of equipment (brand + model/part # + key specs), flag any code violations (NEC 2020/2023 + Florida code) with the exact article, and give actionable install guidance. If something can't be seen clearly, say so.");
+  const sys = systemPrompt(lang) + "\n\n" + mode + "\n\n" + WINDMAR_KB;
+  const block = isDoc
+    ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: att.data } }
+    : { type: "image", source: { type: "base64", media_type: att.mediaType || "image/jpeg", data: att.data } };
   const content = [
-    { type: "image", source: { type: "base64", media_type: image.mediaType || "image/jpeg", data: image.data } },
-    { type: "text", text: question || (es ? "Analiza esta foto — identifica el equipo y cualquier problema de código." : "Analyze this photo — identify the equipment and any code issues.") },
+    block,
+    { type: "text", text: question || (es ? (isDoc ? "Describe y analiza este documento en detalle." : "Analiza esta foto — identifica el equipo y problemas de código.") : (isDoc ? "Describe and analyze this document in detail." : "Analyze this photo — identify the equipment and any code issues.")) },
   ];
   const msgs = (history || []).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: String((m && (m.text || m.content)) || "") })).filter((m) => m.content);
   msgs.push({ role: "user", content });
@@ -663,18 +670,20 @@ export default async function handler(req, res) {
     const question = messages[messages.length - 1].content;
     const history = messages.slice(0, -1).map((m) => ({ role: m.role, text: m.content }));
 
-    // ── PHOTO MODE: if an image is attached, analyze it with Claude vision (Gemini vision backup).
-    const image = (body.image && body.image.data) ? body.image : null;
-    if (image) {
+    // ── FILE MODE: a photo (image/*) OR a document (application/pdf) → read it with Claude
+    // (vision for photos, document input for PDFs); Gemini fallback via the Field HUB nec-ai.
+    const att = (body.image && body.image.data) ? body.image : ((body.file && body.file.data) ? body.file : null);
+    if (att) {
+      const isDoc = /pdf/i.test(att.mediaType || "");
       const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim();
       let answer = null, brain = "";
-      if (/^sk-ant-/.test(apiKey)) { try { answer = await callClaudeVision(apiKey, question, image, history, lang); if (answer) brain = "claude-vision"; } catch (e) {} }
-      if (!answer) { // Gemini vision fallback via the Field HUB nec-ai image mode
-        try { const r = await fetchT(NEC_AI_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ image: { data: image.data, mimeType: image.mediaType || "image/jpeg" }, question, lang }) }, 45000);
+      if (/^sk-ant-/.test(apiKey)) { try { answer = await callClaudeVision(apiKey, question, att, history, lang); if (answer) brain = isDoc ? "claude-doc" : "claude-vision"; } catch (e) {} }
+      if (!answer) { // Gemini fallback (nec-ai handles image + pdf via inline_data)
+        try { const r = await fetchT(NEC_AI_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ image: { data: att.data, mimeType: att.mediaType || (isDoc ? "application/pdf" : "image/jpeg") }, question, lang }) }, 45000);
           if (r && r.ok) { const d = await r.json().catch(() => ({})); if (d && d.answer) { answer = stripFollowups(d.answer); brain = "gemini-vision"; } } } catch (e) {}
       }
-      if (answer) return res.status(200).json({ ok: true, answer, used: ["vision"], source: brain });
-      return res.status(200).json({ ok: false, error: lang === "es" ? "No pude analizar la foto ahora mismo — inténtalo de nuevo." : "I couldn't analyze that photo just now — please try again." });
+      if (answer) return res.status(200).json({ ok: true, answer, used: ["file"], source: brain });
+      return res.status(200).json({ ok: false, error: lang === "es" ? "No pude leer ese archivo ahora mismo — inténtalo de nuevo." : "I couldn't read that file just now — please try again." });
     }
 
     const { context, used, records, search, sitecapture } = await gatherContext(question);

@@ -3315,10 +3315,10 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
     ".wmi-listening .wmSunEye{fill:#38e1ff}",
     reduce?"":".wmi-talking .wmSunMouth{animation:wmsTalk .28s ease-in-out infinite}",
     reduce?"":".wmi-talking .wmSunLaunch{animation:wmSunBob 1s ease-in-out infinite}",
-    ".wmSunLaunch{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));width:66px;height:76px;z-index:1600;border:none;background:transparent;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent;filter:drop-shadow(0 8px 16px rgba(0,0,0,.4))}",
+    ".wmSunLaunch{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));width:78px;height:90px;z-index:1600;border:none;background:transparent;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent;filter:drop-shadow(0 8px 15px rgba(0,0,0,.45)) drop-shadow(0 0 12px rgba(248,155,36,.45))}",
     reduce?".wmSunLaunch{}":".wmSunLaunch{animation:wmSunBob 3.6s ease-in-out infinite}",
     ".wmSunLaunch:active{transform:scale(.92)}",
-    ".wmSunRing{position:absolute;left:50%;top:54%;width:60px;height:60px;margin:-30px 0 0 -30px;border-radius:50%;background:radial-gradient(circle,rgba(248,155,36,.5),transparent 70%);z-index:-1;pointer-events:none}",
+    ".wmSunRing{position:absolute;left:50%;top:52%;width:80px;height:80px;margin:-40px 0 0 -40px;border-radius:50%;background:radial-gradient(circle,rgba(248,155,36,.6),rgba(29,66,155,.25) 55%,transparent 72%);z-index:-1;pointer-events:none}",
     reduce?"":".wmSunRing{animation:wmSunRing 2.4s ease-out infinite}",
     ".wmSunHi{position:fixed;right:92px;bottom:calc(34px + env(safe-area-inset-bottom,0px));z-index:1600;background:#122042;color:#fff;border:1px solid #1D429B;border-radius:14px;padding:9px 13px;font:600 12.5px Montserrat,system-ui,sans-serif;max-width:210px;box-shadow:0 10px 24px -8px rgba(0,0,0,.6)}",
     ".wmSunHi:after{content:'';position:absolute;right:-7px;bottom:16px;border:7px solid transparent;border-left-color:#122042}",
@@ -3365,24 +3365,39 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
         else{ winmiState("idle"); addBubble("b",T("Hmm, I couldn't reach my brain just now. Please try again in a moment.","Mmm, no pude conectar ahora mismo. Inténtalo de nuevo en un momento.")); }
       }).catch(function(){ typing(false); winmiState("idle"); addBubble("b",T("Network hiccup — please try again.","Fallo de red — inténtalo de nuevo.")); });
   }
-  // Photo analysis: downscale on-device, show a thumbnail, send to Claude vision for a precise read.
-  function sendPhoto(f){ if(!f) return; stopSpeak();
+  // Send an attachment (photo OR pdf) to WinMI and render the reply.
+  function postFile(att){
+    var isPdf=/pdf/i.test(att.mediaType||""); var capEl=document.getElementById("wmSunInput");
+    var cap=(capEl&&capEl.value.trim())||(isPdf?T("Read this document and give me a detailed description.","Lee este documento y dame una descripción detallada."):T("Analyze this photo — identify the equipment and any code issues.","Analiza esta foto — identifica el equipo y problemas de código."));
+    if(capEl){ capEl.value=""; capEl.style.height="42px"; }
+    history.push({role:"user",content:cap}); if(history.length>16) history=history.slice(-16);
+    typing(true); winmiState("thinking");
+    var payload={messages:history,lang:es()?"es":"en"}; if(isPdf) payload.file=att; else payload.image=att;
+    fetch("/api/assistant",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)})
+      .then(function(r){return r.json();}).then(function(j){ typing(false);
+        if(j&&j.ok&&j.answer){ addBubble("b",j.answer); history.push({role:"assistant",content:j.answer}); winmiState("idle"); speak(j.answer); }
+        else{ winmiState("idle"); addBubble("b",T("I couldn't read that file just now — please try again.","No pude leer el archivo ahora mismo — inténtalo de nuevo.")); }
+      }).catch(function(){ typing(false); winmiState("idle"); addBubble("b",T("Network hiccup — please try again.","Fallo de red — inténtalo de nuevo.")); });
+  }
+  // Take/upload a PHOTO (downscaled on-device) or a PDF document → WinMI reads it in detail.
+  function sendFile(f){ if(!f) return; stopSpeak();
+    var isImg=/^image\//.test(f.type||""), isPdf=/pdf/i.test(f.type||"")||/\.pdf$/i.test(f.name||"");
+    if(!isImg&&!isPdf){ addBubble("b",T("I can read photos and PDF files — attach one of those.","Puedo leer fotos y archivos PDF — adjunta uno de esos.")); return; }
+    if(isPdf&&f.size>3000000){ addBubble("b",T("That PDF is too big to read here (max ~3MB). Try a smaller file or a single page/section.","Ese PDF es muy grande (máx ~3MB). Prueba un archivo más pequeño o una sola página/sección.")); return; }
     var reader=new FileReader();
-    reader.onload=function(){ var img=new Image(); img.onload=function(){
-      var max=1280, w=img.width, h=img.height; if(w>max||h>max){ if(w>=h){ h=Math.round(h*max/w); w=max; } else { w=Math.round(w*max/h); h=max; } }
-      var cv=document.createElement("canvas"); cv.width=w; cv.height=h; try{ cv.getContext("2d").drawImage(img,0,0,w,h); }catch(e){}
-      var durl; try{ durl=cv.toDataURL("image/jpeg",0.82); }catch(e){ durl=reader.result; }
-      var b64=String(durl).split(",")[1]||"";
-      var b=document.getElementById("wmSunMsgs"); if(b){ var d=document.createElement("div"); d.className="wmB u"; d.style.padding="5px"; d.innerHTML='<img src="'+durl+'" alt="" style="max-width:190px;max-height:190px;border-radius:10px;display:block"/>'; b.appendChild(d); b.scrollTop=b.scrollHeight; }
-      var capEl=document.getElementById("wmSunInput"); var cap=(capEl&&capEl.value.trim())||T("Analyze this photo — identify the equipment and any code issues.","Analiza esta foto — identifica el equipo y problemas de código."); if(capEl){ capEl.value=""; capEl.style.height="42px"; }
-      history.push({role:"user",content:cap}); if(history.length>16) history=history.slice(-16);
-      typing(true); winmiState("thinking");
-      fetch("/api/assistant",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({messages:history,lang:es()?"es":"en",image:{data:b64,mediaType:"image/jpeg"}})})
-        .then(function(r){return r.json();}).then(function(j){ typing(false);
-          if(j&&j.ok&&j.answer){ addBubble("b",j.answer); history.push({role:"assistant",content:j.answer}); winmiState("idle"); speak(j.answer); }
-          else{ winmiState("idle"); addBubble("b",T("I couldn't analyze that photo just now — please try again.","No pude analizar la foto ahora mismo — inténtalo de nuevo.")); }
-        }).catch(function(){ typing(false); winmiState("idle"); addBubble("b",T("Network hiccup — please try again.","Fallo de red — inténtalo de nuevo.")); });
-    }; img.src=reader.result; };
+    reader.onload=function(){
+      if(isImg){ var img=new Image(); img.onload=function(){
+          var max=1280,w=img.width,h=img.height; if(w>max||h>max){ if(w>=h){h=Math.round(h*max/w);w=max;}else{w=Math.round(w*max/h);h=max;} }
+          var cv=document.createElement("canvas"); cv.width=w; cv.height=h; try{cv.getContext("2d").drawImage(img,0,0,w,h);}catch(e){}
+          var durl; try{durl=cv.toDataURL("image/jpeg",0.82);}catch(e){durl=reader.result;}
+          var b=document.getElementById("wmSunMsgs"); if(b){var d=document.createElement("div");d.className="wmB u";d.style.padding="5px";d.innerHTML='<img src="'+durl+'" alt="" style="max-width:190px;max-height:190px;border-radius:10px;display:block"/>';b.appendChild(d);b.scrollTop=b.scrollHeight;}
+          postFile({data:String(durl).split(",")[1]||"",mediaType:"image/jpeg"});
+        }; img.src=reader.result;
+      } else {
+        var b2=document.getElementById("wmSunMsgs"); if(b2){var d2=document.createElement("div");d2.className="wmB u";d2.textContent="📄 "+String(f.name||"document.pdf").slice(0,44);b2.appendChild(d2);b2.scrollTop=b2.scrollHeight;}
+        postFile({data:String(reader.result).split(",")[1]||"",mediaType:"application/pdf"});
+      }
+    };
     reader.readAsDataURL(f);
   }
 
@@ -3397,19 +3412,19 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
 
   function openPanel(){ if(panel){ return; } if(hi){ hi.remove(); hi=null; }
     panel=document.createElement("div"); panel.className="wmSunPanel";
-    panel.innerHTML='<div class="wmSunHdr"><span style="flex-shrink:0">'+droid(30)+'</span>'
+    panel.innerHTML='<div class="wmSunHdr"><span style="flex-shrink:0;display:inline-flex;filter:drop-shadow(0 0 8px rgba(248,155,36,.6))">'+droid(44)+'</span>'
       +'<div style="flex:1;min-width:0"><div style="font:800 14px Montserrat,system-ui,sans-serif;color:#fff">WinMI</div><div style="font-size:11px;color:#8fb0e6">'+T("WindMar Assistant · Zoho + SiteCapture","Asistente WindMar · Zoho + SiteCapture")+'</div></div>'
       +'<button id="wmSunMute" title="'+T("Voice replies","Respuestas por voz")+'" style="background:transparent;border:none;color:#8fb0e6;font-size:18px;cursor:pointer;width:34px;height:34px">'+(muted?"🔇":"🔊")+'</button>'
       +'<button id="wmSunClose" style="background:transparent;border:none;color:#8fb0e6;font-size:20px;cursor:pointer;width:34px;height:34px">✕</button></div>'
       +'<div class="wmSunBody" id="wmSunMsgs"></div>'
-      +'<div class="wmSunFoot"><input id="wmSunFile" type="file" accept="image/*" capture="environment" style="display:none"/>'
+      +'<div class="wmSunFoot"><input id="wmSunFile" type="file" accept="image/*,application/pdf" style="display:none"/>'
       +'<textarea id="wmSunInput" class="wmSunIn" rows="1" placeholder="'+T("Ask about any project…","Pregunta sobre cualquier proyecto…")+'"></textarea>'
-      +'<button id="wmSunCam" class="wmSunBtn" title="'+T("Add / take a photo","Agregar / tomar foto")+'" style="background:#16294f;color:#8fb0e6">📷</button>'
+      +'<button id="wmSunCam" class="wmSunBtn" title="'+T("Add a photo or PDF","Agregar foto o PDF")+'" style="background:#16294f;color:#8fb0e6">📎</button>'
       +(SR?'<button id="wmSunMic" class="wmSunBtn" title="'+T("Talk to me","Háblame")+'" style="background:#16294f;color:#8fb0e6">🎤</button>':"")
       +'<button id="wmSunSend" class="wmSunBtn" style="background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff">➤</button></div>';
     document.body.appendChild(panel);
-    (function(){ var cam=document.getElementById("wmSunCam"), file=document.getElementById("wmSunFile"); if(cam&&file){ cam.onclick=function(){ file.click(); }; file.onchange=function(){ var f=file.files&&file.files[0]; if(f) sendPhoto(f); file.value=""; }; } })();
-    var greet=addBubble("b",T("Hi, I'm WinMI 🤖 your WindMar assistant! Ask me about any project — status, address, notes, inspections — from Zoho or SiteCapture. You can type or tap 🎤 to talk.","¡Hola! Soy WinMI 🤖 tu asistente WindMar. Pregúntame sobre cualquier proyecto — estado, dirección, notas, inspecciones — de Zoho o SiteCapture. Escribe o toca 🎤 para hablar."));
+    (function(){ var cam=document.getElementById("wmSunCam"), file=document.getElementById("wmSunFile"); if(cam&&file){ cam.onclick=function(){ file.click(); }; file.onchange=function(){ var f=file.files&&file.files[0]; if(f) sendFile(f); file.value=""; }; } })();
+    var greet=addBubble("b",T("Hi, I'm WinMI 🤖 your WindMar assistant! Ask me about any project by DL#, name, or address (Zoho + SiteCapture), or anything about solar, roofing & service. Type, tap 🎤 to talk, or 📎 attach a photo or PDF and I'll read it.","¡Hola! Soy WinMI 🤖 tu asistente WindMar. Pregúntame por cualquier proyecto por DL#, nombre o dirección (Zoho + SiteCapture), o lo que sea de solar, techos y servicio. Escribe, toca 🎤 para hablar, o 📎 adjunta una foto o PDF y lo leo."));
     document.getElementById("wmSunMsgs").appendChild(quickChips());
     document.getElementById("wmSunClose").onclick=closePanel;
     document.getElementById("wmSunSend").onclick=function(){ var i=document.getElementById("wmSunInput"); send(i&&i.value); };
