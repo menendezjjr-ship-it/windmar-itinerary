@@ -127,14 +127,17 @@ function searchTermsFrom(text) {
 
 // Zoho word-search ANDs every word, so a full sentence rarely matches. Build ordered query
 // candidates (proper nouns first, then each significant token) and return the FIRST that hits.
+// Generic domain words that must NOT trigger a project search on their own (they'd match hundreds
+// of records) — a real project reference has a NAME, address number, or DL.
+const GENERIC = new Set("installation install service schedule scheduled stage stages status statuses project projects job jobs inspection inspections permit permits deal deals note notes report reports crew crews calendar coordinator near each other pending complete ready today tomorrow week".split(" "));
 async function smartProjectSearch(text) {
   const cands = [];
-  const caps = (String(text).match(/\b[A-Z][a-zA-Z]{2,}\b/g) || []).filter((w) => !STOP.has(w.toLowerCase()));
+  const caps = (String(text).match(/\b[A-Z][a-zA-Z]{2,}\b/g) || []).filter((w) => !STOP.has(w.toLowerCase()) && !GENERIC.has(w.toLowerCase()));
   if (caps.length > 1) cands.push(caps.join(" "));
   caps.slice().sort((a, b) => b.length - a.length).forEach((w) => cands.push(w));
   const stripped = searchTermsFrom(text);
-  if (stripped) cands.push(stripped);
-  stripped.split(" ").filter((t) => t.length >= 4).sort((a, b) => b.length - a.length).forEach((t) => cands.push(t));
+  if (stripped) { if (stripped.indexOf(" ") >= 0) cands.push(stripped); else if (!GENERIC.has(stripped) && stripped.length >= 3) cands.push(stripped); }
+  const num = (String(text).match(/\b\d{3,6}\b/g) || [])[0]; if (num) cands.push(num); // street number
   const seen = new Set(), queries = [];
   for (const q of cands) { const k = q.toLowerCase(); if (q && !seen.has(k)) { seen.add(k); queries.push(q); } if (queries.length >= 4) break; }
   for (const q of queries) {
