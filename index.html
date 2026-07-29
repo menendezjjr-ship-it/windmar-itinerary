@@ -3269,21 +3269,27 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
   // ---- WinMI the sun-bot (SVG): a SUN for a head (friendly face) + a small body with the WindMar "W" chest ----
   function rays(){ var s="",cx=60,cy=44,n=12,r0=26,r1=39; for(var i=0;i<n;i++){ var a=(i*(360/n))*Math.PI/180,ux=Math.cos(a),uy=Math.sin(a);
     s+='<line x1="'+(cx+ux*r0).toFixed(1)+'" y1="'+(cy+uy*r0).toFixed(1)+'" x2="'+(cx+ux*r1).toFixed(1)+'" y2="'+(cy+uy*r1).toFixed(1)+'" stroke="url(#wmSunG)" stroke-width="4" stroke-linecap="round"/>'; } return s; }
-  function droid(px){ return '<svg viewBox="0 0 120 150" width="'+px+'" height="'+Math.round(px*1.25)+'" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="display:block;overflow:visible">'
-    +'<defs><linearGradient id="wmMetal" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b63b8"/><stop offset="1" stop-color="#1D429B"/></linearGradient>'
+  function droid(px){ return '<svg viewBox="0 0 120 152" width="'+px+'" height="'+Math.round(px*1.27)+'" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="display:block;overflow:visible">'
+    +'<defs>'
+    +'<linearGradient id="wmMetal" x1="0.15" y1="0" x2="0.7" y2="1"><stop offset="0" stop-color="#4f77cf"/><stop offset="0.5" stop-color="#274a91"/><stop offset="1" stop-color="#15357c"/></linearGradient>'
+    +'<radialGradient id="wmSunDisc" cx="40%" cy="34%" r="72%"><stop offset="0" stop-color="#FFF0B8"/><stop offset="45%" stop-color="#FDBE3C"/><stop offset="100%" stop-color="#F0850F"/></radialGradient>'
     +'<linearGradient id="wmSunG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD54A"/><stop offset="1" stop-color="#F89B24"/></linearGradient>'
-    +'<radialGradient id="wmSunDisc" cx="50%" cy="42%" r="62%"><stop offset="0" stop-color="#FFE79A"/><stop offset="60%" stop-color="#FCB733"/><stop offset="100%" stop-color="#F89B24"/></radialGradient></defs>'
-    +'<g class="wmSunRays">'+rays()+'</g>'                                  // spinning sun rays
-    +'<rect x="16" y="90" width="11" height="26" rx="5.5" fill="#274a91"/><rect x="93" y="90" width="11" height="26" rx="5.5" fill="#274a91"/>' // arms
-    +'<rect x="54" y="64" width="12" height="22" fill="#274a91"/>'          // neck
-    +'<rect x="40" y="80" width="40" height="44" rx="13" fill="url(#wmMetal)" stroke="#8fb0ee" stroke-width="2"/>' // small body
-    +'<circle class="wmSunGlowC" cx="60" cy="103" r="13" fill="#F89B24" opacity="0"/>'
-    +'<rect x="47" y="90" width="26" height="26" rx="7" fill="#0b1730"/>'   // chest panel
-    +'<text class="wmSunW" x="60" y="110" text-anchor="middle" font-family="Montserrat,Arial,sans-serif" font-weight="900" font-size="19" fill="#F89B24">W</text>'
-    +'<circle cx="60" cy="44" r="25" fill="url(#wmSunDisc)" stroke="#F89B24" stroke-width="1.5"/>' // SUN head
-    +'<circle class="wmSunEye" cx="51" cy="43" r="4.6" fill="#0b1730"/><circle class="wmSunEye" cx="69" cy="43" r="4.6" fill="#0b1730"/>' // eyes
-    +'<circle cx="52.5" cy="41.4" r="1.3" fill="#fff"/><circle cx="70.5" cy="41.4" r="1.3" fill="#fff"/>' // eye sparkles
-    +'<path d="M50 53 Q60 61 70 53" fill="none" stroke="#0b1730" stroke-width="3" stroke-linecap="round"/>' // smile
+    +'</defs>'
+    +'<ellipse cx="60" cy="143" rx="27" ry="5" fill="#000" opacity="0.28"/>'  // ground shadow (3D depth)
+    +'<g class="wmSunRays">'+rays()+'</g>'                                    // spinning sun rays
+    +'<rect x="15" y="90" width="11" height="27" rx="5.5" fill="url(#wmMetal)"/><rect x="94" y="90" width="11" height="27" rx="5.5" fill="url(#wmMetal)"/>' // arms
+    +'<rect x="54" y="63" width="12" height="24" fill="#20407e"/>'            // neck
+    +'<rect x="39" y="79" width="42" height="46" rx="14" fill="url(#wmMetal)" stroke="#9cc0ff" stroke-width="1.5"/>' // body
+    +'<rect x="44" y="82" width="32" height="10" rx="5" fill="#ffffff" opacity="0.14"/>'  // body sheen highlight
+    +'<circle class="wmSunGlowC" cx="60" cy="104" r="14" fill="#F89B24" opacity="0"/>'
+    +'<rect x="46" y="90" width="28" height="27" rx="7" fill="#0a1526"/>'     // chest panel
+    +'<rect x="46" y="90" width="28" height="9" rx="7" fill="#ffffff" opacity="0.06"/>'  // chest glass glare
+    +'<text class="wmSunW" x="60" y="111" text-anchor="middle" font-family="Montserrat,Arial,sans-serif" font-weight="900" font-size="20" fill="url(#wmSunG)">W</text>'
+    +'<circle cx="60" cy="44" r="25.5" fill="url(#wmSunDisc)" stroke="#F0850F" stroke-width="1.5"/>' // SUN head
+    +'<ellipse cx="51" cy="33" rx="11" ry="6.5" fill="#fff" opacity="0.42"/>'  // glossy specular highlight
+    +'<circle class="wmSunEye" cx="51" cy="44" r="4.8" fill="#0a1526"/><circle class="wmSunEye" cx="69" cy="44" r="4.8" fill="#0a1526"/>' // eyes
+    +'<circle cx="52.6" cy="42.3" r="1.5" fill="#fff"/><circle cx="70.6" cy="42.3" r="1.5" fill="#fff"/>' // eye sparkles
+    +'<path class="wmSunMouth" d="M50 53 Q60 61 70 53" fill="none" stroke="#0a1526" stroke-width="3" stroke-linecap="round"/>' // mouth (animates when talking)
     +'</svg>'; }
 
   var st=document.createElement("style");
@@ -3299,6 +3305,16 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
     reduce?"":".wmSunEye{transform-box:fill-box;transform-origin:center;animation:wmSunBlink 5.2s ease-in-out infinite}",
     reduce?"":".wmSunGlowC{animation:wmSunChestP 2.6s ease-in-out infinite}",
     reduce?"":".wmSunTip{animation:wmSunTipP 1.8s ease-in-out infinite}",
+    ".wmSunMouth{transform-box:fill-box;transform-origin:center}",
+    "@keyframes wmsTalk{0%,100%{transform:scaleY(1)}50%{transform:scaleY(1.7)}}",
+    // Reactive "alive" states (body.wmi-*): thinking = faster rays + chest pulse; listening = cyan
+    // eyes + chest pulse; talking = mouth moves + quicker bob. Skipped under reduced-motion.
+    reduce?"":".wmi-thinking .wmSunRays{animation:wmSunSpinR 3.5s linear infinite}",
+    reduce?"":".wmi-thinking .wmSunGlowC{opacity:.35;animation:wmSunChestP 1s ease-in-out infinite}",
+    reduce?"":".wmi-listening .wmSunGlowC{opacity:.5;animation:wmSunChestP .8s ease-in-out infinite}",
+    ".wmi-listening .wmSunEye{fill:#38e1ff}",
+    reduce?"":".wmi-talking .wmSunMouth{animation:wmsTalk .28s ease-in-out infinite}",
+    reduce?"":".wmi-talking .wmSunLaunch{animation:wmSunBob 1s ease-in-out infinite}",
     ".wmSunLaunch{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));width:66px;height:76px;z-index:1600;border:none;background:transparent;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent;filter:drop-shadow(0 8px 16px rgba(0,0,0,.4))}",
     reduce?".wmSunLaunch{}":".wmSunLaunch{animation:wmSunBob 3.6s ease-in-out infinite}",
     ".wmSunLaunch:active{transform:scale(.92)}",
@@ -3330,8 +3346,10 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
   launch.innerHTML=(reduce?"":'<span class="wmSunRing"></span>')+droid(52);
   var panel=null, history=[], hi=null;
 
-  function speak(txt){ if(muted||!window.speechSynthesis||!txt) return; try{ window.speechSynthesis.cancel(); var u=new SpeechSynthesisUtterance(String(txt).replace(/[*_#`]/g,"")); u.lang=es()?"es-ES":"en-US"; u.rate=1.02; u.pitch=1.05; window.speechSynthesis.speak(u); }catch(e){} }
-  function stopSpeak(){ try{ window.speechSynthesis&&window.speechSynthesis.cancel(); }catch(e){} }
+  // Reactive "alive" state — a body class the droid CSS reacts to (idle/listening/thinking/talking).
+  function winmiState(s){ try{ var c=document.body.classList; ["idle","listening","thinking","talking"].forEach(function(x){c.remove("wmi-"+x);}); c.add("wmi-"+(s||"idle")); }catch(e){} }
+  function speak(txt){ if(muted||!window.speechSynthesis||!txt){ winmiState("idle"); return; } try{ window.speechSynthesis.cancel(); var u=new SpeechSynthesisUtterance(String(txt).replace(/[*_#`]/g,"")); u.lang=es()?"es-ES":"en-US"; u.rate=1.02; u.pitch=1.05; winmiState("talking"); u.onend=function(){ winmiState("idle"); }; u.onerror=function(){ winmiState("idle"); }; window.speechSynthesis.speak(u); }catch(e){ winmiState("idle"); } }
+  function stopSpeak(){ try{ window.speechSynthesis&&window.speechSynthesis.cancel(); }catch(e){} winmiState("idle"); }
 
   function addBubble(who,txt){ var b=document.getElementById("wmSunMsgs"); if(!b) return null; var d=document.createElement("div"); d.className="wmB "+(who==="u"?"u":"b"); d.textContent=txt; b.appendChild(d); b.scrollTop=b.scrollHeight; return d; }
   function typing(on){ var b=document.getElementById("wmSunMsgs"); if(!b) return; var ex=document.getElementById("wmSunTyp"); if(ex)ex.remove(); if(on){ var d=document.createElement("div"); d.id="wmSunTyp"; d.className="wmB b"; d.innerHTML='<span class="wmTypDot"></span><span class="wmTypDot" style="animation-delay:.2s"></span><span class="wmTypDot" style="animation-delay:.4s"></span>'; b.appendChild(d); b.scrollTop=b.scrollHeight; } }
@@ -3339,13 +3357,33 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
   function send(text){ text=(text||"").trim(); if(!text) return; stopSpeak();
     addBubble("u",text); history.push({role:"user",content:text}); if(history.length>16) history=history.slice(-16);
     var inp=document.getElementById("wmSunInput"); if(inp){ inp.value=""; inp.style.height="42px"; }
-    typing(true);
+    typing(true); winmiState("thinking");
     fetch("/api/assistant",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({messages:history,lang:es()?"es":"en"})})
       .then(function(r){return r.json();}).then(function(j){ typing(false);
-        if(j&&j.ok&&j.answer){ addBubble("b",j.answer); history.push({role:"assistant",content:j.answer}); speak(j.answer); }
-        else if(j&&j.configured===false){ addBubble("b",T("I'm almost ready! An admin just needs to add my AI key (ANTHROPIC_API_KEY) in the app settings, then I can answer anything about your projects.","¡Casi listo! Un administrador debe agregar mi clave de IA (ANTHROPIC_API_KEY) en la configuración y podré responder sobre tus proyectos.")); }
-        else{ addBubble("b",T("Hmm, I couldn't reach my brain just now. Please try again in a moment.","Mmm, no pude conectar ahora mismo. Inténtalo de nuevo en un momento.")); }
-      }).catch(function(){ typing(false); addBubble("b",T("Network hiccup — please try again.","Fallo de red — inténtalo de nuevo.")); });
+        if(j&&j.ok&&j.answer){ addBubble("b",j.answer); history.push({role:"assistant",content:j.answer}); winmiState("idle"); speak(j.answer); }
+        else if(j&&j.configured===false){ winmiState("idle"); addBubble("b",T("I'm almost ready! An admin just needs to add my AI key (ANTHROPIC_API_KEY) in the app settings, then I can answer anything about your projects.","¡Casi listo! Un administrador debe agregar mi clave de IA (ANTHROPIC_API_KEY) en la configuración y podré responder sobre tus proyectos.")); }
+        else{ winmiState("idle"); addBubble("b",T("Hmm, I couldn't reach my brain just now. Please try again in a moment.","Mmm, no pude conectar ahora mismo. Inténtalo de nuevo en un momento.")); }
+      }).catch(function(){ typing(false); winmiState("idle"); addBubble("b",T("Network hiccup — please try again.","Fallo de red — inténtalo de nuevo.")); });
+  }
+  // Photo analysis: downscale on-device, show a thumbnail, send to Claude vision for a precise read.
+  function sendPhoto(f){ if(!f) return; stopSpeak();
+    var reader=new FileReader();
+    reader.onload=function(){ var img=new Image(); img.onload=function(){
+      var max=1280, w=img.width, h=img.height; if(w>max||h>max){ if(w>=h){ h=Math.round(h*max/w); w=max; } else { w=Math.round(w*max/h); h=max; } }
+      var cv=document.createElement("canvas"); cv.width=w; cv.height=h; try{ cv.getContext("2d").drawImage(img,0,0,w,h); }catch(e){}
+      var durl; try{ durl=cv.toDataURL("image/jpeg",0.82); }catch(e){ durl=reader.result; }
+      var b64=String(durl).split(",")[1]||"";
+      var b=document.getElementById("wmSunMsgs"); if(b){ var d=document.createElement("div"); d.className="wmB u"; d.style.padding="5px"; d.innerHTML='<img src="'+durl+'" alt="" style="max-width:190px;max-height:190px;border-radius:10px;display:block"/>'; b.appendChild(d); b.scrollTop=b.scrollHeight; }
+      var capEl=document.getElementById("wmSunInput"); var cap=(capEl&&capEl.value.trim())||T("Analyze this photo — identify the equipment and any code issues.","Analiza esta foto — identifica el equipo y problemas de código."); if(capEl){ capEl.value=""; capEl.style.height="42px"; }
+      history.push({role:"user",content:cap}); if(history.length>16) history=history.slice(-16);
+      typing(true); winmiState("thinking");
+      fetch("/api/assistant",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({messages:history,lang:es()?"es":"en",image:{data:b64,mediaType:"image/jpeg"}})})
+        .then(function(r){return r.json();}).then(function(j){ typing(false);
+          if(j&&j.ok&&j.answer){ addBubble("b",j.answer); history.push({role:"assistant",content:j.answer}); winmiState("idle"); speak(j.answer); }
+          else{ winmiState("idle"); addBubble("b",T("I couldn't analyze that photo just now — please try again.","No pude analizar la foto ahora mismo — inténtalo de nuevo.")); }
+        }).catch(function(){ typing(false); winmiState("idle"); addBubble("b",T("Network hiccup — please try again.","Fallo de red — inténtalo de nuevo.")); });
+    }; img.src=reader.result; };
+    reader.readAsDataURL(f);
   }
 
   function quickChips(){ var wrap=document.createElement("div"); wrap.style.cssText="display:flex;gap:7px;flex-wrap:wrap;margin-top:2px";
@@ -3364,10 +3402,13 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
       +'<button id="wmSunMute" title="'+T("Voice replies","Respuestas por voz")+'" style="background:transparent;border:none;color:#8fb0e6;font-size:18px;cursor:pointer;width:34px;height:34px">'+(muted?"🔇":"🔊")+'</button>'
       +'<button id="wmSunClose" style="background:transparent;border:none;color:#8fb0e6;font-size:20px;cursor:pointer;width:34px;height:34px">✕</button></div>'
       +'<div class="wmSunBody" id="wmSunMsgs"></div>'
-      +'<div class="wmSunFoot"><textarea id="wmSunInput" class="wmSunIn" rows="1" placeholder="'+T("Ask about any project…","Pregunta sobre cualquier proyecto…")+'"></textarea>'
+      +'<div class="wmSunFoot"><input id="wmSunFile" type="file" accept="image/*" capture="environment" style="display:none"/>'
+      +'<textarea id="wmSunInput" class="wmSunIn" rows="1" placeholder="'+T("Ask about any project…","Pregunta sobre cualquier proyecto…")+'"></textarea>'
+      +'<button id="wmSunCam" class="wmSunBtn" title="'+T("Add / take a photo","Agregar / tomar foto")+'" style="background:#16294f;color:#8fb0e6">📷</button>'
       +(SR?'<button id="wmSunMic" class="wmSunBtn" title="'+T("Talk to me","Háblame")+'" style="background:#16294f;color:#8fb0e6">🎤</button>':"")
       +'<button id="wmSunSend" class="wmSunBtn" style="background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff">➤</button></div>';
     document.body.appendChild(panel);
+    (function(){ var cam=document.getElementById("wmSunCam"), file=document.getElementById("wmSunFile"); if(cam&&file){ cam.onclick=function(){ file.click(); }; file.onchange=function(){ var f=file.files&&file.files[0]; if(f) sendPhoto(f); file.value=""; }; } })();
     var greet=addBubble("b",T("Hi, I'm WinMI 🤖 your WindMar assistant! Ask me about any project — status, address, notes, inspections — from Zoho or SiteCapture. You can type or tap 🎤 to talk.","¡Hola! Soy WinMI 🤖 tu asistente WindMar. Pregúntame sobre cualquier proyecto — estado, dirección, notas, inspecciones — de Zoho o SiteCapture. Escribe o toca 🎤 para hablar."));
     document.getElementById("wmSunMsgs").appendChild(quickChips());
     document.getElementById("wmSunClose").onclick=closePanel;
@@ -3386,9 +3427,9 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
     mic.onclick=function(){ if(listening){ try{rec.stop();}catch(e){} return; }
       try{ rec=new SR(); }catch(e){ return; } rec.lang=es()?"es-ES":"en-US"; rec.interimResults=true; rec.continuous=false;
       var inp=document.getElementById("wmSunInput");
-      rec.onstart=function(){ listening=true; mic.textContent="⏹"; mic.style.background="#B91C1C"; };
-      rec.onerror=function(){ };
-      rec.onend=function(){ listening=false; mic.textContent="🎤"; mic.style.background="#16294f"; };
+      rec.onstart=function(){ listening=true; mic.textContent="⏹"; mic.style.background="#B91C1C"; winmiState("listening"); };
+      rec.onerror=function(){ winmiState("idle"); };
+      rec.onend=function(){ listening=false; mic.textContent="🎤"; mic.style.background="#16294f"; winmiState("idle"); };
       rec.onresult=function(ev){ var t=""; for(var i=0;i<ev.results.length;i++) t+=ev.results[i][0].transcript; if(inp) inp.value=t;
         if(ev.results[ev.results.length-1].isFinal){ var f=t.trim(); if(f){ setTimeout(function(){ send(f); },250); } } };
       stopSpeak(); try{ rec.start(); }catch(e){} };

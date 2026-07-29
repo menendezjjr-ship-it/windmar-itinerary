@@ -363,6 +363,41 @@ const NEC_SKILL = [
   "If a code/equipment question is vague, ask ONE short clarifying question with 2-3 likely options instead of guessing.",
 ].join(" ");
 
+// Full WindMar solar/roofing/service knowledge base — WinMI's built-in expertise (given to Claude).
+const WINDMAR_KB = `WINDMAR FIELD KNOWLEDGE (Solar / Roofing / Service, Florida). Codes: NEC 2020 (FL statewide), NEC 2023 phasing in; Florida Building Code 8th ed. Jobs DL-XXXX; types SOL/BAT/ROO; inspections RI, SE, UG, FI, PV, LV, RF, ES.
+
+ELECTRICAL (NEC)
+- Ampacity Table 310.16, 75°C column for terminations (110.14(C)): #14=15A, #12=20A, #10=30/35A, #8=50A, #6=65A, #4=85A, 1/0=150A, 4/0=230A. Rooftop sun-exposed conduit adds ambient; apply temp correction (310.15) + fill adjustment (>3 current-carrying conductors).
+- OCPD sizes 240.6 (15,20,25,30,40,50,60,70,90,100,110,125,150,175,200…). 240.4(B) next-size-up ≤800A; 240.4(D) small-conductor limits (#14=15A,#12=20A,#10=30A). Continuous loads ×125% (210.19/215.2). Breaker max height 6'7" (240.24).
+- PV: 690.8(A) max current, 690.8(B) conductors/OCPD at 125% of Isc (stacks to 156% of Isc). Rapid shutdown 690.12: ≤80V within 30s inside array boundary, ≤30V outside.
+- EGC Table 250.122 by OCPD: 15A=#14, 20A=#12, 60A=#10, 100A=#8, 200A=#6Cu/#4Al. GEC Table 250.66. PV bonding 690.43 (listed integrated bonding OK), EGC 690.45.
+- Box fill 314.16: #14=2.0, #12=2.25, #10=2.5 in³ (conductors + clamps 1 + device 2 + grounds 1).
+- Working space 110.26: 3ft deep, 30in wide, 6.5ft high. Roof fire setbacks 690.12(B)(2)/FBC: 3ft ridge pathway, 18in from ridge, 3ft access paths.
+- Interconnection 705.12(B)(3) 120% rule: busbar×1.2 ≥ main breaker + PV backfeed; backfeed at opposite end. PCS per 705.13 (Powerwall 3 / Gateway limit current → 120% rule may not apply). Line-side tap 705.11.
+- Voltage drop target ≤2% feeder, ≤3% branch, ≤5% total. Conduit fill 40% for >2 conductors.
+- FL high-wind: attachment to ASCE 7 (140–180 mph, HVHZ Miami-Dade/Broward); FL Product Approval / Miami-Dade NOA required on racking, modules, roofing.
+
+EQUIPMENT
+- Tesla Powerwall 3: 13.5 kWh, 11.5 kW AC cont, 120/240V split-phase; 48A default → 60A backfeed; integrated inverter, 6 MPPTs, up to 20 kW PV DC; Backup Gateway 3; up to 4 units + DC Expansion (13.5 kWh, no inverter). MCI = rapid shutdown; PCS per 705.13; lug torque per label (~40–80 in-lb); NEMA 3R. PW2/+ = 5–7.6 kW AC-coupled, needs Gateway 2.
+- SolarEdge: 1φ SE3300–SE6000 (240V, 500Vdc, SafeDC→1V/optimizer when OFF), HD-Wave; optimizers = module MPPT + rapid shutdown; 3φ Synergy SE50K–120K (1000Vdc, SetApp). String check ~1V×#optimizers with inverter OFF.
+- Qcells Q.HOME COMBINER 80 (G1): 125A Eaton BR bus, 64A cont; Solar-Only/Backup/Grid modes; Q.PEAK DUO modules.
+- Generac PWRcell ATS: 100A torque 50 in-lb; 200A torque 275 in-lb (calibrated wrench, not impact); Cat5 control in separate raceway per 725.136; 8 load-priority levels.
+- Enphase IQ7/IQ8 microinverters, AC-coupled, rapid-shutdown compliant, IQ Gateway comms.
+- Breakers (never mix brands): Eaton BR(1")/CH(¾"), Square D QO(¾")/Homeline(1"), Siemens, GE/ABB — match per UL listing.
+
+ROOFING
+- Owens Corning Duration / Duration STORM: SureNail — nail IN the fabric strip; FL high-wind 6-nail per FBC R905.2.6; Ice & Water first 3ft + valleys; matching starter + hip/ridge for warranty.
+- SnapNrack Ultra Rail (6000): UL 2703 integrated bonding (690.43(C)); mid/end clamp torque 8–10 ft-lb; 5/16"×4" SS lag, min 1.5" rafter penetration, pilot-drilled; flash under upper course/over lower + sealant on shank. Unirac/IronRidge acceptable alternates.
+
+SAFETY
+- LOTOV (14-step): alert → open AC → open DC/string → wait 5 min → verify 0V AC → verify 0V DC → test emergency disconnect → lock OFF → tag OUT OF SERVICE → log → re-verify 0V → announce clear → multi-day log → restore only when supervisor-verified. PPE: CAT2 arc-rated, Class 0 gloves (1000V), insulated tools, CAT III/IV meter.
+- Energize PV/DC first, then battery, then commission via app; de-energize reverse. Battery fire: UL 9540A, water for cooling only (never expect to extinguish Li), HF/hydrofluoric-acid vapor → SCBA, evacuate, call FD. Fall protection >6ft; heat: 1 gal water/person/hr; 30-30 lightning; stop work in rain; no panel setting >20 mph.
+
+SERVICE / MONITORING
+- Common: battery not backing up (Gateway CTs reversed / grid-code mismatch), phase/rotation errors (SolarEdge #29/#30), comm loss (Ethernet>Wi-Fi>cellular; check Gateway LED), isolation/ground fault #25 (megohmmeter each string, healthy >2MΩ), AC voltage high #14/#31 (upsize conductor), country-not-set #44.
+- Commissioning: verify Vac/Vdc/Pac, optimizer/micro count = module count, production matches kW, app "Connected", backup reserve %. Portals: SolarEdge monitoring, Enphase Enlighten, Qcells Q.OMMAND, Tesla app.
+- Installing contractor owns code compliance; always confirm AHJ/utility requirements.`;
+
 function systemPrompt(lang) {
   const es = lang === "es";
   return [
@@ -419,7 +454,7 @@ async function callNecBrain(question, history, lang, knowledgeContext) {
 // is set, so it doesn't depend on the Field HUB's rate-limited Gemini. systemPrompt() carries the
 // WinMI persona + NEC expertise; we add the app + Zoho guides so it can field those too.
 async function callClaude(apiKey, question, history, lang) {
-  const sys = systemPrompt(lang) + "\n\n" + APP_GUIDE + "\n\n" + ZOHO_GUIDE;
+  const sys = systemPrompt(lang) + "\n\n" + WINDMAR_KB + "\n\n" + APP_GUIDE + "\n\n" + ZOHO_GUIDE;
   const msgs = (history || []).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: String((m && (m.text || m.content)) || "") })).filter((m) => m.content);
   msgs.push({ role: "user", content: String(question) });
   while (msgs.length && msgs[0].role !== "user") msgs.shift();
@@ -431,6 +466,31 @@ async function callClaude(apiKey, question, history, lang) {
   if (!r) throw new Error("Claude timed out");
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error("Claude " + r.status + ": " + String((d && d.error && d.error.message) || "").slice(0, 140));
+  return (Array.isArray(d.content) ? d.content : []).filter((b) => b && b.type === "text").map((b) => b.text).join("").trim();
+}
+
+// Claude VISION — analyze a field photo (equipment, panel, breaker box, roof, plan) with WindMar
+// expertise. Returns identification + specs + NEC/code notes + install guidance.
+async function callClaudeVision(apiKey, question, image, history, lang) {
+  const es = lang === "es";
+  const sys = systemPrompt(lang) + "\n\n" + (es
+    ? "MODO FOTO: Analiza la imagen del campo con máxima precisión. 1) Identifica CADA equipo visible: marca + modelo/número de parte + specs clave. 2) Señala problemas o violaciones de código (NEC 2020/2023 + código de Florida) con el artículo exacto. 3) Da recomendaciones de instalación accionables. Sé directo; si algo no se ve bien, dilo."
+    : "PHOTO MODE: Analyze the field image with maximum precision. 1) Identify EVERY piece of equipment: brand + model/part number + key specs. 2) Flag any problems or code violations (NEC 2020/2023 + Florida Building Code) with the exact article. 3) Give actionable install guidance. Be direct; if something can't be seen clearly, say so.") + "\n\n" + WINDMAR_KB;
+  const content = [
+    { type: "image", source: { type: "base64", media_type: image.mediaType || "image/jpeg", data: image.data } },
+    { type: "text", text: question || (es ? "Analiza esta foto — identifica el equipo y cualquier problema de código." : "Analyze this photo — identify the equipment and any code issues.") },
+  ];
+  const msgs = (history || []).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: String((m && (m.text || m.content)) || "") })).filter((m) => m.content);
+  msgs.push({ role: "user", content });
+  while (msgs.length && msgs[0].role !== "user") msgs.shift();
+  const r = await fetchT(ANTHROPIC_URL, {
+    method: "POST",
+    headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({ model: MODEL, max_tokens: 1100, system: sys, messages: msgs.slice(-8) }),
+  }, 40000);
+  if (!r) throw new Error("Claude vision timed out");
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error("Claude vision " + r.status + ": " + String((d && d.error && d.error.message) || "").slice(0, 140));
   return (Array.isArray(d.content) ? d.content : []).filter((b) => b && b.type === "text").map((b) => b.text).join("").trim();
 }
 
@@ -578,6 +638,20 @@ export default async function handler(req, res) {
 
     const question = messages[messages.length - 1].content;
     const history = messages.slice(0, -1).map((m) => ({ role: m.role, text: m.content }));
+
+    // ── PHOTO MODE: if an image is attached, analyze it with Claude vision (Gemini vision backup).
+    const image = (body.image && body.image.data) ? body.image : null;
+    if (image) {
+      const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim();
+      let answer = null, brain = "";
+      if (/^sk-ant-/.test(apiKey)) { try { answer = await callClaudeVision(apiKey, question, image, history, lang); if (answer) brain = "claude-vision"; } catch (e) {} }
+      if (!answer) { // Gemini vision fallback via the Field HUB nec-ai image mode
+        try { const r = await fetchT(NEC_AI_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ image: { data: image.data, mimeType: image.mediaType || "image/jpeg" }, question, lang }) }, 45000);
+          if (r && r.ok) { const d = await r.json().catch(() => ({})); if (d && d.answer) { answer = stripFollowups(d.answer); brain = "gemini-vision"; } } } catch (e) {}
+      }
+      if (answer) return res.status(200).json({ ok: true, answer, used: ["vision"], source: brain });
+      return res.status(200).json({ ok: false, error: lang === "es" ? "No pude analizar la foto ahora mismo — inténtalo de nuevo." : "I couldn't analyze that photo just now — please try again." });
+    }
 
     const { context, used, records, search } = await gatherContext(question);
     const found = (records || []).filter((r) => r && r.found !== false && !r.error);
