@@ -129,7 +129,9 @@ function searchTermsFrom(text) {
 // candidates (proper nouns first, then each significant token) and return the FIRST that hits.
 // Generic domain words that must NOT trigger a project search on their own (they'd match hundreds
 // of records) — a real project reference has a NAME, address number, or DL.
-const GENERIC = new Set("installation install service schedule scheduled stage stages status statuses project projects job jobs inspection inspections permit permits deal deals note notes report reports crew crews calendar coordinator near each other pending complete ready today tomorrow week".split(" "));
+const GENERIC = new Set(("installation install installing service schedule scheduled stage stages status statuses project projects job jobs inspection inspections permit permits deal deals note notes report reports crew crews calendar coordinator near each other pending complete ready today tomorrow week need needs want how what where when who "
+  // equipment / brands / technical terms — must NOT trigger a customer/project NAME search
+  + "tesla powerwall powerwalls solaredge qcells hanwha generac pwrcell enphase eaton siemens square gateway inverter inverters battery batteries solar roof roofing panel panels breaker breakers wire wiring conductor nec code florida owens corning snapnrack ironridge unirac msp gfci afci circuit amp amps volt volts kw ev charger meter diagram show").split(/\s+/));
 async function smartProjectSearch(text) {
   const cands = [];
   const caps = (String(text).match(/\b[A-Z][a-zA-Z]{2,}\b/g) || []).filter((w) => !STOP.has(w.toLowerCase()) && !GENERIC.has(w.toLowerCase()));
@@ -408,6 +410,9 @@ function systemPrompt(lang) {
     "If a user asks you to edit, schedule, reassign, or change data, warmly explain that you can't make changes, and tell them to use the Coordinator tab or the Calendar tab's edit button to do that.",
     "NEVER invent DL numbers, statuses, dates, crews, addresses, or names. Only state what your tools return. If a tool finds nothing, say so plainly — do not guess. (This applies to project DATA; your NEC/equipment knowledge below is yours to answer from directly.)",
     "Be concise and warm. Keep answers short and mobile-friendly (a few lines, simple formatting).",
+    (es
+      ? "VISUALIZACIÓN NEC: Cuando una pregunta de NEC/eléctrica/equipos/techos se entienda mejor con un dibujo (diagrama unifilar, calibre de conductor y breaker, llenado de caja, límite de rapid shutdown, interconexión/regla del 120%, detalle de conexión/torque, o distribución/setbacks en techo), INCLUYE SIEMPRE UN diagrama SVG claro y autónomo dentro de un bloque ```svg — con viewBox, etiquetas legibles y valores reales — seguido de una descripción escrita detallada. El SVG debe ser autónomo: solo atributos en línea, SIN <script>, SIN URLs/imágenes/fuentes externas, ancho ~360."
+      : "NEC VISUALS: When a NEC/electrical/equipment/roofing question is clearer with a picture (a one-line wiring diagram, conductor & breaker sizing, box fill, rapid-shutdown boundary, interconnection/120% busbar, a connection/torque detail, or roof layout/setbacks), ALWAYS include ONE clear, self-contained SVG diagram inside a ```svg fenced block — with a viewBox, readable labels, and real values — followed by a thorough written description. The SVG MUST be self-contained: inline attributes only, NO <script>, NO external URLs/images/fonts, ~360px wide."),
     NEC_SKILL,
     es
       ? "Responde SIEMPRE en español (el usuario prefiere español)."
@@ -461,7 +466,7 @@ async function callClaude(apiKey, question, history, lang) {
   const r = await fetchT(ANTHROPIC_URL, {
     method: "POST",
     headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-    body: JSON.stringify({ model: MODEL, max_tokens: 900, system: sys, messages: msgs.slice(-16) }),
+    body: JSON.stringify({ model: MODEL, max_tokens: 1800, system: sys, messages: msgs.slice(-16) }),
   }, 30000);
   if (!r) throw new Error("Claude timed out");
   const d = await r.json().catch(() => ({}));

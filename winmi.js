@@ -1,5 +1,4 @@
 // WinMI — portable WindMar AI assistant widget. <script src="https://windmar-itinerary.vercel.app/winmi.js" defer></script>
-// Optional: window.WINMI_LANG / window.WINMI_API before load. Calls the Itinerary brain.
 
 (function(){
   if(window.__wmSunny) return; window.__wmSunny=true;
@@ -79,6 +78,8 @@
     ".wmB.b li{margin:4px 0;line-height:1.5}",
     ".wmB.b code{background:#0f1d3c;padding:1px 5px;border-radius:5px;font-size:12.5px}",
     ".wmB.b p{margin:0 0 8px}",".wmB.b p:last-child{margin:0}",
+    ".wmB.b .wmViz{margin:9px 0 4px;background:#0a1526;border:1px solid #2a4a86;border-radius:12px;padding:10px;overflow-x:auto}",
+    ".wmB.b .wmViz svg{max-width:100%;height:auto;display:block;margin:0 auto}",
     ".wmChip{background:#16294f;border:1px solid #2a4a86;color:#bcd2f5;border-radius:20px;padding:7px 12px;font:600 12px Montserrat,system-ui,sans-serif;cursor:pointer;white-space:nowrap}",
     ".wmChip:active{background:#122a52}",
     ".wmSunIn{flex:1;min-height:42px;max-height:110px;resize:none;border-radius:14px;border:1px solid #2a4a86;background:#0f1d3c;color:#fff;padding:11px 13px;font:500 16px Montserrat,system-ui,sans-serif;outline:none}",
@@ -102,7 +103,18 @@
 
   // Light, SAFE markdown → HTML for WinMI's answers so descriptions read clean (bold, bullets, spacing).
   function wmEsc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  // Strip anything executable/external from a model-produced SVG so it renders safely (no scripts).
+  function wmSanSvg(svg){ return String(svg)
+    .replace(/<script[\s\S]*?<\/script>/gi,"").replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi,"")
+    .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*')/gi,"")
+    .replace(/(?:xlink:)?href\s*=\s*("(?!#|data:)[^"]*"|'(?!#|data:)[^']*')/gi,"")
+    .replace(/\bsrc\s*=\s*("(?!data:)[^"]*"|'(?!data:)[^']*')/gi,""); }
   function fmtBotHtml(t){
+    t=String(t==null?"":t); var svgs=[];
+    var stash=function(g){ svgs.push(g); return " SVG"+(svgs.length-1)+" "; };
+    t=t.replace(/```svg\s*([\s\S]*?)```/gi,function(_,g){return stash(g);});
+    t=t.replace(/```(?:xml|html)?\s*(<svg[\s\S]*?<\/svg>)\s*```/gi,function(_,g){return stash(g);});
+    t=t.replace(/<svg[\s\S]*?<\/svg>/gi,function(g){return stash(g);});
     var s=wmEsc(t).replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>").replace(/`([^`]+)`/g,"<code>$1</code>").replace(/^\s*#{1,6}\s+(.*)$/gm,"<strong>$1</strong>");
     var lines=s.split(/\r?\n/), out=[], inUl=false, flush=function(){ if(inUl){out.push("</ul>");inUl=false;} };
     for(var i=0;i<lines.length;i++){ var ln=lines[i], m=ln.match(/^\s*(?:[•\-\*]|\d+[\.\)])\s+(.*)$/);
@@ -110,7 +122,9 @@
       else if(ln.trim()===""){ flush(); out.push("<br>"); }
       else { flush(); out.push(ln+"<br>"); } }
     flush();
-    return out.join("").replace(/(<br>\s*)+$/,"").replace(/<\/ul>\s*<br>/g,"</ul>").replace(/<br>\s*<ul>/g,"<ul>");
+    var html=out.join("").replace(/(<br>\s*)+$/,"").replace(/<\/ul>\s*<br>/g,"</ul>").replace(/<br>\s*<ul>/g,"<ul>");
+    html=html.replace(/ SVG(\d+) (<br>)?/g,function(_,i){ return '<div class="wmViz">'+wmSanSvg(svgs[+i])+'</div>'; });
+    return html;
   }
   function addBubble(who,txt){ var b=document.getElementById("wmSunMsgs"); if(!b) return null; var d=document.createElement("div"); d.className="wmB "+(who==="u"?"u":"b"); if(who==="u"){ d.textContent=txt; } else { d.innerHTML=fmtBotHtml(txt); } b.appendChild(d); b.scrollTop=b.scrollHeight; return d; }
   function typing(on){ var b=document.getElementById("wmSunMsgs"); if(!b) return; var ex=document.getElementById("wmSunTyp"); if(ex)ex.remove(); if(on){ var d=document.createElement("div"); d.id="wmSunTyp"; d.className="wmB b"; d.innerHTML='<span class="wmTypDot"></span><span class="wmTypDot" style="animation-delay:.2s"></span><span class="wmTypDot" style="animation-delay:.4s"></span>'; b.appendChild(d); b.scrollTop=b.scrollHeight; } }
