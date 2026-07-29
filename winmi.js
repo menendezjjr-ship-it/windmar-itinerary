@@ -1,6 +1,5 @@
-// WinMI — portable WindMar AI assistant widget. Load on any WindMar app:
-//   <script src="https://windmar-itinerary.vercel.app/winmi.js" defer></script>
-// Optional: set window.WINMI_LANG="es" or window.WINMI_API before load. Calls the Itinerary brain.
+// WinMI — portable WindMar AI assistant widget. <script src="https://windmar-itinerary.vercel.app/winmi.js" defer></script>
+// Optional: window.WINMI_LANG / window.WINMI_API before load. Calls the Itinerary brain.
 
 (function(){
   if(window.__wmSunny) return; window.__wmSunny=true;
@@ -67,14 +66,19 @@
     reduce?"":".wmSunRing{animation:wmSunRing 2.4s ease-out infinite}",
     ".wmSunHi{position:fixed;right:92px;bottom:calc(34px + env(safe-area-inset-bottom,0px));z-index:1600;background:#122042;color:#fff;border:1px solid #1D429B;border-radius:14px;padding:9px 13px;font:600 12.5px Montserrat,system-ui,sans-serif;max-width:210px;box-shadow:0 10px 24px -8px rgba(0,0,0,.6)}",
     ".wmSunHi:after{content:'';position:absolute;right:-7px;bottom:16px;border:7px solid transparent;border-left-color:#122042}",
-    ".wmSunPanel{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));width:380px;max-width:calc(100vw - 24px);height:560px;max-height:78vh;z-index:1650;background:#0c1730;border:1px solid #22407e;border-radius:20px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px -12px rgba(0,0,0,.7);animation:wmSunUp .32s cubic-bezier(.22,1.1,.4,1) both}",
+    ".wmSunPanel{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));width:440px;max-width:calc(100vw - 24px);height:600px;max-height:82vh;z-index:1650;background:#0c1730;border:1px solid #22407e;border-radius:20px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 60px -12px rgba(0,0,0,.7);animation:wmSunUp .32s cubic-bezier(.22,1.1,.4,1) both}",
     "@media (max-width:560px){.wmSunPanel{right:0;left:0;bottom:0;width:100%;max-width:100%;height:86dvh;max-height:86dvh;border-radius:20px 20px 0 0}}",
     ".wmSunHdr{display:flex;align-items:center;gap:10px;padding:11px 12px;background:linear-gradient(120deg,#12234b,#0c1730);border-bottom:1px solid #22407e;flex-shrink:0}",
     ".wmSunBody{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:14px;display:flex;flex-direction:column;gap:10px;background:radial-gradient(120% 60% at 50% 0,#122042,#0c1730)}",
     ".wmSunFoot{flex-shrink:0;padding:10px;border-top:1px solid #22407e;background:#0c1730;display:flex;gap:8px;align-items:flex-end}",
-    ".wmB{max-width:82%;padding:9px 12px;border-radius:15px;font:500 13.5px/1.45 Montserrat,system-ui,sans-serif;white-space:pre-wrap;word-wrap:break-word}",
+    ".wmB{max-width:90%;padding:10px 13px;border-radius:15px;font:500 13.5px/1.55 Montserrat,system-ui,sans-serif;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}",
     ".wmB.u{align-self:flex-end;background:linear-gradient(135deg,#1D429B,#2a55bd);color:#fff;border-bottom-right-radius:5px}",
-    ".wmB.b{align-self:flex-start;background:#1a2b52;color:#eaf1ff;border:1px solid #25406f;border-bottom-left-radius:5px}",
+    ".wmB.b{align-self:flex-start;background:#1a2b52;color:#eaf1ff;border:1px solid #25406f;border-bottom-left-radius:5px;white-space:normal}",
+    ".wmB.b strong{color:#fff;font-weight:800}",
+    ".wmB.b ul{margin:7px 0 3px;padding-left:20px}",
+    ".wmB.b li{margin:4px 0;line-height:1.5}",
+    ".wmB.b code{background:#0f1d3c;padding:1px 5px;border-radius:5px;font-size:12.5px}",
+    ".wmB.b p{margin:0 0 8px}",".wmB.b p:last-child{margin:0}",
     ".wmChip{background:#16294f;border:1px solid #2a4a86;color:#bcd2f5;border-radius:20px;padding:7px 12px;font:600 12px Montserrat,system-ui,sans-serif;cursor:pointer;white-space:nowrap}",
     ".wmChip:active{background:#122a52}",
     ".wmSunIn{flex:1;min-height:42px;max-height:110px;resize:none;border-radius:14px;border:1px solid #2a4a86;background:#0f1d3c;color:#fff;padding:11px 13px;font:500 16px Montserrat,system-ui,sans-serif;outline:none}",
@@ -96,7 +100,19 @@
   function speak(txt){ if(muted||!window.speechSynthesis||!txt){ winmiState("idle"); return; } try{ window.speechSynthesis.cancel(); var u=new SpeechSynthesisUtterance(String(txt).replace(/[*_#`]/g,"")); u.lang=es()?"es-ES":"en-US"; u.rate=1.02; u.pitch=1.05; winmiState("talking"); u.onend=function(){ winmiState("idle"); }; u.onerror=function(){ winmiState("idle"); }; window.speechSynthesis.speak(u); }catch(e){ winmiState("idle"); } }
   function stopSpeak(){ try{ window.speechSynthesis&&window.speechSynthesis.cancel(); }catch(e){} winmiState("idle"); }
 
-  function addBubble(who,txt){ var b=document.getElementById("wmSunMsgs"); if(!b) return null; var d=document.createElement("div"); d.className="wmB "+(who==="u"?"u":"b"); d.textContent=txt; b.appendChild(d); b.scrollTop=b.scrollHeight; return d; }
+  // Light, SAFE markdown → HTML for WinMI's answers so descriptions read clean (bold, bullets, spacing).
+  function wmEsc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  function fmtBotHtml(t){
+    var s=wmEsc(t).replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>").replace(/`([^`]+)`/g,"<code>$1</code>").replace(/^\s*#{1,6}\s+(.*)$/gm,"<strong>$1</strong>");
+    var lines=s.split(/\r?\n/), out=[], inUl=false, flush=function(){ if(inUl){out.push("</ul>");inUl=false;} };
+    for(var i=0;i<lines.length;i++){ var ln=lines[i], m=ln.match(/^\s*(?:[•\-\*]|\d+[\.\)])\s+(.*)$/);
+      if(m){ if(!inUl){out.push("<ul>");inUl=true;} out.push("<li>"+m[1]+"</li>"); }
+      else if(ln.trim()===""){ flush(); out.push("<br>"); }
+      else { flush(); out.push(ln+"<br>"); } }
+    flush();
+    return out.join("").replace(/(<br>\s*)+$/,"").replace(/<\/ul>\s*<br>/g,"</ul>").replace(/<br>\s*<ul>/g,"<ul>");
+  }
+  function addBubble(who,txt){ var b=document.getElementById("wmSunMsgs"); if(!b) return null; var d=document.createElement("div"); d.className="wmB "+(who==="u"?"u":"b"); if(who==="u"){ d.textContent=txt; } else { d.innerHTML=fmtBotHtml(txt); } b.appendChild(d); b.scrollTop=b.scrollHeight; return d; }
   function typing(on){ var b=document.getElementById("wmSunMsgs"); if(!b) return; var ex=document.getElementById("wmSunTyp"); if(ex)ex.remove(); if(on){ var d=document.createElement("div"); d.id="wmSunTyp"; d.className="wmB b"; d.innerHTML='<span class="wmTypDot"></span><span class="wmTypDot" style="animation-delay:.2s"></span><span class="wmTypDot" style="animation-delay:.4s"></span>'; b.appendChild(d); b.scrollTop=b.scrollHeight; } }
 
   function send(text){ text=(text||"").trim(); if(!text) return; stopSpeak();
