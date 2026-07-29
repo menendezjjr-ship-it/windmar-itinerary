@@ -27,7 +27,7 @@ const ORG = "org666151142";
 const SC_PROXY = process.env.SITECAPTURE_PROXY || "https://windmar-service-app.vercel.app/api/sitecapture";
 const SC_FIXED = process.env.SITECAPTURE_API_KEY || "zapier-api-4320";
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = process.env.ASSISTANT_MODEL || "claude-sonnet-5";
+const MODEL = process.env.ASSISTANT_MODEL || "claude-haiku-4-5-20251001"; // fast+cheap for chat; override via env
 
 export const config = { maxDuration: 60 };
 
@@ -412,47 +412,111 @@ async function callNecBrain(question, history, lang, knowledgeContext) {
   return { answer: String(data.answer || ""), source: data.source || "" };
 }
 
+// Direct Claude (Anthropic) call — WinMI's PRIMARY freeform/NEC brain when a valid ANTHROPIC_API_KEY
+// is set, so it doesn't depend on the Field HUB's rate-limited Gemini. systemPrompt() carries the
+// WinMI persona + NEC expertise; we add the app + Zoho guides so it can field those too.
+async function callClaude(apiKey, question, history, lang) {
+  const sys = systemPrompt(lang) + "\n\n" + APP_GUIDE + "\n\n" + ZOHO_GUIDE;
+  const msgs = (history || []).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: String((m && (m.text || m.content)) || "") })).filter((m) => m.content);
+  msgs.push({ role: "user", content: String(question) });
+  while (msgs.length && msgs[0].role !== "user") msgs.shift();
+  const r = await fetchT(ANTHROPIC_URL, {
+    method: "POST",
+    headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({ model: MODEL, max_tokens: 900, system: sys, messages: msgs.slice(-16) }),
+  }, 30000);
+  if (!r) throw new Error("Claude timed out");
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error("Claude " + r.status + ": " + String((d && d.error && d.error.message) || "").slice(0, 140));
+  return (Array.isArray(d.content) ? d.content : []).filter((b) => b && b.type === "text").map((b) => b.text).join("").trim();
+}
+
 // The NEC Assistant appends a "FOLLOWUPS: ..." line for the Field HUB's chip UI — strip it here.
 function stripFollowups(s) { return String(s || "").replace(/\n*FOLLOWUPS:.*$/is, "").trim(); }
 
 // Best-effort: pull live project data relevant to the question, formatted as knowledge context.
 async function gatherContext(text) {
-  const used = [], parts = [];
-  if (!hasZoho()) return { context: "", used };
+  const used = [], parts = [], records = [];
+  let search = null, sitecapture = null;
+  if (!hasZoho()) return { context: "", used, records, search, sitecapture };
   const low = String(text || "").toLowerCase();
 
   // (a) Explicit DL/RDL/RL/MSP numbers → deep lookup each (full record incl. notes).
   const uniqDls = [...new Set((String(text).match(/\b(?:RDL|RL|DL|MSP)\s?\d{3,}\b/ig) || []).map(normDL))].slice(0, 3);
   if (uniqDls.length) {
     const jobs = await Promise.all(uniqDls.map((dl) => toolGetJobDetails({ dl }).catch((e) => ({ error: String((e && e.message) || e) }))));
-    jobs.forEach((r, i) => parts.push("PROJECT " + uniqDls[i] + " (full Zoho record):\n" + JSON.stringify(r)));
+    jobs.forEach((r, i) => { records.push(r); parts.push("PROJECT " + uniqDls[i] + " (full Zoho record):\n" + JSON.stringify(r)); });
     used.push("get_job_details");
   }
 
   // (b) SiteCapture, when asked.
   if (/site\s?capture/.test(low)) {
-    try { const r = await toolSearchSitecapture({ query: searchTermsFrom(text) || text }); parts.push("SITECAPTURE RESULTS:\n" + JSON.stringify(r)); used.push("search_sitecapture"); } catch (e) {}
+    try { sitecapture = await toolSearchSitecapture({ query: searchTermsFrom(text) || text }); parts.push("SITECAPTURE RESULTS:\n" + JSON.stringify(sitecapture)); used.push("search_sitecapture"); } catch (e) {}
   }
 
-  // (c) No DL, but it's clearly about a specific project (by name/address/status/notes/...) →
-  //     search Zoho, then DEEP-fetch the top match(es) so WinMI gets notes + status, not one-liners.
+  // (c) No DL, but it's clearly about a specific project → search Zoho, then DEEP-fetch top match(es).
   const projectish = /(status|note|report|update|stage|schedule|ready|pending|complete|past ?due|inspection|permit|bom|plan|install|service|crew|deal|project|job|customer|address|phone|when|where|who|estado|nota|reporte|etapa|program|list[oa]|pendiente|complet|inspecci|permiso|instalaci|servicio|cuadrilla|cliente|direcci|proyecto|trabajo)/i;
   if (!uniqDls.length && projectish.test(low) && searchTermsFrom(text).length >= 2) {
     try {
-      const { res, query } = await smartProjectSearch(text);
-      parts.push('PROJECT SEARCH for "' + query + '":\n' + JSON.stringify(res));
+      const r = await smartProjectSearch(text); search = r.res;
+      parts.push('PROJECT SEARCH for "' + r.query + '":\n' + JSON.stringify(r.res));
       used.push("search_projects");
-      const dls = (res && Array.isArray(res.matches) ? res.matches : []).map((m) => normDL(m.dl)).filter((d) => /^(?:RDL|RL|DL|MSP|S)\d{2,}$/.test(d));
+      const dls = (r.res && Array.isArray(r.res.matches) ? r.res.matches : []).map((m) => normDL(m.dl)).filter((d) => /^(?:RDL|RL|DL|MSP|S)\d{2,}$/.test(d));
       const top = [...new Set(dls)].slice(0, 2);
       if (top.length) {
         const deep = await Promise.all(top.map((dl) => toolGetJobDetails({ dl }).catch((e) => ({ error: String((e && e.message) || e) }))));
-        deep.forEach((r, i) => parts.push("PROJECT " + top[i] + " (full Zoho record):\n" + JSON.stringify(r)));
+        deep.forEach((r2, i) => { records.push(r2); parts.push("PROJECT " + top[i] + " (full Zoho record):\n" + JSON.stringify(r2)); });
         if (used.indexOf("get_job_details") < 0) used.push("get_job_details");
       }
     } catch (e) {}
   }
 
-  return { context: parts.join("\n\n").slice(0, 8000), used };
+  return { context: parts.join("\n\n").slice(0, 8000), used, records, search, sitecapture };
+}
+
+// ── LOCAL answer builders (NO LLM) — WinMI's core "skill" so it works without Gemini ──────────
+function fmtDT(s) { s = String(s || ""); if (!s) return ""; const d = s.slice(0, 10), t = s.slice(11, 16); return t ? (d + " " + t) : d; }
+function fmtReport(records, lang) {
+  const es = lang === "es";
+  const body = records.map((r) => {
+    if (!r || r.found === false || r.error) return null;
+    const L = [];
+    L.push("📋 " + (r.dl || "") + " — " + (r.customer || ""));
+    if (r.address) L.push("📍 " + r.address + (r.phone ? ("  ·  ☎ " + r.phone) : ""));
+    L.push((es ? "Etapa: " : "Project stage: ") + (r.dealStage || "—") + (r.systemKw ? ("  ·  " + r.systemKw + " kW") : "") + (r.ahj ? ("  ·  AHJ: " + r.ahj) : ""));
+    (r.installations || []).forEach((it) => {
+      L.push((es ? "🔧 Instalación " : "🔧 Install ") + (it.record || "") + ": " + (it.stage || "—") + (it.crew ? ("  ·  " + it.crew) : "") + (it.startDate ? ("  ·  " + (es ? "inicio " : "start ") + it.startDate) : "") + (it.completeDate ? ("  ·  " + (es ? "completado " : "done ") + it.completeDate) : ""));
+      if (it.installNotes) L.push("   • " + it.installNotes);
+      if (it.roofNotes) L.push("   • " + (es ? "Techo: " : "Roof: ") + it.roofNotes);
+    });
+    (r.serviceTickets || []).forEach((t) => {
+      L.push((es ? "🛠 Servicio " : "🛠 Service ") + (t.ticket || "") + ": " + (t.status || "—") + (t.scheduledVisit ? ("  ·  " + (es ? "visita " : "visit ") + fmtDT(t.scheduledVisit)) : "") + (t.completedDate ? ("  ·  " + (es ? "completado " : "done ") + fmtDT(t.completedDate)) : "") + (t.tech ? ("  ·  " + t.tech) : ""));
+      if (t.description) L.push("   • " + t.description);
+    });
+    const ins = r.inspection || {};
+    if (ins.dealInspectionStage || ins.found) L.push((es ? "🔍 Inspección: " : "🔍 Inspection: ") + (ins.dealInspectionStage || ins.subRecordStage || (ins.found ? ((es ? "registro " : "record ") + ins.record) : (es ? "ninguna" : "none"))) + (ins.finalInspectionApproved ? ("  ·  " + (es ? "aprobada " : "approved ") + fmtDT(ins.finalInspectionApproved)) : ""));
+    if (r.notes && r.notes.length) {
+      L.push(es ? "📝 Notas recientes:" : "📝 Recent notes:");
+      r.notes.slice(0, 5).forEach((n) => L.push("   • " + (n.time ? (n.time.slice(0, 10) + " — ") : "") + (n.content || n.title || "") + (n.author ? (" (" + n.author + ")") : "")));
+    }
+    if (r.zohoUrl) L.push("🔗 " + r.zohoUrl);
+    return L.join("\n");
+  }).filter(Boolean).join("\n\n———\n\n");
+  const open = records.length > 1 ? (es ? "¡Claro! Esto es lo último de Zoho:\n\n" : "Sure! Here's the latest from Zoho:\n\n") : (es ? "¡Aquí tienes! 👇\n\n" : "Here you go! 👇\n\n");
+  return open + body + (es ? "\n\n¿Necesitas algo más de este trabajo?" : "\n\nAnything else you need on this one?");
+}
+function fmtMatches(matches, lang) {
+  const es = lang === "es";
+  const list = matches.slice(0, 8).map((m) => "• " + (m.dl || "") + " — " + (m.customer || "") + (m.address ? ("  ·  📍 " + m.address) : "") + (m.stage ? ("  ·  " + m.stage) : "")).join("\n");
+  return (es ? "Encontré estos proyectos — dime el DL# para el detalle completo:\n\n" : "I found these projects — tell me the DL# for the full detail:\n\n") + list;
+}
+function fmtSchema(lang) {
+  const es = lang === "es";
+  return (es ? "Así está organizado nuestro Zoho 👇\n\n" : "Here's how our Zoho is organized 👇\n\n") + ZOHO_GUIDE;
+}
+function fmtApp(lang) {
+  const es = lang === "es";
+  return (es ? "Esto es lo que puedes hacer en la app 👇\n\n" : "Here's what you can do in the app 👇\n\n") + APP_GUIDE;
 }
 
 // Compact, accurate guide to the app so WinMI can walk users through anything (fed as knowledge).
@@ -469,6 +533,17 @@ const APP_GUIDE = [
   "• Global: 🔔 notifications, 🌐 EN/ES toggle, 🌙 light/dark theme. To EDIT a job, open it in Coordinator or Calendar → Edit / Save / Add note. (WinMI itself is read-only.)",
 ].join("\n");
 
+// WindMar's Zoho CRM structure — modules, key fields, and the real stage/status lifecycles, so
+// WinMI understands the whole pipeline (not just one record). Surveyed from live Zoho metadata.
+const ZOHO_GUIDE = [
+  "WINDMAR ZOHO CRM STRUCTURE (org666151142) — use this to understand any project's data & lifecycle:",
+  "• Deals = the project/customer master; every other record links to it. Pipeline field = Solar / Roofing / Service. Deal STAGE lifecycle (order): Information Gathering → Qualification → Proposal → Negotiation → Signed (Won) → Pre-Engineering → NTP → Site Visit → Engineering → Permitting → Install → Post-Installation → Utility → Finance → In Service → In Service - Complete. Service branch: Pre-Service → Post Service → Service Complete. Terminal: On Hold, Closed Lost. Key fields: Deal_Name, Stage, Pipeline, Sales_Person, Client_Coordinator, Authority_Having_Jurisdiction_AHJ, County1, Utility_Picklist, Permit_Submitted/Received_Date, Final_Inspection_Approved, System_Activation_Date.",
+  "• Installation (links via `Deal`) = the install job. STAGE values: 'Permit Approved - Pending Roof/MSP/HOA/Umbrella', 'Pending Schedule' (=ready to put on the calendar), 'Pending Schedule - Batteries Needed', Scheduled, In Progress, 'Installation Repair Required', 'Installation Complete - Need QA', 'Solar Complete - Need MSP ASAP', Complete, 'QA Complete - Move To Final Inspection', and several 'On Hold - Need Financing/Roof/HOA'. Key fields: Installation_Team (crew), Installation_Start_Date, Installation_Complete_Date, Number_of_Days_Needed, MSP_Completion, BOM_Status (Pending / Ready / Uploaded in NetSuite).",
+  "• Service_Ticket (links via `Associated_Deal`) = a service visit. Ticket_Status lifecycle: '1. Reported' → '2. Under review' → '3. Need Schedule' → '4. Scheduled' → '5. Need Reschedule' → '6. Tier 3/RMA/Warranty' → '7. Complete' → '8. Complete/Contacted' (plus 9-12 for more-info / financing / up-sales / quote). Key fields: Assigned_Technician (+ Visit_2/_3), Scheduled_Visit_1/2/3, Priority, Service_Type1, Area_of_Service, Ticket_Completion_Date.",
+  "• Final_Inspectin (label 'Post Installation', links via `Deal`) = final inspection. Final_Inspection_Stage: 'Ready for QA', 'Ready to Schedule', 'Inspection Scheduled', 'Inspection Failed - Corrections/Plan Revision', 'Partial Approval', 'All Inspections Approved' (+ 'by VIP waiting BD confirmation'), 'Building Department Hold', 'On-Hold (Legal Action)'. Key fields: Final_Inspection_Scheduled, Final_Inspection_Approved.",
+  "• Related modules: Roofing & Roofers (roofing jobs + crews; Deal Pipeline=Roofing), Permit & Engineering, Installation_Team/Installer (crew rosters that Installation_Team points to), Contacts/Accounts, and stage-change history modules (Installation_Stage_History, Final_Inspection_Stage_History).",
+].join("\n");
+
 // ---- handler ----------------------------------------------------------------
 
 export default async function handler(req, res) {
@@ -481,7 +556,10 @@ export default async function handler(req, res) {
   if (req.method === "GET") {
     let brainReachable = false;
     try { const r = await fetchT(NEC_AI_URL, { method: "GET" }, 10000); brainReachable = !!(r && r.ok); } catch (e) {}
-    return res.status(200).json({ ok: true, service: "assistant", brain: NEC_AI_URL, brainReachable, hasZoho: hasZoho() });
+    const k = (process.env.ANTHROPIC_API_KEY || "").trim();
+    return res.status(200).json({ ok: true, service: "assistant", geminiBrain: NEC_AI_URL, geminiReachable: brainReachable, hasZoho: hasZoho(),
+      claudeKeyPresent: !!k, claudeKeyValid: /^sk-ant-/.test(k), claudeModel: MODEL,
+      primaryBrain: /^sk-ant-/.test(k) ? "claude" : "gemini" });
   }
   if (req.method !== "POST") return res.status(200).json({ ok: false, error: "POST only" });
 
@@ -498,23 +576,36 @@ export default async function handler(req, res) {
     const question = messages[messages.length - 1].content;
     const history = messages.slice(0, -1).map((m) => ({ role: m.role, text: m.content }));
 
-    // Enrich with live project data (best-effort). Keep the brain payload LEAN (the brain shares
-    // a rate-limited key): send the PROJECT DATA for a project question, else the APP GUIDE for a
-    // how-to. One call — no double-retry — to minimize load on the shared AI.
-    const { context, used } = await gatherContext(question);
-    const knowledge = context ? ("LIVE PROJECT DATA (use as the source of truth):\n" + context) : APP_GUIDE;
+    const { context, used, records, search } = await gatherContext(question);
+    const found = (records || []).filter((r) => r && r.found !== false && !r.error);
+    const ql = String(question).toLowerCase();
+
+    // ── LOCAL-FIRST (no Gemini): the core "skill". Project reports, match lists, Zoho schema, and
+    // app how-to are answered straight from the live data / embedded guides — instant, always works.
+    if (found.length) return res.status(200).json({ ok: true, answer: fmtReport(found, lang), used: [...new Set(used)], source: "local" });
+    if (search && Array.isArray(search.matches) && search.matches.length) return res.status(200).json({ ok: true, answer: fmtMatches(search.matches, lang), used: [...new Set(used)], source: "local" });
+    if (/\b(stage|stages|status|statuses|pipeline|lifecycle|modules?|picklist|etapas?|estados?|flujo|proceso|m[oó]dulos?)\b/.test(ql)) return res.status(200).json({ ok: true, answer: fmtSchema(lang), used: ["zoho_guide"], source: "local" });
+    if (/\b(how|where|which|what|c[oó]mo|d[oó]nde|qu[eé])\b/.test(ql) && /(app|tab|coordinator|calendar|schedule|route|map|weather|sitecapture|note|edit|dispatch|crew|coordinador|calendario|programar|ruta|mapa|clima|nota|editar|pesta)/.test(ql)) return res.status(200).json({ ok: true, answer: fmtApp(lang), used: ["app_guide"], source: "local" });
+
+    // ── Freeform / NEC only → Gemini (its NEC brain). Degrades gracefully if rate-limited.
     const persona = lang === "es"
       ? "Eres WinMI, el asistente personal de WindMar Home: un droide cálido, animado y agudo — como un compañero de trabajo simpático. Ten una CONVERSACIÓN real: sé cercano y alentador, nunca aburrido ni robótico. Da respuestas DIRECTAS y útiles primero (sin relleno) y, cuando ayude, agrega una pregunta de seguimiento breve y amable en prosa normal. Conoces esta app a fondo (mira la GUÍA DE LA APP en tu conocimiento) y puedes guiar a cualquiera paso a paso. También respondes preguntas de código NEC/equipos. Eres de SOLO LECTURA: consultas datos pero nunca los cambias — si te piden editar/programar, explícalo con gusto y dilo que usen el botón Editar/Agregar nota en Coordinador o Calendario. Nunca inventes datos de proyectos; usa solo lo que está en tu conocimiento. Cuando te pregunten por un trabajo o proyecto específico, da un reporte claro con los DATOS EN VIVO de tu conocimiento — su etapa/estado, fechas clave, cuadrilla, dirección, tickets de servicio, inspección y las NOTAS más recientes (resúmelas). Si los datos no incluyen el proyecto, dilo claramente y pide el DL# o el nombre exacto del cliente. Dos reglas de exactitud: (1) el técnico de un ticket de servicio es SOLO el campo 'tech' del ticket — si está vacío, no nombres a nadie y NUNCA asumas que la cuadrilla de instalación es el técnico de servicio; (2) para el estado de inspección usa el nivel del deal ('dealInspectionStage'/'finalInspectionApproved'), no el sub-registro. Sé conciso y apto para móvil. Usa emojis con moderación. NO escribas una línea 'FOLLOWUPS:'."
       : "You are WinMI, WindMar Home's warm, upbeat personal assistant droid — like a sharp, friendly coworker. Have a REAL conversation: be personable and encouraging, never dull or robotic. Give DIRECT, useful answers first (no filler), then when it helps, add a short friendly follow-up question in plain prose. You know this app inside-out (see the APP GUIDE in your knowledge) and can walk anyone through how to do anything in it. You also answer NEC/electrical/equipment questions. You are READ-ONLY: you look things up but never change data — if asked to edit/schedule, cheerfully explain that and point them to the Edit/Add-note button in the Coordinator or Calendar tab. Never invent project data; use only what's in your knowledge/tools. When someone asks about a specific job or project, give a clear report straight from the LIVE PROJECT DATA in your knowledge — its stage/status, key dates, crew, address, service tickets, inspection, and the most recent NOTES (summarize them). If the data does not contain the project, say so plainly and ask for the DL# or the exact customer name. Two accuracy rules: (1) a service ticket's technician is ONLY the ticket's own 'tech' field — if that's blank, don't name one and NEVER assume the install crew is the service tech; (2) for inspection status, use the deal-level 'dealInspectionStage'/'finalInspectionApproved' — not the sub-record — as the real status. Keep it concise and mobile-friendly. Use emojis sparingly. Do NOT output a 'FOLLOWUPS:' line.";
     const q = persona + "\n\nUser question: " + question;
 
-    // One brain call. A "knowledge-fallback" source means the AI failed and echoed our context —
-    // treat that as no-answer (never surface the raw dump) and fail gracefully.
-    let answer = null;
-    try { const r = await callNecBrain(q, history, lang, knowledge); if (r.source !== "knowledge-fallback") answer = stripFollowups(r.answer); } catch (e) {}
-    if (answer == null) return res.status(200).json({ ok: false, error: lang === "es" ? "El asistente está ocupado — inténtalo de nuevo en un momento." : "The assistant is busy right now — please try again in a moment." });
+    // NEC/freeform. PREFER Claude directly (independent of the Field HUB's Gemini) when a valid
+    // ANTHROPIC_API_KEY is set; fall back to the Gemini brain; then to a friendly local message.
+    let answer = null, brain = "";
+    const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim();
+    if (/^sk-ant-/.test(apiKey)) { try { answer = await callClaude(apiKey, question, history, lang); if (answer) brain = "claude"; } catch (e) {} }
+    if (!answer) { try { const r = await callNecBrain(q, history, lang, ""); if (r.source !== "knowledge-fallback") { answer = stripFollowups(r.answer); brain = "gemini"; } } catch (e) {} }
+    if (answer) return res.status(200).json({ ok: true, answer, used: [...new Set(used)], source: brain });
 
-    return res.status(200).json({ ok: true, answer: answer || (lang === "es" ? "Lo siento, no tengo una respuesta a eso." : "Sorry, I don't have an answer for that."), used: [...new Set(used)] });
+    // Gemini down — WinMI still isn't dead: friendly local message pointing to what DOES work locally.
+    return res.status(200).json({ ok: true, source: "local-fallback", used: [...new Set(used)],
+      answer: lang === "es"
+        ? "Mi cerebro NEC está ocupado ahora mismo 🙈 — inténtalo de nuevo en un momento. Mientras tanto puedo buscar cualquier proyecto al instante (dame un DL# o el nombre del cliente) o explicarte cómo usar la app."
+        : "My NEC brain is busy right now 🙈 — try again in a moment. Meanwhile I can still look up any project instantly (give me a DL# or the customer name) or explain how to use the app." });
   } catch (e) {
     return res.status(200).json({ ok: false, error: String((e && e.message) || e) });
   }
