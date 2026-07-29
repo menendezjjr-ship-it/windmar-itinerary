@@ -517,21 +517,40 @@ async function gatherContext(text) {
     try { sitecapture = await toolSearchSitecapture({ query: searchTermsFrom(text) || text }); parts.push("SITECAPTURE RESULTS:\n" + JSON.stringify(sitecapture)); used.push("search_sitecapture"); } catch (e) {}
   }
 
-  // (c) No DL, but it's clearly about a specific project → search Zoho, then DEEP-fetch top match(es).
-  const projectish = /(status|note|report|update|stage|schedule|ready|pending|complete|past ?due|inspection|permit|bom|plan|install|service|crew|deal|project|job|customer|address|phone|when|where|who|estado|nota|reporte|etapa|program|list[oa]|pendiente|complet|inspecci|permiso|instalaci|servicio|cuadrilla|cliente|direcci|proyecto|trabajo)/i;
-  if (!uniqDls.length && projectish.test(low) && searchTermsFrom(text).length >= 2) {
-    try {
-      const r = await smartProjectSearch(text); search = r.res;
-      parts.push('PROJECT SEARCH for "' + r.query + '":\n' + JSON.stringify(r.res));
-      used.push("search_projects");
-      const dls = (r.res && Array.isArray(r.res.matches) ? r.res.matches : []).map((m) => normDL(m.dl)).filter((d) => /^(?:RDL|RL|DL|MSP|S)\d{2,}$/.test(d));
+  // (c) No DL → search Zoho by NAME / ADDRESS / PHONE (no keyword required). smartProjectSearch
+  // self-gates on real entities (names, addresses, numbers), so pure NEC/app/schema questions
+  // (no proper noun) won't trigger a search. Then DEEP-fetch the top match(es).
+  if (!uniqDls.length) {
+    const digits = String(text).replace(/\D/g, "");
+    // Phone lookup (7–15 digits, e.g. "find 813-900-8710").
+    if (digits.length >= 7 && digits.length <= 15) {
+      try {
+        const token = await getAccessToken();
+        const rows = await zohoSearch("Deals", "phone=" + encodeURIComponent(digits.slice(-10)) + "&fields=" + encodeURIComponent("Deal_Name,Stage,Address,City,State,Zip") + "&per_page=10", token);
+        const matches = rows.map((d) => { const p = parseDeal(d.Deal_Name); return { dl: p.num || "", customer: p.customer || d.Deal_Name || "", address: p.address || [clean(d.Address), clean(d.City)].filter(Boolean).join(", "), stage: d.Stage || "" }; });
+        if (matches.length) { search = { count: matches.length, matches }; parts.push("PHONE SEARCH:\n" + JSON.stringify(search)); used.push("search_projects"); }
+      } catch (e) {}
+    }
+    // Name / address search.
+    if (!search || !search.matches || !search.matches.length) {
+      try { const r = await smartProjectSearch(text); if (r.res && Array.isArray(r.res.matches) && r.res.matches.length) { search = r.res; parts.push('PROJECT SEARCH for "' + r.query + '":\n' + JSON.stringify(r.res)); used.push("search_projects"); } } catch (e) {}
+    }
+    // Deep-fetch top matches (full status + notes).
+    if (search && Array.isArray(search.matches) && search.matches.length) {
+      const dls = search.matches.map((m) => normDL(m.dl)).filter((d) => /^(?:RDL|RL|DL|MSP|S)\d{2,}$/.test(d));
       const top = [...new Set(dls)].slice(0, 2);
       if (top.length) {
         const deep = await Promise.all(top.map((dl) => toolGetJobDetails({ dl }).catch((e) => ({ error: String((e && e.message) || e) }))));
         deep.forEach((r2, i) => { records.push(r2); parts.push("PROJECT " + top[i] + " (full Zoho record):\n" + JSON.stringify(r2)); });
         if (used.indexOf("get_job_details") < 0) used.push("get_job_details");
       }
-    } catch (e) {}
+    }
+    // SiteCapture fallback — Zoho found nothing but the user named an entity → search SiteCapture too.
+    if ((!search || !search.matches || !search.matches.length) && !sitecapture && !/site\s?capture/.test(low)) {
+      const caps = (String(text).match(/\b[A-Z][a-zA-Z]{2,}\b/g) || []).filter((w) => !STOP.has(w.toLowerCase()) && !GENERIC.has(w.toLowerCase()));
+      const terms = caps.join(" ") || (digits.length >= 3 ? digits : "");
+      if (terms) { try { const sc = await toolSearchSitecapture({ query: terms }); if (sc && sc.count) { sitecapture = sc; parts.push("SITECAPTURE RESULTS:\n" + JSON.stringify(sc)); used.push("search_sitecapture"); } } catch (e) {} }
+    }
   }
 
   return { context: parts.join("\n\n").slice(0, 8000), used, records, search, sitecapture };
@@ -572,6 +591,11 @@ function fmtMatches(matches, lang) {
   const es = lang === "es";
   const list = matches.slice(0, 8).map((m) => "• " + (m.dl || "") + " — " + (m.customer || "") + (m.address ? ("  ·  📍 " + m.address) : "") + (m.stage ? ("  ·  " + m.stage) : "")).join("\n");
   return (es ? "Encontré estos proyectos — dime el DL# para el detalle completo:\n\n" : "I found these projects — tell me the DL# for the full detail:\n\n") + list;
+}
+function fmtSiteCapture(sc, lang) {
+  const es = lang === "es";
+  const list = (sc.projects || []).slice(0, 8).map((p) => "• " + (p.name || "") + (p.address ? ("  ·  📍 " + p.address) : "") + (p.status ? ("  ·  " + p.status) : "")).join("\n");
+  return (es ? "No lo encontré en Zoho, pero esto salió en SiteCapture 📷:\n\n" : "I didn't find it in Zoho, but here's what SiteCapture has 📷:\n\n") + list;
 }
 function fmtSchema(lang) {
   const es = lang === "es";
@@ -653,7 +677,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: false, error: lang === "es" ? "No pude analizar la foto ahora mismo — inténtalo de nuevo." : "I couldn't analyze that photo just now — please try again." });
     }
 
-    const { context, used, records, search } = await gatherContext(question);
+    const { context, used, records, search, sitecapture } = await gatherContext(question);
     const found = (records || []).filter((r) => r && r.found !== false && !r.error);
     const ql = String(question).toLowerCase();
 
@@ -661,6 +685,7 @@ export default async function handler(req, res) {
     // app how-to are answered straight from the live data / embedded guides — instant, always works.
     if (found.length) return res.status(200).json({ ok: true, answer: fmtReport(found, lang), used: [...new Set(used)], source: "local" });
     if (search && Array.isArray(search.matches) && search.matches.length) return res.status(200).json({ ok: true, answer: fmtMatches(search.matches, lang), used: [...new Set(used)], source: "local" });
+    if (sitecapture && sitecapture.count) return res.status(200).json({ ok: true, answer: fmtSiteCapture(sitecapture, lang), used: [...new Set(used)], source: "local" });
     if (/\b(stage|stages|status|statuses|pipeline|lifecycle|modules?|picklist|etapas?|estados?|flujo|proceso|m[oó]dulos?)\b/.test(ql)) return res.status(200).json({ ok: true, answer: fmtSchema(lang), used: ["zoho_guide"], source: "local" });
     if (/\b(how|where|which|what|c[oó]mo|d[oó]nde|qu[eé])\b/.test(ql) && /(app|tab|coordinator|calendar|schedule|route|map|weather|sitecapture|note|edit|dispatch|crew|coordinador|calendario|programar|ruta|mapa|clima|nota|editar|pesta)/.test(ql)) return res.status(200).json({ ok: true, answer: fmtApp(lang), used: ["app_guide"], source: "local" });
 
