@@ -1,4 +1,4 @@
-// WinMI — portable WindMar AI assistant widget. <script src="https://windmar-itinerary.vercel.app/winmi.js" defer></script>
+// WinMI portable widget — <script src="https://windmar-itinerary.vercel.app/winmi.js" defer></script>
 
 (function(){
   if(window.__wmSunny) return; window.__wmSunny=true;
@@ -98,7 +98,30 @@
 
   // Reactive "alive" state — a body class the droid CSS reacts to (idle/listening/thinking/talking).
   function winmiState(s){ try{ var c=document.body.classList; ["idle","listening","thinking","talking"].forEach(function(x){c.remove("wmi-"+x);}); c.add("wmi-"+(s||"idle")); }catch(e){} }
-  function speak(txt){ if(muted||!window.speechSynthesis||!txt){ winmiState("idle"); return; } try{ window.speechSynthesis.cancel(); var u=new SpeechSynthesisUtterance(String(txt).replace(/[*_#`]/g,"")); u.lang=es()?"es-ES":"en-US"; u.rate=1.02; u.pitch=1.05; winmiState("talking"); u.onend=function(){ winmiState("idle"); }; u.onerror=function(){ winmiState("idle"); }; window.speechSynthesis.speak(u); }catch(e){ winmiState("idle"); } }
+  // Pick the most natural voice the device offers (voices load async → cache + refresh).
+  var WM_VOICES=[]; function wmLoadVoices(){ try{ WM_VOICES=window.speechSynthesis.getVoices()||[]; }catch(e){} }
+  if(window.speechSynthesis){ wmLoadVoices(); try{ window.speechSynthesis.addEventListener("voiceschanged",wmLoadVoices); }catch(e){ try{window.speechSynthesis.onvoiceschanged=wmLoadVoices;}catch(_){} } }
+  function wmPickVoice(sp){ if(!WM_VOICES.length) wmLoadVoices(); var vs=WM_VOICES; if(!vs.length) return null;
+    var pref=sp?"es":"en";
+    var pri=sp?[/google espa/i,/(elvira|dalia|paloma|alvaro|lucia|jorge).*(natural|online|neural)/i,/(m[oó]nica|paulina)/i,/natural|neural|online/i,/google/i]
+              :[/google us english/i,/(aria|jenny|guy|ava|emma|libby|michelle|nova).*(natural|online|neural)/i,/(samantha|allison|ava|karen|siri)/i,/natural|neural|online/i,/google/i];
+    for(var p=0;p<pri.length;p++){ for(var i=0;i<vs.length;i++){ if((vs[i].lang||"").toLowerCase().indexOf(pref)===0 && pri[p].test(vs[i].name||"")) return vs[i]; } }
+    for(var j=0;j<vs.length;j++){ if((vs[j].lang||"").toLowerCase().indexOf(pref)===0) return vs[j]; }
+    return null; }
+  // Strip diagrams/markdown/urls/emoji so it reads smoothly (not "asterisk", "less-than svg", etc).
+  function wmSpokenText(t){ try{ return String(t||"")
+    .replace(/```[\s\S]*?```/g," ").replace(/<svg[\s\S]*?<\/svg>/gi," ").replace(/https?:\/\/\S+/g," ")
+    .replace(/\*\*([^*]+)\*\*/g,"$1").replace(/`([^`]+)`/g,"$1").replace(/[*_#>`|]/g," ")
+    .replace(/^\s*[-•]\s*/gm,"").replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}️]/gu," ")
+    .replace(/\s{2,}/g," ").trim(); }catch(e){ return String(t||"").replace(/[*_#`]/g,""); } }
+  function speak(txt){ if(muted||!window.speechSynthesis||!txt){ winmiState("idle"); return; }
+    try{ window.speechSynthesis.cancel(); var spoken=wmSpokenText(txt); if(!spoken){ winmiState("idle"); return; }
+      var u=new SpeechSynthesisUtterance(spoken); var sp=es(); u.lang=sp?"es-ES":"en-US";
+      var v=wmPickVoice(sp); if(v){ u.voice=v; if(v.lang) u.lang=v.lang; }
+      u.rate=0.97; u.pitch=1.0;
+      winmiState("talking"); u.onend=function(){ winmiState("idle"); }; u.onerror=function(){ winmiState("idle"); };
+      window.speechSynthesis.speak(u);
+    }catch(e){ winmiState("idle"); } }
   function stopSpeak(){ try{ window.speechSynthesis&&window.speechSynthesis.cancel(); }catch(e){} winmiState("idle"); }
 
   // Light, SAFE markdown → HTML for WinMI's answers so descriptions read clean (bold, bullets, spacing).
