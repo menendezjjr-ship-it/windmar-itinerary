@@ -1,8 +1,15 @@
 // /api/zoho-ready.js — "Ready to Schedule" feed for the Coordinator tab.
 // Unlike /api/zoho-jobs (which is date-windowed), these records usually have NO
 // Installation_Start_Date / Scheduled_Visit yet, so we query them by STATUS:
-//   Installation   Stage = "Pending Schedule" OR "Pending Schedule - Batteries Needed"
+//   Installation   Stage = ready/near-ready (see READY_INSTALL_STAGES)
 //   Service_Ticket Ticket_Status starts with "3" (verified live: "3. Need Schedule")
+//
+// IMPORTANT (verified live 2026-07): WindMar does NOT reset an Installation's Stage
+// when its Deal dies, so "Pending Schedule" alone is 100% STALE (all 85 attached to
+// Closed-Lost deals). The genuine live pipeline sits mostly at "Permit Approved - *"
+// (permit approved, pending roof/MSP/HOA/umbrella). So we query the whole pre-scheduled
+// stage set and rely on the Deal-Stage filter (DEAD_STAGE) to drop the dead sales —
+// that is the only reliable "is this a real job?" signal here.
 // Both are mapped to the SAME job shape /api/zoho-jobs emits so the client can reuse
 // jobType(), the Coordinator card, and coordDetailModal (editable Installation detail).
 // Self-contained (CommonJS-safe: only export default + global fetch — no import.meta).
@@ -57,6 +64,19 @@ async function fetchDealStages(ids, token) {
   return out;
 }
 const DEAD_STAGE = /closed\s*lost|dead|cancell?ed/i; // primarily "Closed Lost" (verified exact string live)
+
+// Installation Stages that mean "not yet on the calendar, coordinator should act on it."
+// "Pending Schedule*" = fully ready; "Permit Approved - *" = permit approved, pending one
+// blocker (roof/MSP/HOA/umbrella). Closed-Lost sales among these are dropped by DEAD_STAGE.
+const READY_INSTALL_STAGES = [
+  "Pending Schedule",
+  "Pending Schedule - Batteries Needed",
+  "Permit Approved - HOA is Pending",
+  "Permit Approved - Pending Roof",
+  "Permit Approved - Pending MSP",
+  "Permit Approved - Pending Umbrella",
+];
+const READY_INSTALL_CRITERIA = "(" + READY_INSTALL_STAGES.map((s) => `(Stage:equals:${s})`).join("or") + ")";
 
 // Run a paginated CRM search and return ALL matches (criteria/fields URL-encoded).
 async function searchAll(module, criteria, fields, token) {
@@ -252,12 +272,7 @@ export default async function handler(req, res) {
   try {
     const token = await getAccessToken();
     const [installs, services] = await Promise.all([
-      searchAll(
-        "Installation",
-        "((Stage:equals:Pending Schedule)or(Stage:equals:Pending Schedule - Batteries Needed))",
-        INSTALL_FIELDS,
-        token
-      ),
+      searchAll("Installation", READY_INSTALL_CRITERIA, INSTALL_FIELDS, token),
       // starts_with:3 captures "3. Need Schedule" (+ any 3.x variant); mapper keeps only needs_schedule.
       searchAll("Service_Ticket", "(Ticket_Status:starts_with:3)", SERVICE_FIELDS, token),
     ]);
