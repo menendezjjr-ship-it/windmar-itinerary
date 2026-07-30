@@ -18,8 +18,8 @@ function hasCreds() {
   return !!(process.env.ZOHO_CLIENT_ID && process.env.ZOHO_CLIENT_SECRET && process.env.ZOHO_REFRESH_TOKEN);
 }
 
-async function getAccessToken() {
-  if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
+async function getAccessToken(force) {
+  if (!force && cachedToken && Date.now() < tokenExpiry) return cachedToken;
   const res = await fetch(`${ACCOUNTS_HOST}/oauth/v2/token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -46,10 +46,9 @@ async function fetchDealStages(ids, token) {
   for (let i = 0; i < uniq.length; i += 100) {
     const chunk = uniq.slice(i, i + 100);
     try {
-      const res = await fetch(
-        `${API_DOMAIN}/crm/${API_VERSION}/Deals?ids=${encodeURIComponent(chunk.join(","))}&fields=Stage`,
-        { headers: { Authorization: `Zoho-oauthtoken ${token}` } }
-      );
+      const url = `${API_DOMAIN}/crm/${API_VERSION}/Deals?ids=${encodeURIComponent(chunk.join(","))}&fields=Stage`;
+      let res = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+      if (res.status === 401) { token = await getAccessToken(true); res = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${token}` } }); }
       if (res.status === 204 || !res.ok) continue;
       const data = await res.json();
       (data.data || []).forEach((d) => { if (d && d.id) out[String(d.id)] = (d.Stage || "").trim(); });
@@ -66,9 +65,13 @@ async function searchAll(module, criteria, fields, token) {
     const path =
       `${encodeURIComponent(module)}/search?criteria=${encodeURIComponent(criteria)}` +
       `&fields=${encodeURIComponent(fields)}&per_page=200&page=${page}`;
-    const res = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, {
+    let res = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, {
       headers: { Authorization: `Zoho-oauthtoken ${token}` },
     });
+    if (res.status === 401) { // cached token was invalidated by Zoho → force-refresh + retry once
+      token = await getAccessToken(true);
+      res = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+    }
     if (res.status === 204) break; // no records
     if (!res.ok) throw new Error(`Zoho ${module} ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const data = await res.json();
