@@ -131,7 +131,9 @@ function searchTermsFrom(text) {
 // of records) — a real project reference has a NAME, address number, or DL.
 const GENERIC = new Set(("installation install installing service schedule scheduled stage stages status statuses project projects job jobs inspection inspections permit permits deal deals note notes report reports crew crews calendar coordinator near each other pending complete ready today tomorrow week need needs want how what where when who "
   // equipment / brands / technical terms — must NOT trigger a customer/project NAME search
-  + "tesla powerwall powerwalls solaredge qcells hanwha generac pwrcell enphase eaton siemens square gateway inverter inverters battery batteries solar roof roofing panel panels breaker breakers wire wiring conductor nec code florida owens corning snapnrack ironridge unirac msp gfci afci circuit amp amps volt volts kw ev charger meter diagram show").split(/\s+/));
+  + "tesla powerwall powerwalls solaredge qcells hanwha generac pwrcell enphase eaton siemens square gateway inverter inverters battery batteries solar roof roofing panel panels breaker breakers wire wiring conductor nec code florida owens corning snapnrack ironridge unirac msp gfci afci circuit amp amps volt volts kw ev charger meter diagram show "
+  // schema / meta words — a question ABOUT Zoho/the data model must NOT search for a customer
+  + "zoho crm module modules track tracking picklist pipeline lifecycle schema field fields record records name final list listing category categories type types").split(/\s+/));
 async function smartProjectSearch(text) {
   const cands = [];
   const caps = (String(text).match(/\b[A-Z][a-zA-Z]{2,}\b/g) || []).filter((w) => !STOP.has(w.toLowerCase()) && !GENERIC.has(w.toLowerCase()));
