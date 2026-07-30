@@ -8,8 +8,8 @@
 // when its Deal dies, so "Pending Schedule" alone is 100% STALE (all 85 attached to
 // Closed-Lost deals). The genuine live pipeline sits mostly at "Permit Approved - *"
 // (permit approved, pending roof/MSP/HOA/umbrella). So we query the whole pre-scheduled
-// stage set and rely on the Deal-Stage filter (DEAD_STAGE) to drop the dead sales —
-// that is the only reliable "is this a real job?" signal here.
+// stage set and rely on the Deal-Stage filter (LIVE_DEAL_STAGES) to keep only live sales —
+// that is the only reliable "is this a real, still-active job?" signal here.
 // Both are mapped to the SAME job shape /api/zoho-jobs emits so the client can reuse
 // jobType(), the Coordinator card, and coordDetailModal (editable Installation detail).
 // Self-contained (CommonJS-safe: only export default + global fetch — no import.meta).
@@ -63,11 +63,19 @@ async function fetchDealStages(ids, token) {
   }
   return out;
 }
-const DEAD_STAGE = /closed\s*lost|dead|cancell?ed/i; // primarily "Closed Lost" (verified exact string live)
+// The ONLY reliable "is this a real, still-active job?" signal is the Deal's Stage — WindMar
+// never rewinds an Installation's Stage when a sale dies OR after it finishes, so the ready
+// pool is full of stale records whose Deal is Closed-Lost (dead) or already past install
+// (In Service / Complete / Post-Installation…). Keep an install ONLY if its Deal is in a live,
+// not-yet-completed pipeline stage. (Verified live 2026-07 against the Deals Stage picklist.)
+const LIVE_DEAL_STAGES = new Set([
+  "Won (Signed)", "Signed - Pending Approval",
+  "Pre-Engineering", "NTP", "Site Visit", "Engineering", "Permitting", "Install",
+]);
 
 // Installation Stages that mean "not yet on the calendar, coordinator should act on it."
 // "Pending Schedule*" = fully ready; "Permit Approved - *" = permit approved, pending one
-// blocker (roof/MSP/HOA/umbrella). Closed-Lost sales among these are dropped by DEAD_STAGE.
+// blocker (roof/MSP/HOA/umbrella). Stale/dead sales among these are dropped by LIVE_DEAL_STAGES.
 const READY_INSTALL_STAGES = [
   "Pending Schedule",
   "Pending Schedule - Batteries Needed",
@@ -279,14 +287,16 @@ export default async function handler(req, res) {
 
     const instJobsRaw = installs.map(mapReadyInstall);
 
-    // Drop installs whose associated Deal (the sale) is dead — primarily Stage "Closed Lost".
-    // Batch-resolve the Deal Stages, then filter. Installs with no resolvable Deal are KEPT.
+    // Keep only installs whose associated Deal is a LIVE, not-yet-completed project.
+    // Batch-resolve the Deal Stages, then filter. An install whose Deal can't be resolved
+    // (empty stage) is KEPT (fail-open) so a transient deal-fetch hiccup never hides real jobs.
     const dealStages = await fetchDealStages(instJobsRaw.map((j) => j.dealId), token);
     const instJobs = [];
-    let closedLost = 0;
+    let filteredStale = 0;
     for (const j of instJobsRaw) {
-      const st = j.dealId ? dealStages[j.dealId] : "";
-      if (st && DEAD_STAGE.test(st)) { closedLost++; continue; }
+      const st = j.dealId ? (dealStages[j.dealId] || "") : "";
+      j.dealStage = st;
+      if (st && !LIVE_DEAL_STAGES.has(st)) { filteredStale++; continue; }
       instJobs.push(j);
     }
 
@@ -308,7 +318,7 @@ export default async function handler(req, res) {
       configured: true,
       ok: true,
       updated: new Date().toISOString(),
-      counts: { installs: instJobs.length, services: svcJobs.length, jobs: jobs.length, filteredClosedLost: closedLost },
+      counts: { installs: instJobs.length, services: svcJobs.length, jobs: jobs.length, filteredStale },
       jobs,
     });
   } catch (e) {
