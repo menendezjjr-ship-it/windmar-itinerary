@@ -344,74 +344,108 @@ async function toolSearchSitecapture(input) {
   return { count: projects.length, projects };
 }
 
-// 4) count_jobs — aggregate installs/services over a DATE RANGE, broken down by crew + MSP.
-// Answers "how many … did Crew #X do in July", totals, per-crew tallies. Pulls the records whose
-// date falls in [from,to], canonicalizes each crew, and tallies — so counts always match the board.
+// Page a Zoho CRM search (criteria) to ALL rows (cap 2000). Returns rows[] or {error}.
+async function pageSearch(mod, criteria, fields, token) {
+  const rows = [];
+  for (let page = 1; page <= 10; page++) {
+    let batch;
+    try { batch = await zohoSearch(mod, `criteria=${encodeURIComponent(criteria)}&fields=${encodeURIComponent(fields)}&per_page=200&page=${page}`, token); }
+    catch (e) { return { error: String((e && e.message) || e) }; }
+    if (!batch || !batch.length) break;
+    rows.push(...batch);
+    if (batch.length < 200) break;
+  }
+  return rows;
+}
+
+// 4) count_jobs — aggregate INSTALLS and/or SERVICE tickets over a DATE RANGE, broken down by crew.
+// Answers "how many … did Crew #X do in July", totals, per-crew tallies. CRITICAL: MSP work happens
+// TWO ways — (1) as an install line-item (MSP_Upgrade_Required='MSP', done by INSTALL crews: Crew H,
+// Elite Crew #2/#3) and (2) as a SERVICE job (Service_Type1='(5) MSP/Electrical Work', done by SERVICE
+// crews: Crew #1S=Leonardo Torres, #2S=David Radke, #3S=Luis Morales). So for an MSP-by-crew question,
+// query BOTH modules — otherwise a service crew's MSPs read as 0. module 'both' does exactly that.
 async function toolCountJobs(input) {
   if (!hasZoho()) return { error: "Zoho is not configured on this server" };
-  const module = (input && /serv/i.test(String(input.module || ""))) ? "service" : "install";
   const from = String((input && input.from) || "").slice(0, 10);
   const to = String((input && input.to) || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return { error: "need from and to dates as YYYY-MM-DD" };
   const token = await getAccessToken();
 
-  const isSvc = module === "service";
-  const dateField = (input && input.dateField) ||
-    (isSvc ? "Ticket_Completion_Date" : "Installation_Start_Date");
-  const mod = isSvc ? "Service_Ticket" : "Installation";
-  const fields = isSvc
-    ? "Name,Associated_Deal,Assigned_Technician,Scheduled_Visit_1,Ticket_Completion_Date,Type_of_Service,Ticket_Status"
-    : "Name,Deal,Installation_Team,Installation_Start_Date,Installation_Complete_Date,MSP_Upgrade_Required,Stage";
+  // If they ask about MSP without naming a module, span BOTH (so service-crew MSPs aren't missed).
+  const typeFilter = input && input.type ? String(input.type).toLowerCase() : "";
+  const explicitMod = input && input.module ? String(input.module).toLowerCase() : "";
+  const modReq = explicitMod || (/msp/.test(typeFilter) ? "both" : "install");
+  const doInstall = /both|install|all/.test(modReq);
+  const doService = /both|service|all/.test(modReq);
 
-  // Page through (a month is ~120; cap at 2000 to respect Zoho's single-search limit).
-  const rows = [];
-  for (let page = 1; page <= 10; page++) {
-    let batch;
-    try {
-      batch = await zohoSearch(mod, `criteria=${encodeURIComponent(`(${dateField}:between:${from},${to})`)}&fields=${encodeURIComponent(fields)}&per_page=200&page=${page}`, token);
-    } catch (e) { return { error: String((e && e.message) || e) }; }
-    if (!batch || !batch.length) break;
-    rows.push(...batch);
-    if (batch.length < 200) break;
+  const items = [];
+  const dateFieldUsed = {};
+
+  if (doInstall) {
+    const dateField = (explicitMod && explicitMod !== "both" && input && input.dateField) ? input.dateField : "Installation_Start_Date";
+    const fields = "Name,Deal,Installation_Team,Installation_Start_Date,Installation_Complete_Date,MSP_Upgrade_Required,Stage";
+    const rows = await pageSearch("Installation", `(${dateField}:between:${from},${to})`, fields, token);
+    if (rows && rows.error) return rows;
+    dateFieldUsed.install = dateField;
+    for (const r of (rows || [])) {
+      const deal = parseDeal(lookup(r.Deal));
+      const crew = canonTeam(lookup(r.Installation_Team));
+      items.push({
+        source: "install", id: deal.num || r.Name, customer: deal.customer || "", crew,
+        msp: String(r.MSP_Upgrade_Required || "") === "MSP" || /^MSP/i.test(deal.num || ""),
+        roofing: crew === "Windmar Roofing" || /^RL/i.test(deal.num || ""),
+        date: r.Installation_Start_Date || "", stage: r.Stage || "",
+      });
+    }
   }
 
-  const items = rows.map((r) => {
-    const deal = parseDeal(lookup(isSvc ? r.Associated_Deal : r.Deal));
-    const crew = canonTeam(lookup(isSvc ? r.Assigned_Technician : r.Installation_Team));
-    const mspFlag = String(r.MSP_Upgrade_Required || "");
-    const msp = mspFlag === "MSP" || r.MSP_Upgrade_Required === true || /^MSP/i.test(deal.num || "");
-    const roofing = crew === "Windmar Roofing" || /^RL/i.test(deal.num || "");
-    return {
-      dl: deal.num || r.Name, customer: deal.customer || "", crew, msp, roofing,
-      stage: isSvc ? (r.Ticket_Status || "") : (r.Stage || ""),
-      date: isSvc ? (r.Ticket_Completion_Date || r.Scheduled_Visit_1 || "") : (r.Installation_Start_Date || ""),
-    };
-  });
+  if (doService) {
+    // Service work is dated by the VISIT (Scheduled_Visit_1, a datetime → FL-offset range).
+    const off = (() => { const m = Number(from.slice(5, 7)); return (m >= 3 && m <= 11) ? "-04:00" : "-05:00"; })();
+    const dateField = (explicitMod && explicitMod !== "both" && input && input.dateField) ? input.dateField : "Scheduled_Visit_1";
+    const isDT = /Visit|Time/.test(dateField);
+    const range = isDT ? `${from}T00:00:00${off},${to}T23:59:59${off}` : `${from},${to}`;
+    const fields = "Name,Associated_Deal,Assigned_Technician,Service_Type1,Type_of_Service,Ticket_Status,Scheduled_Visit_1,Ticket_Completion_Date";
+    const rows = await pageSearch("Service_Ticket", `(${dateField}:between:${range})`, fields, token);
+    if (rows && rows.error) return rows;
+    dateFieldUsed.service = dateField;
+    for (const r of (rows || [])) {
+      const deal = parseDeal(lookup(r.Associated_Deal));
+      const st1 = String(r.Service_Type1 || "");
+      const tos = Array.isArray(r.Type_of_Service) ? r.Type_of_Service.join(" ") : String(r.Type_of_Service || "");
+      items.push({
+        source: "service", id: r.Name, customer: deal.customer || "", dl: deal.num || "",
+        crew: canonTeam(lookup(r.Assigned_Technician)),
+        msp: /msp\b|msp\/|electrical work/i.test(st1) || /\bmsp\b/i.test(tos),
+        roofing: false, serviceType: st1,
+        date: r.Scheduled_Visit_1 || r.Ticket_Completion_Date || "", stage: r.Ticket_Status || "",
+      });
+    }
+  }
 
   // Optional filters the caller asked for.
   const crewFilter = input && input.crew ? canonTeam(input.crew) : "";
-  const typeFilter = input && input.type ? String(input.type).toLowerCase() : "";
   let matched = items;
   if (crewFilter) matched = matched.filter((x) => x.crew === crewFilter);
   if (/msp/.test(typeFilter)) matched = matched.filter((x) => x.msp);
   else if (/roof/.test(typeFilter)) matched = matched.filter((x) => x.roofing);
-  else if (/solar|install/.test(typeFilter)) matched = matched.filter((x) => !x.roofing);
+  else if (/solar|install/.test(typeFilter)) matched = matched.filter((x) => x.source === "install" && !x.roofing);
+  else if (/service/.test(typeFilter)) matched = matched.filter((x) => x.source === "service");
 
-  // Per-crew breakdown over the WHOLE window (so the model can answer follow-ups too).
+  // Per-crew breakdown over the whole window (install + service split so follow-ups are answerable).
   const byCrew = {};
   for (const x of items) {
-    const b = byCrew[x.crew] || (byCrew[x.crew] = { total: 0, msp: 0, roofing: 0 });
-    b.total++; if (x.msp) b.msp++; if (x.roofing) b.roofing++;
+    const b = byCrew[x.crew] || (byCrew[x.crew] = { total: 0, msp: 0, install: 0, service: 0 });
+    b.total++; if (x.msp) b.msp++; b[x.source]++;
   }
-  const totalMsp = items.filter((x) => x.msp).length;
   return {
-    module, dateField, from, to,
-    total: items.length, totalMsp,
+    modules: { install: doInstall, service: doService }, dateFieldUsed, from, to,
+    total: items.length, totalMsp: items.filter((x) => x.msp).length,
     matchedCount: matched.length,
     filters: { crew: crewFilter || null, type: typeFilter || null },
     byCrew,
-    note: "msp = install flagged MSP_Upgrade_Required='MSP' OR an MSP-coded deal. roofing = Windmar Roofing / RL-coded. 'matchedCount' already applies the crew/type filters you passed.",
-    sample: matched.slice(0, 40).map((x) => ({ dl: x.dl, customer: x.customer, crew: x.crew, msp: x.msp, date: x.date, stage: x.stage })),
+    note: "INSTALL msp = MSP_Upgrade_Required='MSP' / MSP-coded deal (install crews: Crew H, Elite Crew #2, Elite Crew #3). SERVICE msp = Service_Type1 '(5) MSP/Electrical Work' (service crews: Crew #1S=Leonardo Torres, #2S=David Radke, #3S=Luis Morales). byCrew.msp already sums BOTH. matchedCount applies your crew/type filters.",
+    sample: matched.slice(0, 40).map((x) => ({ id: x.id, customer: x.customer, crew: x.crew, msp: x.msp, source: x.source, serviceType: x.serviceType, date: x.date, stage: x.stage })),
   };
 }
 
@@ -433,14 +467,14 @@ const TOOLS = [
   },
   {
     name: "count_jobs",
-    description: "Count / aggregate WindMar jobs over a DATE RANGE. Use for ANY 'how many', 'how much', total, tally, or per-crew breakdown question — e.g. 'how many MSPs did Crew #1S do in July', 'how many installs last month', 'which crew did the most jobs this week'. Queries Zoho Installations (module 'install', default) or Service tickets (module 'service') whose date is within [from,to], then returns the total, the total MSP count, a per-crew breakdown {total, msp, roofing}, and a sample list. You MUST compute the from/to dates yourself from TODAY'S DATE (given in your instructions); for a bare month name with no year, use the most recent PAST occurrence. Pass crew and/or type to pre-filter (the result's matchedCount reflects those filters).",
+    description: "Count / aggregate WindMar jobs over a DATE RANGE. Use for ANY 'how many', 'how much', total, tally, or per-crew breakdown question — e.g. 'how many MSPs did Crew #2S do in July', 'how many installs last month', 'which crew did the most jobs this week'. Queries Zoho Installations ('install'), Service tickets ('service'), or BOTH ('both'), returning the total, total MSP count, a per-crew breakdown {total, msp, install, service}, and a sample. IMPORTANT: MSP work happens BOTH as an install line-item (INSTALL crews: Crew H, Elite Crew #2/#3) AND as a service job (SERVICE crews: Crew #1S=Leonardo Torres, #2S=David Radke, #3S=Luis Morales). For ANY MSP question use module 'both' (the tool defaults to 'both' when type='msp' and you omit module). Compute from/to yourself from TODAY'S DATE; a bare month name = most recent PAST occurrence. Pass crew and/or type to pre-filter (matchedCount reflects those).",
     input_schema: { type: "object", properties: {
-      module: { type: "string", enum: ["install", "service"], description: "'install' (default) or 'service'." },
+      module: { type: "string", enum: ["install", "service", "both"], description: "'install' (default), 'service', or 'both'. Use 'both' for MSP or any cross-crew question." },
       from: { type: "string", description: "Start date YYYY-MM-DD (inclusive)." },
       to: { type: "string", description: "End date YYYY-MM-DD (inclusive)." },
-      crew: { type: "string", description: "Optional crew filter, e.g. 'Crew #1S', 'Elite Crew #2', 'Crew H'." },
-      type: { type: "string", description: "Optional job-type filter: 'msp', 'roofing', or 'solar'/'install'." },
-      dateField: { type: "string", description: "Optional Zoho date field to range on (default Installation_Start_Date for installs, Ticket_Completion_Date for service)." },
+      crew: { type: "string", description: "Optional crew filter, e.g. 'Crew #2S', 'Elite Crew #2', 'Crew H'." },
+      type: { type: "string", description: "Optional job-type filter: 'msp', 'roofing', 'solar'/'install', or 'service'." },
+      dateField: { type: "string", description: "Optional Zoho date field to range on (single-module only; default Installation_Start_Date for install, Scheduled_Visit_1 for service)." },
     }, required: ["from", "to"] },
   },
 ];
@@ -588,7 +622,8 @@ async function callClaudeAgentic(apiKey, question, history, lang) {
   const today = todayISO();
   const guide =
     "\n\nTODAY'S DATE: " + today + ". Use it to resolve 'this month', 'July', 'last week', 'this year' into concrete from/to dates. For a bare month name with NO year, assume the most recent PAST occurrence.\n" +
-    "TOOLS: You have LIVE read-only tools. ALWAYS use a tool for anything about a specific customer/project (search_projects → get_job_details), a name/address lookup, SiteCapture, or a COUNT/total/tally over a period (count_jobs). NEVER guess project data or make up numbers — if a tool returns nothing, say so. Answer NEC/electrical/equipment/how-to-use-the-app questions directly from your knowledge (no tool needed). Crew names are canonical: Elite Crew #2/#3, Crew #1S/#2S/#3S, Crew H, Windmar Roofing.";
+    "TOOLS: You have LIVE read-only tools. ALWAYS use a tool for anything about a specific customer/project (search_projects → get_job_details), a name/address lookup, SiteCapture, or a COUNT/total/tally over a period (count_jobs). NEVER guess project data or make up numbers — if a tool returns nothing, say so. Answer NEC/electrical/equipment/how-to-use-the-app questions directly from your knowledge (no tool needed).\n" +
+    "CREWS: INSTALL crews (do Installations) = Crew H, Elite Crew #2, Elite Crew #3, Windmar Roofing. SERVICE crews (do Service tickets) = Crew #1S (Leonardo Torres), Crew #2S (David Radke), Crew #3S (Luis Morales), plus techs Carlos Acevedo / Jose Menendez / Luis G. Ortiz and subcontractors Eagle Eye / Holi Solar. MSP (Main Service Panel) work happens BOTH as an install line-item (install crews) AND as a service job 'MSP/Electrical Work' (service crews) — so for ANY MSP-by-crew or 'how many MSP' question, call count_jobs with module:'both' so a service crew's MSPs aren't reported as 0.";
   const sys = systemPrompt(lang) + guide + "\n\n" + WINDMAR_KB + "\n\n" + APP_GUIDE + "\n\n" + ZOHO_GUIDE;
   const msgs = (history || []).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: String((m && (m.text || m.content)) || "") })).filter((m) => m.content);
   msgs.push({ role: "user", content: String(question) });
