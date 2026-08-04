@@ -845,18 +845,24 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: false, error: lang === "es" ? "No pude leer ese archivo ahora mismo — inténtalo de nuevo." : "I couldn't read that file just now — please try again." });
     }
 
-    const { context, used, records, search, sitecapture } = await gatherContext(question);
-    const found = (records || []).filter((r) => r && r.found !== false && !r.error);
     const ql = String(question).toLowerCase();
 
-    // ── ANALYTICAL intent ("how many", totals, per-crew) MUST reach the agent (count_jobs) —
-    // never a canned local answer. This is what the old keyword router got wrong.
-    const analytical = /\bhow many|how much|how often|number of|count(s|ed|ing)?|total(s|ed)?|tally|tallies|breakdown|per crew|by crew|each crew|which crew|how's .* doing|most|fewest|least|busiest|average|avg|cu[aá]nt|cu[aá]nto|promedio\b/i.test(question);
+    // ── ANALYTICAL intent ("how many", totals, per-crew) MUST reach the agent (count_jobs) — never
+    // a canned local answer. Detect it FIRST and skip the fuzzy project search entirely (that search
+    // deep-fetches a random match into `found` and would short-circuit before the agent runs — the
+    // old keyword router's core bug).
+    const analytical = /\bhow many|how much|how often|number of|count(s|ed|ing)?|total(s|ed)?|tally|tallies|breakdown|per crew|by crew|each crew|which crew|how's .* doing|how is .* doing|most|fewest|least|busiest|average|avg|cu[aá]nt|cu[aá]nto|promedio\b/i.test(question);
+
+    let used = [], records = [], search = null, sitecapture = null;
+    if (!analytical) {
+      ({ used, records, search, sitecapture } = await gatherContext(question));
+    }
+    const found = (records || []).filter((r) => r && r.found !== false && !r.error);
 
     // ── LOCAL-FIRST fast paths (instant, no LLM) — ONLY for clear, non-analytical data hits.
     if (found.length) return res.status(200).json({ ok: true, answer: fmtReport(found, lang), used: [...new Set(used)], source: "local" });
-    if (!analytical && search && Array.isArray(search.matches) && search.matches.length) return res.status(200).json({ ok: true, answer: fmtMatches(search.matches, lang), used: [...new Set(used)], source: "local" });
-    if (!analytical && sitecapture && sitecapture.count) return res.status(200).json({ ok: true, answer: fmtSiteCapture(sitecapture, lang), used: [...new Set(used)], source: "local" });
+    if (search && Array.isArray(search.matches) && search.matches.length) return res.status(200).json({ ok: true, answer: fmtMatches(search.matches, lang), used: [...new Set(used)], source: "local" });
+    if (sitecapture && sitecapture.count) return res.status(200).json({ ok: true, answer: fmtSiteCapture(sitecapture, lang), used: [...new Set(used)], source: "local" });
 
     // ── SMART BRAIN: Claude WITH TOOLS (search_projects, get_job_details, search_sitecapture,
     // count_jobs). It decides what to call — so WinMI answers ANY work question: lookups, searches,
