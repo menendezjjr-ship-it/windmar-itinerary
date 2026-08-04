@@ -73,6 +73,7 @@ async function zohoSearch(module, params, token) {
 
 const lookup = (v) => (v && typeof v === "object" ? v.name : v) || "";
 const clean = (s) => String(s || "").replace(/[\s,]+$/, "").trim();
+const todayISO = () => new Date().toISOString().slice(0, 10);
 
 // "DL8467 Frank Roman 7420 Olin Way Orlando FL" -> { code, num, customer, address }
 function parseDeal(name) {
@@ -93,6 +94,20 @@ function parseDeal(name) {
 function normDL(s) {
   const m = String(s || "").toUpperCase().replace(/\s+/g, "").match(/((?:RDL|RL|DL|MSP|S)\d{2,})/);
   return m ? m[1] : String(s || "").toUpperCase().replace(/\s+/g, "");
+}
+
+// Canonicalize a Zoho crew/team label to the official roster name (mirrors zoho-jobs / zoho-ready).
+function canonTeam(raw) {
+  const s = (raw || "Unassigned").trim();
+  const n = s.toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
+  if (/elite crew #?3|in ?house #?3|william sierra|luis vargas/.test(n)) return "Elite Crew #3";
+  if (/elite crew #?2|in ?house #?2|tailor herrera|maykel pimentel/.test(n)) return "Elite Crew #2";
+  if (/crew #?1s|leonardo torres/.test(n)) return "Crew #1S";
+  if (/crew #?2s|david radke/.test(n)) return "Crew #2S";
+  if (/crew #?3s|luis morales/.test(n)) return "Crew #3S";
+  if (/crew h|holi/.test(n)) return "Crew H";
+  if (/roofing/.test(n)) return "Windmar Roofing";
+  return s.replace(/^t\d+\s*[-–]\s*/i, "").trim() || "Unassigned";
 }
 
 // Strip Zoho note HTML + @-mention tokens (crm[user#...]crm) into plain text.
@@ -324,6 +339,77 @@ async function toolSearchSitecapture(input) {
   return { count: projects.length, projects };
 }
 
+// 4) count_jobs — aggregate installs/services over a DATE RANGE, broken down by crew + MSP.
+// Answers "how many … did Crew #X do in July", totals, per-crew tallies. Pulls the records whose
+// date falls in [from,to], canonicalizes each crew, and tallies — so counts always match the board.
+async function toolCountJobs(input) {
+  if (!hasZoho()) return { error: "Zoho is not configured on this server" };
+  const module = (input && /serv/i.test(String(input.module || ""))) ? "service" : "install";
+  const from = String((input && input.from) || "").slice(0, 10);
+  const to = String((input && input.to) || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return { error: "need from and to dates as YYYY-MM-DD" };
+  const token = await getAccessToken();
+
+  const isSvc = module === "service";
+  const dateField = (input && input.dateField) ||
+    (isSvc ? "Ticket_Completion_Date" : "Installation_Start_Date");
+  const mod = isSvc ? "Service_Ticket" : "Installation";
+  const fields = isSvc
+    ? "Name,Associated_Deal,Assigned_Technician,Scheduled_Visit_1,Ticket_Completion_Date,Type_of_Service,Ticket_Status"
+    : "Name,Deal,Installation_Team,Installation_Start_Date,Installation_Complete_Date,MSP_Upgrade_Required,Stage";
+
+  // Page through (a month is ~120; cap at 2000 to respect Zoho's single-search limit).
+  const rows = [];
+  for (let page = 1; page <= 10; page++) {
+    let batch;
+    try {
+      batch = await zohoSearch(mod, `criteria=${encodeURIComponent(`(${dateField}:between:${from},${to})`)}&fields=${encodeURIComponent(fields)}&per_page=200&page=${page}`, token);
+    } catch (e) { return { error: String((e && e.message) || e) }; }
+    if (!batch || !batch.length) break;
+    rows.push(...batch);
+    if (batch.length < 200) break;
+  }
+
+  const items = rows.map((r) => {
+    const deal = parseDeal(lookup(isSvc ? r.Associated_Deal : r.Deal));
+    const crew = canonTeam(lookup(isSvc ? r.Assigned_Technician : r.Installation_Team));
+    const mspFlag = String(r.MSP_Upgrade_Required || "");
+    const msp = mspFlag === "MSP" || r.MSP_Upgrade_Required === true || /^MSP/i.test(deal.num || "");
+    const roofing = crew === "Windmar Roofing" || /^RL/i.test(deal.num || "");
+    return {
+      dl: deal.num || r.Name, customer: deal.customer || "", crew, msp, roofing,
+      stage: isSvc ? (r.Ticket_Status || "") : (r.Stage || ""),
+      date: isSvc ? (r.Ticket_Completion_Date || r.Scheduled_Visit_1 || "") : (r.Installation_Start_Date || ""),
+    };
+  });
+
+  // Optional filters the caller asked for.
+  const crewFilter = input && input.crew ? canonTeam(input.crew) : "";
+  const typeFilter = input && input.type ? String(input.type).toLowerCase() : "";
+  let matched = items;
+  if (crewFilter) matched = matched.filter((x) => x.crew === crewFilter);
+  if (/msp/.test(typeFilter)) matched = matched.filter((x) => x.msp);
+  else if (/roof/.test(typeFilter)) matched = matched.filter((x) => x.roofing);
+  else if (/solar|install/.test(typeFilter)) matched = matched.filter((x) => !x.roofing);
+
+  // Per-crew breakdown over the WHOLE window (so the model can answer follow-ups too).
+  const byCrew = {};
+  for (const x of items) {
+    const b = byCrew[x.crew] || (byCrew[x.crew] = { total: 0, msp: 0, roofing: 0 });
+    b.total++; if (x.msp) b.msp++; if (x.roofing) b.roofing++;
+  }
+  const totalMsp = items.filter((x) => x.msp).length;
+  return {
+    module, dateField, from, to,
+    total: items.length, totalMsp,
+    matchedCount: matched.length,
+    filters: { crew: crewFilter || null, type: typeFilter || null },
+    byCrew,
+    note: "msp = install flagged MSP_Upgrade_Required='MSP' OR an MSP-coded deal. roofing = Windmar Roofing / RL-coded. 'matchedCount' already applies the crew/type filters you passed.",
+    sample: matched.slice(0, 40).map((x) => ({ dl: x.dl, customer: x.customer, crew: x.crew, msp: x.msp, date: x.date, stage: x.stage })),
+  };
+}
+
 const TOOLS = [
   {
     name: "search_projects",
@@ -340,6 +426,18 @@ const TOOLS = [
     description: "Search SiteCapture field-project records by name or address. Returns project name, address, status, and photo/media count when available.",
     input_schema: { type: "object", properties: { query: { type: "string", description: "Customer name or address to search SiteCapture for." } }, required: ["query"] },
   },
+  {
+    name: "count_jobs",
+    description: "Count / aggregate WindMar jobs over a DATE RANGE. Use for ANY 'how many', 'how much', total, tally, or per-crew breakdown question — e.g. 'how many MSPs did Crew #1S do in July', 'how many installs last month', 'which crew did the most jobs this week'. Queries Zoho Installations (module 'install', default) or Service tickets (module 'service') whose date is within [from,to], then returns the total, the total MSP count, a per-crew breakdown {total, msp, roofing}, and a sample list. You MUST compute the from/to dates yourself from TODAY'S DATE (given in your instructions); for a bare month name with no year, use the most recent PAST occurrence. Pass crew and/or type to pre-filter (the result's matchedCount reflects those filters).",
+    input_schema: { type: "object", properties: {
+      module: { type: "string", enum: ["install", "service"], description: "'install' (default) or 'service'." },
+      from: { type: "string", description: "Start date YYYY-MM-DD (inclusive)." },
+      to: { type: "string", description: "End date YYYY-MM-DD (inclusive)." },
+      crew: { type: "string", description: "Optional crew filter, e.g. 'Crew #1S', 'Elite Crew #2', 'Crew H'." },
+      type: { type: "string", description: "Optional job-type filter: 'msp', 'roofing', or 'solar'/'install'." },
+      dateField: { type: "string", description: "Optional Zoho date field to range on (default Installation_Start_Date for installs, Ticket_Completion_Date for service)." },
+    }, required: ["from", "to"] },
+  },
 ];
 
 async function runTool(name, input) {
@@ -347,6 +445,7 @@ async function runTool(name, input) {
     if (name === "search_projects") return await toolSearchProjects(input);
     if (name === "get_job_details") return await toolGetJobDetails(input);
     if (name === "search_sitecapture") return await toolSearchSitecapture(input);
+    if (name === "count_jobs") return await toolCountJobs(input);
     return { error: `unknown tool: ${name}` };
   } catch (e) {
     return { error: String(e && e.message || e) };
@@ -474,6 +573,59 @@ async function callClaude(apiKey, question, history, lang) {
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error("Claude " + r.status + ": " + String((d && d.error && d.error.message) || "").slice(0, 140));
   return (Array.isArray(d.content) ? d.content : []).filter((b) => b && b.type === "text").map((b) => b.text).join("").trim();
+}
+
+// AGENTIC Claude — the smart brain. Claude gets the full tool set (search_projects, get_job_details,
+// search_sitecapture, count_jobs) and decides what to call, looping tool_use → tool_result until it
+// has an answer. This is what lets WinMI handle ANY work question — lookups, searches, and
+// aggregate "how many …" analytics — instead of brittle keyword routing. Returns {answer, used}.
+async function callClaudeAgentic(apiKey, question, history, lang) {
+  const today = todayISO();
+  const guide =
+    "\n\nTODAY'S DATE: " + today + ". Use it to resolve 'this month', 'July', 'last week', 'this year' into concrete from/to dates. For a bare month name with NO year, assume the most recent PAST occurrence.\n" +
+    "TOOLS: You have LIVE read-only tools. ALWAYS use a tool for anything about a specific customer/project (search_projects → get_job_details), a name/address lookup, SiteCapture, or a COUNT/total/tally over a period (count_jobs). NEVER guess project data or make up numbers — if a tool returns nothing, say so. Answer NEC/electrical/equipment/how-to-use-the-app questions directly from your knowledge (no tool needed). Crew names are canonical: Elite Crew #2/#3, Crew #1S/#2S/#3S, Crew H, Windmar Roofing.";
+  const sys = systemPrompt(lang) + guide + "\n\n" + WINDMAR_KB + "\n\n" + APP_GUIDE + "\n\n" + ZOHO_GUIDE;
+  const msgs = (history || []).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: String((m && (m.text || m.content)) || "") })).filter((m) => m.content);
+  msgs.push({ role: "user", content: String(question) });
+  while (msgs.length && msgs[0].role !== "user") msgs.shift();
+
+  const used = [];
+  for (let step = 0; step < 4; step++) {
+    const r = await fetchT(ANTHROPIC_URL, {
+      method: "POST",
+      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model: MODEL, max_tokens: 1800, system: sys, tools: TOOLS, messages: msgs.slice(-16) }),
+    }, 40000);
+    if (!r) throw new Error("Claude timed out");
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error("Claude " + r.status + ": " + String((d && d.error && d.error.message) || "").slice(0, 140));
+    const blocks = Array.isArray(d.content) ? d.content : [];
+    const toolUses = blocks.filter((b) => b && b.type === "tool_use");
+    if (d.stop_reason === "tool_use" && toolUses.length) {
+      msgs.push({ role: "assistant", content: blocks });
+      const results = [];
+      for (const tu of toolUses) {
+        used.push(tu.name);
+        const out = await runTool(tu.name, tu.input || {});
+        results.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(out).slice(0, 7000) });
+      }
+      msgs.push({ role: "user", content: results });
+      continue; // let Claude read the tool output and answer (or call another tool)
+    }
+    const text = blocks.filter((b) => b && b.type === "text").map((b) => b.text).join("").trim();
+    return { answer: text, used };
+  }
+  // Hit the step cap — ask once more for a final text answer with no further tools.
+  try {
+    const r = await fetchT(ANTHROPIC_URL, {
+      method: "POST",
+      headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model: MODEL, max_tokens: 1200, system: sys, messages: msgs.slice(-16) }),
+    }, 30000);
+    const d = r ? await r.json().catch(() => ({})) : {};
+    const text = (Array.isArray(d.content) ? d.content : []).filter((b) => b && b.type === "text").map((b) => b.text).join("").trim();
+    return { answer: text, used };
+  } catch (e) { return { answer: "", used }; }
 }
 
 // Claude VISION — analyze a field photo (equipment, panel, breaker box, roof, plan) with WindMar
@@ -697,33 +849,40 @@ export default async function handler(req, res) {
     const found = (records || []).filter((r) => r && r.found !== false && !r.error);
     const ql = String(question).toLowerCase();
 
-    // ── LOCAL-FIRST (no Gemini): the core "skill". Project reports, match lists, Zoho schema, and
-    // app how-to are answered straight from the live data / embedded guides — instant, always works.
+    // ── ANALYTICAL intent ("how many", totals, per-crew) MUST reach the agent (count_jobs) —
+    // never a canned local answer. This is what the old keyword router got wrong.
+    const analytical = /\bhow many|how much|how often|number of|count(s|ed|ing)?|total(s|ed)?|tally|tallies|breakdown|per crew|by crew|each crew|which crew|how's .* doing|most|fewest|least|busiest|average|avg|cu[aá]nt|cu[aá]nto|promedio\b/i.test(question);
+
+    // ── LOCAL-FIRST fast paths (instant, no LLM) — ONLY for clear, non-analytical data hits.
     if (found.length) return res.status(200).json({ ok: true, answer: fmtReport(found, lang), used: [...new Set(used)], source: "local" });
-    if (search && Array.isArray(search.matches) && search.matches.length) return res.status(200).json({ ok: true, answer: fmtMatches(search.matches, lang), used: [...new Set(used)], source: "local" });
-    if (sitecapture && sitecapture.count) return res.status(200).json({ ok: true, answer: fmtSiteCapture(sitecapture, lang), used: [...new Set(used)], source: "local" });
-    if (/\b(stage|stages|status|statuses|pipeline|lifecycle|modules?|picklist|etapas?|estados?|flujo|proceso|m[oó]dulos?)\b/.test(ql)) return res.status(200).json({ ok: true, answer: fmtSchema(lang), used: ["zoho_guide"], source: "local" });
-    if (/\b(how|where|which|what|c[oó]mo|d[oó]nde|qu[eé])\b/.test(ql) && /(app|tab|coordinator|calendar|schedule|route|map|weather|sitecapture|note|edit|dispatch|crew|coordinador|calendario|programar|ruta|mapa|clima|nota|editar|pesta)/.test(ql)) return res.status(200).json({ ok: true, answer: fmtApp(lang), used: ["app_guide"], source: "local" });
+    if (!analytical && search && Array.isArray(search.matches) && search.matches.length) return res.status(200).json({ ok: true, answer: fmtMatches(search.matches, lang), used: [...new Set(used)], source: "local" });
+    if (!analytical && sitecapture && sitecapture.count) return res.status(200).json({ ok: true, answer: fmtSiteCapture(sitecapture, lang), used: [...new Set(used)], source: "local" });
 
-    // ── Freeform / NEC only → Gemini (its NEC brain). Degrades gracefully if rate-limited.
-    const persona = lang === "es"
-      ? "Eres WinMI, el asistente personal de WindMar Home: un droide cálido, animado y agudo — como un compañero de trabajo simpático. Ten una CONVERSACIÓN real: sé cercano y alentador, nunca aburrido ni robótico. Da respuestas DIRECTAS y útiles primero (sin relleno) y, cuando ayude, agrega una pregunta de seguimiento breve y amable en prosa normal. Conoces esta app a fondo (mira la GUÍA DE LA APP en tu conocimiento) y puedes guiar a cualquiera paso a paso. También respondes preguntas de código NEC/equipos. Eres de SOLO LECTURA: consultas datos pero nunca los cambias — si te piden editar/programar, explícalo con gusto y dilo que usen el botón Editar/Agregar nota en Coordinador o Calendario. Nunca inventes datos de proyectos; usa solo lo que está en tu conocimiento. Cuando te pregunten por un trabajo o proyecto específico, da un reporte claro con los DATOS EN VIVO de tu conocimiento — su etapa/estado, fechas clave, cuadrilla, dirección, tickets de servicio, inspección y las NOTAS más recientes (resúmelas). Si los datos no incluyen el proyecto, dilo claramente y pide el DL# o el nombre exacto del cliente. Dos reglas de exactitud: (1) el técnico de un ticket de servicio es SOLO el campo 'tech' del ticket — si está vacío, no nombres a nadie y NUNCA asumas que la cuadrilla de instalación es el técnico de servicio; (2) para el estado de inspección usa el nivel del deal ('dealInspectionStage'/'finalInspectionApproved'), no el sub-registro. Sé conciso y apto para móvil. Usa emojis con moderación. NO escribas una línea 'FOLLOWUPS:'."
-      : "You are WinMI, WindMar Home's warm, upbeat personal assistant droid — like a sharp, friendly coworker. Have a REAL conversation: be personable and encouraging, never dull or robotic. Give DIRECT, useful answers first (no filler), then when it helps, add a short friendly follow-up question in plain prose. You know this app inside-out (see the APP GUIDE in your knowledge) and can walk anyone through how to do anything in it. You also answer NEC/electrical/equipment questions. You are READ-ONLY: you look things up but never change data — if asked to edit/schedule, cheerfully explain that and point them to the Edit/Add-note button in the Coordinator or Calendar tab. Never invent project data; use only what's in your knowledge/tools. When someone asks about a specific job or project, give a clear report straight from the LIVE PROJECT DATA in your knowledge — its stage/status, key dates, crew, address, service tickets, inspection, and the most recent NOTES (summarize them). If the data does not contain the project, say so plainly and ask for the DL# or the exact customer name. Two accuracy rules: (1) a service ticket's technician is ONLY the ticket's own 'tech' field — if that's blank, don't name one and NEVER assume the install crew is the service tech; (2) for inspection status, use the deal-level 'dealInspectionStage'/'finalInspectionApproved' — not the sub-record — as the real status. Keep it concise and mobile-friendly. Use emojis sparingly. Do NOT output a 'FOLLOWUPS:' line.";
-    const q = persona + "\n\nUser question: " + question;
-
-    // NEC/freeform. PREFER Claude directly (independent of the Field HUB's Gemini) when a valid
-    // ANTHROPIC_API_KEY is set; fall back to the Gemini brain; then to a friendly local message.
-    let answer = null, brain = "";
+    // ── SMART BRAIN: Claude WITH TOOLS (search_projects, get_job_details, search_sitecapture,
+    // count_jobs). It decides what to call — so WinMI answers ANY work question: lookups, searches,
+    // and aggregate "how many …" analytics. Gemini (freeform) + friendly local are the fallbacks.
+    let answer = null, brain = "", usedX = [...used];
     const apiKey = (process.env.ANTHROPIC_API_KEY || "").trim();
-    if (/^sk-ant-/.test(apiKey)) { try { answer = await callClaude(apiKey, question, history, lang); if (answer) brain = "claude"; } catch (e) {} }
-    if (!answer) { try { const r = await callNecBrain(q, history, lang, ""); if (r.source !== "knowledge-fallback") { answer = stripFollowups(r.answer); brain = "gemini"; } } catch (e) {} }
-    if (answer) return res.status(200).json({ ok: true, answer, used: [...new Set(used)], source: brain });
+    if (/^sk-ant-/.test(apiKey)) {
+      try { const r = await callClaudeAgentic(apiKey, question, history, lang); if (r && r.answer) { answer = r.answer; brain = "claude"; usedX.push(...(r.used || [])); } } catch (e) {}
+    }
+    if (!answer) {
+      // Gemini fallback (freeform, no tools). Keep the warm WinMI persona; its NEC brain still helps.
+      const persona = lang === "es"
+        ? "Eres WinMI, el asistente personal de WindMar Home: un droide cálido, animado y agudo — como un compañero de trabajo simpático. Ten una CONVERSACIÓN real: sé cercano y alentador, nunca aburrido ni robótico. Da respuestas DIRECTAS y útiles primero (sin relleno) y, cuando ayude, agrega una pregunta de seguimiento breve y amable en prosa normal. Conoces esta app a fondo (mira la GUÍA DE LA APP en tu conocimiento) y puedes guiar a cualquiera paso a paso. También respondes preguntas de código NEC/equipos. Eres de SOLO LECTURA: consultas datos pero nunca los cambias — si te piden editar/programar, explícalo con gusto y dilo que usen el botón Editar/Agregar nota en Coordinador o Calendario. Nunca inventes datos de proyectos; usa solo lo que está en tu conocimiento. Sé conciso y apto para móvil. Usa emojis con moderación. NO escribas una línea 'FOLLOWUPS:'."
+        : "You are WinMI, WindMar Home's warm, upbeat personal assistant droid — like a sharp, friendly coworker. Have a REAL conversation: be personable and encouraging, never dull or robotic. Give DIRECT, useful answers first (no filler), then when it helps, add a short friendly follow-up question in plain prose. You know this app inside-out (see the APP GUIDE) and answer NEC/electrical/equipment questions. You are READ-ONLY: you look things up but never change data — if asked to edit/schedule, cheerfully point them to the Edit/Add-note button in the Coordinator or Calendar tab. Never invent project data. Keep it concise and mobile-friendly. Use emojis sparingly. Do NOT output a 'FOLLOWUPS:' line.";
+      const q = persona + "\n\nUser question: " + question;
+      try { const r = await callNecBrain(q, history, lang, ""); if (r.source !== "knowledge-fallback") { answer = stripFollowups(r.answer); brain = "gemini"; } } catch (e) {}
+    }
+    if (answer) return res.status(200).json({ ok: true, answer, used: [...new Set(usedX)], source: brain });
 
-    // Gemini down — WinMI still isn't dead: friendly local message pointing to what DOES work locally.
-    return res.status(200).json({ ok: true, source: "local-fallback", used: [...new Set(used)],
+    // ── Both brains unavailable → last-resort LOCAL guides (schema / app), then a friendly note.
+    if (/\b(stage|stages|status|statuses|pipeline|lifecycle|modules?|picklist|etapas?|estados?|flujo|proceso|m[oó]dulos?)\b/.test(ql)) return res.status(200).json({ ok: true, answer: fmtSchema(lang), used: ["zoho_guide"], source: "local" });
+    if (/\b(how|where|which|what|c[oó]mo|d[oó]nde|qu[eé])\b/.test(ql) && /(app|tab|coordinator|calendar|schedule|route|map|weather|sitecapture|note|edit|dispatch|coordinador|calendario|programar|ruta|mapa|clima|nota|editar|pesta)/.test(ql)) return res.status(200).json({ ok: true, answer: fmtApp(lang), used: ["app_guide"], source: "local" });
+    return res.status(200).json({ ok: true, source: "local-fallback", used: [...new Set(usedX)],
       answer: lang === "es"
-        ? "Mi cerebro NEC está ocupado ahora mismo 🙈 — inténtalo de nuevo en un momento. Mientras tanto puedo buscar cualquier proyecto al instante (dame un DL# o el nombre del cliente) o explicarte cómo usar la app."
-        : "My NEC brain is busy right now 🙈 — try again in a moment. Meanwhile I can still look up any project instantly (give me a DL# or the customer name) or explain how to use the app." });
+        ? "Mi cerebro está ocupado ahora mismo 🙈 — inténtalo de nuevo en un momento. Mientras tanto puedo buscar cualquier proyecto al instante (dame un DL# o el nombre del cliente) o explicarte cómo usar la app."
+        : "My brain is busy right now 🙈 — try again in a moment. Meanwhile I can still look up any project instantly (give me a DL# or the customer name) or explain how to use the app." });
   } catch (e) {
     return res.status(200).json({ ok: false, error: String((e && e.message) || e) });
   }
