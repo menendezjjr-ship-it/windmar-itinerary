@@ -151,12 +151,17 @@ const GENERIC = new Set(("installation install installing service schedule sched
   + "zoho crm module modules track tracking picklist pipeline lifecycle schema field fields record records name final list listing category categories type types").split(/\s+/));
 async function smartProjectSearch(text) {
   const cands = [];
-  const caps = (String(text).match(/\b[A-Z][a-zA-Z]{2,}\b/g) || []).filter((w) => !STOP.has(w.toLowerCase()) && !GENERIC.has(w.toLowerCase()));
+  // Proper-noun tokens must have a lowercase tail (a real name/word), so technical ACRONYMS like
+  // EGC/MSP/AFCI/GFCI/NEC/AHJ are NOT treated as a customer name to search for.
+  const caps = (String(text).match(/\b[A-Z][a-z]{2,}\b/g) || []).filter((w) => !STOP.has(w.toLowerCase()) && !GENERIC.has(w.toLowerCase()));
   if (caps.length > 1) cands.push(caps.join(" "));
   caps.slice().sort((a, b) => b.length - a.length).forEach((w) => cands.push(w));
   const stripped = searchTermsFrom(text);
   if (stripped) { if (stripped.indexOf(" ") >= 0) cands.push(stripped); else if (!GENERIC.has(stripped) && stripped.length >= 3) cands.push(stripped); }
-  const num = (String(text).match(/\b\d{3,6}\b/g) || [])[0]; if (num) cands.push(num); // street number
+  // A bare number is a street number ONLY when the text actually reads like an address — otherwise
+  // it's a code/amperage/measurement in an NEC or general question and must NOT drive a project search.
+  const looksAddr = /\b(st|street|ave|avenue|rd|road|dr|drive|ln|lane|blvd|ct|court|way|cir|circle|pl|place|ter|terrace|trl|trail|hwy|loop|apt|unit|suite)\b/i.test(text) || /,\s*[A-Za-z]{2}\b/.test(text) || /\b(who(?:'s| is)?\s+(?:at|lives?|located)|address|reside)\b/i.test(text);
+  const num = looksAddr ? (String(text).match(/\b\d{2,6}\b/g) || [])[0] : null; if (num) cands.push(num); // street number
   const seen = new Set(), queries = [];
   for (const q of cands) { const k = q.toLowerCase(); if (q && !seen.has(k)) { seen.add(k); queries.push(q); } if (queries.length >= 4) break; }
   for (const q of queries) {
