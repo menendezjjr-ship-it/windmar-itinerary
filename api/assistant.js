@@ -716,10 +716,12 @@ async function gatherContext(text) {
         if (used.indexOf("get_job_details") < 0) used.push("get_job_details");
       }
     }
-    // SiteCapture fallback — Zoho found nothing but the user named an entity → search SiteCapture too.
+    // SiteCapture fallback — Zoho found nothing but the user named a real PERSON/entity → search
+    // SiteCapture too. Require a proper name (capitalized word with a lowercase tail) so technical
+    // acronyms (EGC/MSP) and bare numbers in NEC/general questions never trigger a SiteCapture search.
     if ((!search || !search.matches || !search.matches.length) && !sitecapture && !/site\s?capture/.test(low)) {
-      const caps = (String(text).match(/\b[A-Z][a-zA-Z]{2,}\b/g) || []).filter((w) => !STOP.has(w.toLowerCase()) && !GENERIC.has(w.toLowerCase()));
-      const terms = caps.join(" ") || (digits.length >= 3 ? digits : "");
+      const caps = (String(text).match(/\b[A-Z][a-z]{2,}\b/g) || []).filter((w) => !STOP.has(w.toLowerCase()) && !GENERIC.has(w.toLowerCase()));
+      const terms = caps.length ? caps.join(" ") : "";
       if (terms) { try { const sc = await toolSearchSitecapture({ query: terms }); if (sc && sc.count) { sitecapture = sc; parts.push("SITECAPTURE RESULTS:\n" + JSON.stringify(sc)); used.push("search_sitecapture"); } } catch (e) {} }
     }
   }
