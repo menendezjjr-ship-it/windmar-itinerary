@@ -148,7 +148,9 @@ const GENERIC = new Set(("installation install installing service schedule sched
   // equipment / brands / technical terms — must NOT trigger a customer/project NAME search
   + "tesla powerwall powerwalls solaredge qcells hanwha generac pwrcell enphase eaton siemens square gateway inverter inverters battery batteries solar roof roofing panel panels breaker breakers wire wiring conductor nec code florida owens corning snapnrack ironridge unirac msp gfci afci circuit amp amps volt volts kw ev charger meter diagram show "
   // schema / meta words — a question ABOUT Zoho/the data model must NOT search for a customer
-  + "zoho crm module modules track tracking picklist pipeline lifecycle schema field fields record records name final list listing category categories type types").split(/\s+/));
+  + "zoho crm module modules track tracking picklist pipeline lifecycle schema field fields record records name final list listing category categories type types "
+  // attribute words — an ATTRIBUTE search (mounting/roof/system type) goes to find_jobs, not a name search
+  + "tile shingle metal flat pergola carport ground mount mounts mounting mounted kilowatt kilowatts kwh").split(/\s+/));
 async function smartProjectSearch(text) {
   const cands = [];
   // Proper-noun tokens must have a lowercase tail (a real name/word), so technical ACRONYMS like
