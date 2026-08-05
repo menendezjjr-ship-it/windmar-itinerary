@@ -3,10 +3,11 @@
 // Token scope required: "Read Vehicle Statistics".
 
 // Central crew filter — WindMar installation team ONLY. Every consumer (dispatch view + Crews tab)
-// sees only these trucks. Keeps INSTALACION / IN HOUSE / SERVICE; drops DISPONIBLE, ALMACEN, VENTAS,
-// CANVASSING, SITE SURVEY, ROOFING subs, Marketing/Tesla vans, and code-only names (e.g. GNUE-SW9-U8V).
+// sees only these trucks. Keeps INSTALACION / IN HOUSE / SERVICE + CAMION DE PRUEBA (test truck);
+// drops DISPONIBLE, ALMACEN, VENTAS, CANVASSING, SITE SURVEY, ROOFING subs, Marketing/Tesla vans,
+// and code-only names (e.g. GNUE-SW9-U8V).
 // Edit this one regex to add crews (e.g. add ROOFING): /\b(INSTALACION|IN\s*HOUSE|SERVICE|ROOFING)\b/i
-const CREW_RX = /\b(INSTALACION|IN\s*HOUSE|SERVICE)\b/i;
+const CREW_RX = /\b(INSTALACION|IN\s*HOUSE|SERVICE|CAMION\s*DE\s*PRUEBA)\b/i;
 
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "s-maxage=20, stale-while-revalidate=40");
