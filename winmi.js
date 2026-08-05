@@ -149,7 +149,8 @@
     html=html.replace(/ SVG(\d+) (<br>)?/g,function(_,i){ return '<div class="wmViz">'+wmSanSvg(svgs[+i])+'</div>'; });
     return html;
   }
-  function addBubble(who,txt){ var b=document.getElementById("wmSunMsgs"); if(!b) return null; var d=document.createElement("div"); d.className="wmB "+(who==="u"?"u":"b"); if(who==="u"){ d.textContent=txt; } else { d.innerHTML=fmtBotHtml(txt); } b.appendChild(d); b.scrollTop=b.scrollHeight; return d; }
+  function wmScrollTop(b,d){ if(!b||!d) return; var go=function(){ try{ var top=d.getBoundingClientRect().top - b.getBoundingClientRect().top + b.scrollTop; b.scrollTop=Math.max(0,top-6); }catch(e){ b.scrollTop=b.scrollHeight; } }; go(); setTimeout(go,60); setTimeout(go,260); }
+  function addBubble(who,txt){ var b=document.getElementById("wmSunMsgs"); if(!b) return null; var d=document.createElement("div"); d.className="wmB "+(who==="u"?"u":"b"); if(who==="u"){ d.textContent=txt; } else { d.innerHTML=fmtBotHtml(txt); } b.appendChild(d); if(who==="b"){ wmScrollTop(b,d); } else { b.scrollTop=b.scrollHeight; } return d; }
   function typing(on){ var b=document.getElementById("wmSunMsgs"); if(!b) return; var ex=document.getElementById("wmSunTyp"); if(ex)ex.remove(); if(on){ var d=document.createElement("div"); d.id="wmSunTyp"; d.className="wmB b"; d.innerHTML='<span class="wmTypDot"></span><span class="wmTypDot" style="animation-delay:.2s"></span><span class="wmTypDot" style="animation-delay:.4s"></span>'; b.appendChild(d); b.scrollTop=b.scrollHeight; } }
 
   function send(text){ text=(text||"").trim(); if(!text) return; stopSpeak();

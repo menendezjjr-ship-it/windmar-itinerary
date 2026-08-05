@@ -741,10 +741,11 @@ async function gatherContext(text) {
     if (!search || !search.matches || !search.matches.length) {
       try { const r = await smartProjectSearch(text); if (r.res && Array.isArray(r.res.matches) && r.res.matches.length) { search = r.res; parts.push('PROJECT SEARCH for "' + r.query + '":\n' + JSON.stringify(r.res)); used.push("search_projects"); } } catch (e) {}
     }
-    // Deep-fetch top matches (full status + notes).
+    // Deep-fetch ONLY the single best match → the report shows just the job the user asked about
+    // (not a second unrelated project). If there are other matches, the user can name the DL#.
     if (search && Array.isArray(search.matches) && search.matches.length) {
       const dls = search.matches.map((m) => normDL(m.dl)).filter((d) => /^(?:RDL|RL|DL|MSP|S)\d{2,}$/.test(d));
-      const top = [...new Set(dls)].slice(0, 2);
+      const top = [...new Set(dls)].slice(0, 1);
       if (top.length) {
         const deep = await Promise.all(top.map((dl) => toolGetJobDetails({ dl }).catch((e) => ({ error: String((e && e.message) || e) }))));
         deep.forEach((r2, i) => { records.push(r2); parts.push("PROJECT " + top[i] + " (full Zoho record):\n" + JSON.stringify(r2)); });
