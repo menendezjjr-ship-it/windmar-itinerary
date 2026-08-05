@@ -102,14 +102,20 @@
   var WM_VOICES=[]; function wmLoadVoices(){ try{ WM_VOICES=window.speechSynthesis.getVoices()||[]; }catch(e){} }
   if(window.speechSynthesis){ wmLoadVoices(); try{ window.speechSynthesis.addEventListener("voiceschanged",wmLoadVoices); }catch(e){ try{window.speechSynthesis.onvoiceschanged=wmLoadVoices;}catch(_){} } }
   var WM_FEM=/(samantha|victoria|karen|moira|tessa|fiona|allison|susan|zira|hazel|catherine|linda|heather|serena|kate|female|aria|jenny|emma|libby|michelle|nova|ava|elvira|dalia|paloma|lucia|m[oó]nica|monica|paulina|helena|sabina|marisol)/i;
+  var WM_MALE=/\b(guy|andrew|brian|christopher|eric|davis|tony|jason|steffan|roger|liam|ryan|daniel|alex|aaron|arthur|oliver|reed|fred|gordon|rocko|ralph|nathan|thomas|tom|david|mark|george|james|jorge|alvaro|carlos|juan|diego|enrique|pablo|miguel|paco)\b/i;
   function wmPickVoice(sp){ if(!WM_VOICES.length) wmLoadVoices(); var vs=WM_VOICES; if(!vs.length) return null;
     var pref=sp?"es":"en";
-    var pri=sp?[/(jorge|alvaro|carlos|juan|diego|enrique|pablo|miguel)\b.*(natural|online|neural)/i,/google espa.*male/i,/\b(jorge|alvaro|carlos|juan|diego|enrique|pablo|miguel|paco)\b/i,/\bmale\b/i,/natural|neural|online/i]
-              :[/(guy|andrew|brian|christopher|eric|davis|tony|jason|steffan|roger|liam)\b.*(natural|online|neural)/i,/google uk english male/i,/\b(daniel|alex|aaron|arthur|oliver|reed|fred|gordon|rocko|ralph|junior)\b/i,/\bmale\b/i,/\b(david|mark|george|james)\b/i,/natural|neural|online/i];
-    for(var p=0;p<pri.length;p++){ for(var i=0;i<vs.length;i++){ if((vs[i].lang||"").toLowerCase().indexOf(pref)===0 && pri[p].test(vs[i].name||"")) return vs[i]; } }
-    for(var j=0;j<vs.length;j++){ if((vs[j].lang||"").toLowerCase().indexOf(pref)===0 && !WM_FEM.test(vs[j].name||"")) return vs[j]; }
-    for(var k=0;k<vs.length;k++){ if((vs[k].lang||"").toLowerCase().indexOf(pref)===0) return vs[k]; }
-    return null; }
+    var L=vs.filter(function(v){return (v.lang||"").toLowerCase().indexOf(pref)===0;}); if(!L.length) L=vs;
+    var male=function(v){var n=v.name||"";return WM_MALE.test(n)||(/\bmale\b/i.test(n)&&!WM_FEM.test(n));};
+    var notFem=function(v){return !WM_FEM.test(v.name||"");};
+    var natural=function(v){return /natural|neural|online|enhanced|premium|siri/i.test(v.name||"")||v.localService===false||/google/i.test(v.name||"");};
+    var pick=function(f){for(var i=0;i<L.length;i++){if(f(L[i]))return L[i];}return null;};
+    return pick(function(v){return male(v)&&natural(v);})
+        || pick(function(v){return natural(v)&&notFem(v);})
+        || pick(male)
+        || pick(natural)
+        || pick(notFem)
+        || L[0]; }
   // Strip diagrams/markdown/urls/emoji so it reads smoothly (not "asterisk", "less-than svg", etc).
   function wmSpokenText(t){ try{ return String(t||"")
     .replace(/```[\s\S]*?```/g," ").replace(/<svg[\s\S]*?<\/svg>/gi," ").replace(/https?:\/\/\S+/g," ")
@@ -120,7 +126,7 @@
     try{ window.speechSynthesis.cancel(); var spoken=wmSpokenText(txt); if(!spoken){ winmiState("idle"); return; }
       var u=new SpeechSynthesisUtterance(spoken); var sp=es(); u.lang=sp?"es-ES":"en-US";
       var v=wmPickVoice(sp); if(v){ u.voice=v; if(v.lang) u.lang=v.lang; }
-      u.rate=1.0; u.pitch=0.95; // smooth male tone
+      u.rate=1.12; u.pitch=1.0; // brisker + natural male tone (was dragging/robotic)
       winmiState("talking"); u.onend=function(){ winmiState("idle"); }; u.onerror=function(){ winmiState("idle"); };
       window.speechSynthesis.speak(u);
     }catch(e){ winmiState("idle"); } }
