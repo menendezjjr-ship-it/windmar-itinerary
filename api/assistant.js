@@ -988,9 +988,12 @@ export default async function handler(req, res) {
     // deep-fetches a random match into `found` and would short-circuit before the agent runs — the
     // old keyword router's core bug).
     const analytical = /\bhow many|how much|how often|number of|count(s|ed|ing)?|total(s|ed)?|tally|tallies|breakdown|per crew|by crew|each crew|which crew|how's .* doing|how is .* doing|most|fewest|least|busiest|average|avg|cu[aá]nt|cu[aá]nto|promedio\b/i.test(question);
+    // ATTRIBUTE search (mounting/roof type, system size, panels, battery, county, utility) → find_jobs.
+    // Skip the local fuzzy name search so an attribute word (e.g. "tile") can't match a random customer.
+    const attributeSearch = /\bground\s*mount|roof[- ]?mount|\b(tile|shingle|metal|flat|pergola|carport)\b|\b\d+\s*k(w|wh|ilowatt)|\b(over|under|above|below|more than|less than|at least|fewer than)\s+\d+\s*(kw|panel|module|kilowatt|watt)|\bwith\s+(a\s+)?(ground|battery|tesla|generac|enphase|powerwall)\b|battery\s+(jobs|installs?|systems?)|jobs?\s+in\s+\w+\s+county|\bin\s+\w+\s+county\b/i.test(question);
 
     let used = [], records = [], search = null, sitecapture = null;
-    if (!analytical) {
+    if (!analytical && !attributeSearch) {
       ({ used, records, search, sitecapture } = await gatherContext(question));
     }
     const found = (records || []).filter((r) => r && r.found !== false && !r.error);
