@@ -508,6 +508,127 @@ async function toolFindJobs(input) {
   };
 }
 
+// ── SAMSARA fleet GPS (crew location + proximity) ───────────────────────────────────────────────
+const SAMSARA_TOKEN = process.env.SAMSARA_API_TOKEN || process.env.Samsara_Coordinator_Key;
+const CREW_RX = /\b(INSTALACION|IN\s*HOUSE|SERVICE|CAMION\s*DE\s*PRUEBA)\b/i; // WindMar field trucks (mirrors api/crews.js)
+async function fetchCrews() {
+  if (!SAMSARA_TOKEN) return { error: "Samsara is not configured on this server" };
+  const r = await fetchT("https://api.samsara.com/fleet/vehicles/stats?types=gps", { headers: { Authorization: "Bearer " + SAMSARA_TOKEN, Accept: "application/json" } }, 12000);
+  if (!r || !r.ok) return { error: "Samsara " + (r ? r.status : "timeout") };
+  const body = await r.json().catch(() => ({}));
+  const crews = (body.data || []).filter((v) => CREW_RX.test(v.name || "")).map((v) => {
+    const g = v.gps || {};
+    return { raw: v.name || "", canon: canonTeam(v.name || ""), person: (String(v.name || "").match(/\(([^)]+)\)/) || [])[1] || "",
+      lat: g.latitude, lon: g.longitude, mph: g.speedMilesPerHour != null ? Math.round(g.speedMilesPerHour) : 0,
+      addr: (g.reverseGeo && g.reverseGeo.formattedLocation) || "", time: g.time || null };
+  }).filter((c) => c.lat != null && c.lon != null);
+  return { crews };
+}
+const inFL2 = (la, lo) => la >= 24.3 && la <= 31.1 && lo >= -87.7 && lo <= -79.8;
+// Geocode a FL address → {lat,lon,label}. Census first (no key), OSM fallback. Mirrors api/geocode.js.
+async function geocodeAddr(addr) {
+  const a = String(addr || "").trim(); if (!a) return null;
+  const withFL = /\bfl\b|florida/i.test(a) ? a : a + ", FL";
+  try {
+    const r = await fetchT("https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?benchmark=Public_AR_Current&format=json&address=" + encodeURIComponent(withFL), { headers: { Accept: "application/json" } }, 9000);
+    const j = r && await r.json().catch(() => null); const m = j && j.result && j.result.addressMatches && j.result.addressMatches[0];
+    if (m && inFL2(m.coordinates.y, m.coordinates.x)) return { lat: m.coordinates.y, lon: m.coordinates.x, label: m.matchedAddress || a };
+  } catch (e) {}
+  try {
+    const r = await fetchT("https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=" + encodeURIComponent(withFL), { headers: { "User-Agent": "WindMar-Itinerary/1.0 (ops@windmarhome.com)", Accept: "application/json" } }, 9000);
+    const j = r && await r.json().catch(() => null); if (Array.isArray(j) && j[0]) { const la = +j[0].lat, lo = +j[0].lon; if (inFL2(la, lo)) return { lat: la, lon: lo, label: j[0].display_name || a }; }
+  } catch (e) {}
+  return null;
+}
+function haversineMi(aLat, aLon, bLat, bLon) {
+  const R = 3958.8, dLat = (bLat - aLat) * Math.PI / 180, dLon = (bLon - aLon) * Math.PI / 180, la1 = aLat * Math.PI / 180, la2 = bLat * Math.PI / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+// Look up a Deal's street address (light — no notes) for geocoding.
+async function dealAddress(dl) {
+  if (!hasZoho()) return null;
+  try {
+    const token = await getAccessToken();
+    const rows = await zohoSearch("Deals", `criteria=${encodeURIComponent(`(Deal_Name:starts_with:${dl})`)}&fields=${encodeURIComponent("Deal_Name,Address,City,State,Zip")}&per_page=1`, token);
+    if (!rows || !rows[0]) return null;
+    const p = parseDeal(rows[0].Deal_Name);
+    const addr = [clean(rows[0].Address), clean(rows[0].City), [clean(rows[0].State), clean(rows[0].Zip)].filter(Boolean).join(" ")].filter(Boolean).join(", ") || p.address || "";
+    return { customer: p.customer || "", address: addr };
+  } catch (e) { return null; }
+}
+
+// crew_location — where is a crew's truck right now (live Samsara GPS).
+async function toolCrewLocation(input) {
+  const { crews, error } = await fetchCrews(); if (error) return { error };
+  if (!crews.length) return { found: false, note: "No crew trucks are reporting GPS right now." };
+  const fmt = (c) => ({ crew: c.canon, person: c.person, truck: c.raw, location: c.addr || `${c.lat.toFixed(4)}, ${c.lon.toFixed(4)}`, movingMph: c.mph, lastPing: c.time, mapUrl: `https://www.google.com/maps?q=${c.lat},${c.lon}` });
+  const q = String((input && input.crew) || "").trim().toLowerCase();
+  if (!q) return { found: true, count: crews.length, crews: crews.map(fmt) };
+  const canonQ = canonTeam(q).toLowerCase();
+  const list = crews.filter((c) => c.canon.toLowerCase() === canonQ || c.canon.toLowerCase().indexOf(q) >= 0 || (c.person && c.person.toLowerCase().indexOf(q) >= 0) || c.raw.toLowerCase().indexOf(q) >= 0);
+  if (!list.length) return { found: false, note: `No live truck matched "${input.crew}". Live crews right now: ${crews.map((c) => c.canon + (c.person ? ` (${c.person})` : "")).join("; ")}.` };
+  return { found: true, count: list.length, crews: list.map(fmt) };
+}
+
+// closest_crew — nearest live crew(s) to a DL's address (or a given address).
+async function toolClosestCrew(input) {
+  input = input || {};
+  let target = null, targetLabel = "";
+  const dl = normDL(input.dl || "");
+  if (/^(?:RDL|RL|DL|MSP|S)\d{2,}$/.test(dl)) {
+    const da = await dealAddress(dl);
+    if (da) { targetLabel = (dl + " " + (da.customer || "")).trim(); target = await geocodeAddr(da.address); }
+    if (!target) return { error: `Couldn't locate ${dl} — no geocodable address on the deal.` };
+  } else if (input.address) { targetLabel = String(input.address); target = await geocodeAddr(input.address); if (!target) return { error: `Couldn't geocode "${input.address}".` }; }
+  else return { error: "Give me a DL# or an address to find the closest crew." };
+  const { crews, error } = await fetchCrews(); if (error) return { error };
+  if (!crews.length) return { found: false, note: "No crew trucks are reporting GPS right now." };
+  const ranked = crews.map((c) => Object.assign({}, c, { mi: haversineMi(target.lat, target.lon, c.lat, c.lon) })).sort((a, b) => a.mi - b.mi);
+  return { found: true, target: targetLabel, targetAddress: target.label,
+    nearest: ranked.slice(0, 4).map((c) => ({ crew: c.canon, person: c.person, truck: c.raw, miles: Math.round(c.mi * 10) / 10, location: c.addr, movingMph: c.mph, directions: `https://www.google.com/maps/dir/?api=1&origin=${c.lat},${c.lon}&destination=${target.lat},${target.lon}` })) };
+}
+
+// getPhotos (LOCAL — returns real SiteCapture image URLs the widget renders as a gallery).
+// name → project → walk fields[].media[] image ids → proxy image URLs (verified public, 200 image/jpeg).
+async function getPhotos(input) {
+  input = input || {};
+  let name = String(input.name || "").trim();
+  const dl = normDL(input.dl || "");
+  const isDL = /^(?:RDL|RL|DL|MSP|S)\d{2,}$/.test(dl);
+  let label = name || dl;
+  const readJson = async (u) => { try { const r = await fetchT(u, { headers: { Accept: "application/json" } }, 11000); if (!r || !r.ok) return null; return await r.json().catch(() => null); } catch (e) { return null; } };
+  // SiteCapture project names usually embed the DL (e.g. "DL6334 Summer Malagon") → search the DL FIRST
+  // (precise), then the customer name (resolved from Zoho if only a DL was given).
+  const queries = [];
+  if (isDL) { queries.push(dl); label = dl; }
+  if (name) queries.push(name);
+  if (isDL && !name) { const da = await dealAddress(dl); if (da && da.customer) { name = da.customer; label = dl + " " + da.customer; queries.push(name); } }
+  const uniqQ = [...new Set(queries.map((x) => String(x).trim()).filter((x) => x.length >= 2))];
+  if (!uniqQ.length) return { error: "need a DL# or customer name" };
+  const scoreProj = (p) => (isDL && String(p.display_line1 || p.name || "").toUpperCase().indexOf(dl) >= 0 ? 4 : 0) + (/complete/i.test(String(p.status || "")) ? 1 : 0);
+  let best = null;
+  for (const q of uniqQ) {
+    const sj = await readJson(SC_PROXY + "?path=projects&max=20&q=" + encodeURIComponent(q));
+    let projects = sj ? (Array.isArray(sj) ? sj : (sj.data || sj.projects || sj.results || [])) : [];
+    if (!Array.isArray(projects) || !projects.length) continue;
+    projects.sort((a, b) => scoreProj(b) - scoreProj(a));
+    best = projects[0]; if (best) break;
+  }
+  if (!best) return { found: false, label, note: `No SiteCapture project found for "${label}".` };
+  const pid = best.id || best.project_id; if (!pid) return { found: false, label, note: `No SiteCapture project id for "${label}".` };
+  const pname = best.display_line1 || best.name || best.project_name || label;
+  const paddr = [best.display_line2, best.display_line3].map((x) => (x == null ? "" : String(x).trim())).filter(Boolean).find((x) => /\d/.test(x)) || best.address || "";
+  const dj = await readJson(SC_PROXY + "?path=project&id=" + encodeURIComponent(pid));
+  const det = dj && (dj.data || dj); const fields = (det && det.fields) || [];
+  const ids = [];
+  fields.forEach((f) => { ((f && f.media) || []).forEach((m) => { if (m && m.type === "image" && m.id != null) ids.push(String(m.id)); }); });
+  const uniq = [...new Set(ids)];
+  const urls = uniq.slice(0, 18).map((id) => SC_PROXY + "?path=image&id=" + id);
+  if (!urls.length) return { found: true, label, project: pname, address: paddr, count: 0, urls: [], note: "The SiteCapture project has no photos yet." };
+  return { found: true, label, project: pname, address: paddr, count: urls.length, total: uniq.length, urls };
+}
+
 const TOOLS = [
   {
     name: "search_projects",
@@ -523,6 +644,16 @@ const TOOLS = [
     name: "search_sitecapture",
     description: "Search SiteCapture field-project records by name or address. Returns project name, address, status, and photo/media count when available.",
     input_schema: { type: "object", properties: { query: { type: "string", description: "Customer name or address to search SiteCapture for." } }, required: ["query"] },
+  },
+  {
+    name: "crew_location",
+    description: "Where is a crew's truck RIGHT NOW — live Samsara GPS. Use for 'where is Crew #1S', 'where's Leonardo', 'where is the service crew located', 'where are the trucks'. Pass the crew name/person (Crew #1S=Leonardo Torres, #2S=David Radke, #3S=Luis Morales, Elite Crew #2=Tailor Herrera, Elite Crew #3=William Sierra, or a person's name); omit to list all live trucks. Returns each truck's current location (address), whether it's moving (mph), last ping time, and a Google Maps link.",
+    input_schema: { type: "object", properties: { crew: { type: "string", description: "Crew or person, e.g. 'Crew #1S', 'Leonardo', 'service crew', 'David Radke'. Omit for all trucks." } }, required: [] },
+  },
+  {
+    name: "closest_crew",
+    description: "Which crew truck is CLOSEST to a job or address — live Samsara GPS + real driving-distance ranking. Use for 'which crew is closest to DL8418', 'nearest crew to 123 Main St Orlando', 'who's closest to <customer>'. Pass a DL number (its address is looked up + geocoded) OR a raw address. Returns the nearest crews with miles away + a directions link.",
+    input_schema: { type: "object", properties: { dl: { type: "string", description: "DL number of the job, e.g. 'DL8418'." }, address: { type: "string", description: "A street address (if no DL)." } }, required: [] },
   },
   {
     name: "find_jobs",
@@ -563,6 +694,8 @@ async function runTool(name, input) {
     if (name === "search_sitecapture") return await toolSearchSitecapture(input);
     if (name === "count_jobs") return await toolCountJobs(input);
     if (name === "find_jobs") return await toolFindJobs(input);
+    if (name === "crew_location") return await toolCrewLocation(input);
+    if (name === "closest_crew") return await toolClosestCrew(input);
     return { error: `unknown tool: ${name}` };
   } catch (e) {
     return { error: String(e && e.message || e) };
@@ -700,7 +833,7 @@ async function callClaudeAgentic(apiKey, question, history, lang) {
   const today = todayISO();
   const guide =
     "\n\nTODAY'S DATE: " + today + ". Use it to resolve 'this month', 'July', 'last week', 'this year' into concrete from/to dates. For a bare month name with NO year, assume the most recent PAST occurrence.\n" +
-    "TOOLS: You have LIVE read-only tools. ALWAYS use a tool for anything about a specific customer/project (search_projects → get_job_details), a name/address lookup, SiteCapture, a COUNT/total/tally over a period (count_jobs), or a search by ATTRIBUTE — mounting type (ground mount, tile, shingle, flat, metal, pergola), roof type, system size, panel/module count, battery brand, city, county, utility, or stage (find_jobs). NEVER say you can't search by an attribute and NEVER tell the user to go filter it themselves — call find_jobs. NEVER guess project data or make up numbers — if a tool returns nothing, say so. Answer NEC/electrical/equipment/how-to-use-the-app questions directly from your knowledge (no tool needed).\n" +
+    "TOOLS: You have LIVE read-only tools. ALWAYS use a tool for anything about a specific customer/project (search_projects → get_job_details), a name/address lookup, SiteCapture, a COUNT/total/tally over a period (count_jobs), a search by ATTRIBUTE — mounting type (ground mount, tile, shingle, flat, metal, pergola), roof type, system size, panel/module count, battery brand, city, county, utility, or stage (find_jobs), where a crew's truck is right now (crew_location, live Samsara GPS), or which crew is CLOSEST to a job/address (closest_crew). NEVER say you can't search by an attribute or can't locate a crew and NEVER tell the user to go do it themselves — call the tool. NEVER guess project data, numbers, or truck locations — if a tool returns nothing, say so. Answer NEC/electrical/equipment/how-to-use-the-app questions directly from your knowledge (no tool needed).\n" +
     "CREWS: INSTALL crews (do Installations) = Crew H, Elite Crew #2, Elite Crew #3, Windmar Roofing. SERVICE crews (do Service tickets) = Crew #1S (Leonardo Torres), Crew #2S (David Radke), Crew #3S (Luis Morales), plus techs Carlos Acevedo / Jose Menendez / Luis G. Ortiz and subcontractors Eagle Eye / Holi Solar. MSP (Main Service Panel) work happens BOTH as an install line-item (install crews) AND as a service job 'MSP/Electrical Work' (service crews) — so for ANY MSP-by-crew or 'how many MSP' question, call count_jobs with module:'both' so a service crew's MSPs aren't reported as 0.";
   const sys = systemPrompt(lang) + guide + "\n\n" + WINDMAR_KB + "\n\n" + APP_GUIDE + "\n\n" + ZOHO_GUIDE;
   const msgs = (history || []).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: String((m && (m.text || m.content)) || "") })).filter((m) => m.content);
@@ -986,6 +1119,28 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: false, error: lang === "es" ? "No pude leer ese archivo ahora mismo — inténtalo de nuevo." : "I couldn't read that file just now — please try again." });
     }
 
+    // ── PHOTO MODE (local): "show me the photos for DL8418" / "pics of the Rivera job" → real
+    // SiteCapture image URLs returned in `photos[]` so the widget renders a gallery (no LLM needed).
+    if (/\b(photos?|pictures?|pics?|images?|fotos?|im[aá]genes?)\b/i.test(question)) {
+      const dlP = (String(question).match(/\b(?:RDL|RL|DL|MSP)\s?\d{3,}\b/i) || []).map(normDL)[0] || "";
+      const capsP = (String(question).match(/\b[A-Z][a-z]{2,}\b/g) || []).filter((w) => !STOP.has(w.toLowerCase()) && !GENERIC.has(w.toLowerCase()));
+      if (dlP || capsP.length) {
+        const es = lang === "es";
+        try {
+          const ph = await getPhotos({ dl: dlP, name: dlP ? "" : capsP.join(" ") });
+          if (ph && ph.found && ph.urls && ph.urls.length) {
+            const more = ph.total && ph.total > ph.urls.length ? (es ? ` (mostrando ${ph.urls.length} de ${ph.total})` : ` (showing ${ph.urls.length} of ${ph.total})`) : "";
+            return res.status(200).json({ ok: true, source: "local", used: ["get_photos"], photos: ph.urls,
+              answer: (es ? `📷 ${ph.count} foto${ph.count > 1 ? "s" : ""} de ` : `📷 ${ph.count} photo${ph.count > 1 ? "s" : ""} for `) + (ph.project || ph.label) + (ph.address ? " — " + ph.address : "") + more });
+          }
+          if (ph && (ph.found === false || (ph.urls && !ph.urls.length))) {
+            return res.status(200).json({ ok: true, source: "local", used: ["get_photos"],
+              answer: (es ? "No encontré fotos en SiteCapture para " : "I couldn't find SiteCapture photos for ") + (dlP || capsP.join(" ")) + ". " + (ph.note || "") });
+          }
+        } catch (e) { /* fall through to normal handling */ }
+      }
+    }
+
     const ql = String(question).toLowerCase();
 
     // ── ANALYTICAL intent ("how many", totals, per-crew) MUST reach the agent (count_jobs) — never
@@ -996,9 +1151,13 @@ export default async function handler(req, res) {
     // ATTRIBUTE search (mounting/roof type, system size, panels, battery, county, utility) → find_jobs.
     // Skip the local fuzzy name search so an attribute word (e.g. "tile") can't match a random customer.
     const attributeSearch = /\bground\s*mount|roof[- ]?mount|\b(tile|shingle|metal|flat|pergola|carport)\b|\b\d+\s*k(w|wh|ilowatt)|\b(over|under|above|below|more than|less than|at least|fewer than)\s+\d+\s*(kw|panel|module|kilowatt|watt)|\bwith\s+(a\s+)?(ground|battery|tesla|generac|enphase|powerwall)\b|battery\s+(jobs|installs?|systems?)|jobs?\s+in\s+\w+\s+county|\bin\s+\w+\s+county\b/i.test(question);
+    // CREW LOCATION / PROXIMITY (Samsara GPS) → crew_location / closest_crew (agent tools).
+    const crewIntent = (/\b(where\s*(is|are|s)?|located?|location|closest|nearest|far|distance|how far)\b/i.test(question) &&
+      /\b(crew|crews|truck|trucks|leonardo|david|luis|carlos|jose|tailor|william|holi|camion|elite\s*crew|service\s*crew|install(acion|ation)?)\b/i.test(question)) ||
+      /\b(closest|nearest)\s+crew\b/i.test(question);
 
     let used = [], records = [], search = null, sitecapture = null;
-    if (!analytical && !attributeSearch) {
+    if (!analytical && !attributeSearch && !crewIntent) {
       ({ used, records, search, sitecapture } = await gatherContext(question));
     }
     const found = (records || []).filter((r) => r && r.found !== false && !r.error);

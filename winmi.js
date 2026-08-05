@@ -80,7 +80,7 @@
     ".wmB.b p{margin:0 0 8px}",".wmB.b p:last-child{margin:0}",
     ".wmB.b .wmViz{margin:9px 0 4px;background:linear-gradient(160deg,#0d1e3d,#081120);border:1px solid #31569a;border-radius:14px;padding:12px;overflow-x:auto;box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 8px 22px -13px rgba(0,0,0,.6)}",
     ".wmB.b .wmViz svg{max-width:100%;height:auto;display:block;margin:0 auto}",
-    ".wmChips{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;align-self:flex-start;max-width:92%;animation:wmBIn .3s ease both}",".wmChip{background:linear-gradient(160deg,#26498c,#183056);border:1px solid #3c62a6;color:#dbe9ff;border-radius:20px;padding:8px 13px;font:600 12px Montserrat,system-ui,sans-serif;cursor:pointer;white-space:nowrap;box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 4px 12px -6px rgba(0,0,0,.5);transition:transform .12s ease,box-shadow .12s ease,filter .12s ease}",".wmChip:hover{transform:translateY(-1px);filter:brightness(1.12);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 7px 16px -6px rgba(29,66,155,.6)}",
+    ".wmChips{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;align-self:flex-start;max-width:92%;animation:wmBIn .3s ease both}",".wmChip{background:linear-gradient(160deg,#26498c,#183056);border:1px solid #3c62a6;color:#dbe9ff;border-radius:20px;padding:8px 13px;font:600 12px Montserrat,system-ui,sans-serif;cursor:pointer;white-space:nowrap;box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 4px 12px -6px rgba(0,0,0,.5);transition:transform .12s ease,box-shadow .12s ease,filter .12s ease}",".wmChip:hover{transform:translateY(-1px);filter:brightness(1.12);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 7px 16px -6px rgba(29,66,155,.6)}",".wmGal{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:9px;align-self:stretch;width:100%;animation:wmBIn .34s ease both}",".wmGal a{display:block;border-radius:11px;overflow:hidden;border:1px solid #2f5596;background:#0a1526;aspect-ratio:1/1;box-shadow:0 6px 16px -10px rgba(0,0,0,.6)}",".wmGal img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .25s ease}",".wmGal a:hover img{transform:scale(1.07)}",
     ".wmChip:active{transform:translateY(0) scale(.96);filter:brightness(.95)}",
     ".wmSunIn{flex:1;min-height:42px;max-height:110px;resize:none;border-radius:14px;border:1px solid #2a4a86;background:#0f1d3c;color:#fff;padding:11px 13px;font:500 16px Montserrat,system-ui,sans-serif;outline:none}",
     ".wmSunBtn{flex-shrink:0;width:44px;height:44px;border-radius:14px;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:19px}",
@@ -101,12 +101,14 @@
   // Pick the most natural voice the device offers (voices load async → cache + refresh).
   var WM_VOICES=[]; function wmLoadVoices(){ try{ WM_VOICES=window.speechSynthesis.getVoices()||[]; }catch(e){} }
   if(window.speechSynthesis){ wmLoadVoices(); try{ window.speechSynthesis.addEventListener("voiceschanged",wmLoadVoices); }catch(e){ try{window.speechSynthesis.onvoiceschanged=wmLoadVoices;}catch(_){} } }
+  var WM_FEM=/(samantha|victoria|karen|moira|tessa|fiona|allison|susan|zira|hazel|catherine|linda|heather|serena|kate|female|aria|jenny|emma|libby|michelle|nova|ava|elvira|dalia|paloma|lucia|m[oó]nica|monica|paulina|helena|sabina|marisol)/i;
   function wmPickVoice(sp){ if(!WM_VOICES.length) wmLoadVoices(); var vs=WM_VOICES; if(!vs.length) return null;
     var pref=sp?"es":"en";
-    var pri=sp?[/google espa/i,/(elvira|dalia|paloma|alvaro|lucia|jorge).*(natural|online|neural)/i,/(m[oó]nica|paulina)/i,/natural|neural|online/i,/google/i]
-              :[/google us english/i,/(aria|jenny|guy|ava|emma|libby|michelle|nova).*(natural|online|neural)/i,/(samantha|allison|ava|karen|siri)/i,/natural|neural|online/i,/google/i];
+    var pri=sp?[/(jorge|alvaro|carlos|juan|diego|enrique|pablo|miguel)\b.*(natural|online|neural)/i,/google espa.*male/i,/\b(jorge|alvaro|carlos|juan|diego|enrique|pablo|miguel|paco)\b/i,/\bmale\b/i,/natural|neural|online/i]
+              :[/(guy|andrew|brian|christopher|eric|davis|tony|jason|steffan|roger|liam)\b.*(natural|online|neural)/i,/google uk english male/i,/\b(daniel|alex|aaron|arthur|oliver|reed|fred|gordon|rocko|ralph|junior)\b/i,/\bmale\b/i,/\b(david|mark|george|james)\b/i,/natural|neural|online/i];
     for(var p=0;p<pri.length;p++){ for(var i=0;i<vs.length;i++){ if((vs[i].lang||"").toLowerCase().indexOf(pref)===0 && pri[p].test(vs[i].name||"")) return vs[i]; } }
-    for(var j=0;j<vs.length;j++){ if((vs[j].lang||"").toLowerCase().indexOf(pref)===0) return vs[j]; }
+    for(var j=0;j<vs.length;j++){ if((vs[j].lang||"").toLowerCase().indexOf(pref)===0 && !WM_FEM.test(vs[j].name||"")) return vs[j]; }
+    for(var k=0;k<vs.length;k++){ if((vs[k].lang||"").toLowerCase().indexOf(pref)===0) return vs[k]; }
     return null; }
   // Strip diagrams/markdown/urls/emoji so it reads smoothly (not "asterisk", "less-than svg", etc).
   function wmSpokenText(t){ try{ return String(t||"")
@@ -118,7 +120,7 @@
     try{ window.speechSynthesis.cancel(); var spoken=wmSpokenText(txt); if(!spoken){ winmiState("idle"); return; }
       var u=new SpeechSynthesisUtterance(spoken); var sp=es(); u.lang=sp?"es-ES":"en-US";
       var v=wmPickVoice(sp); if(v){ u.voice=v; if(v.lang) u.lang=v.lang; }
-      u.rate=0.97; u.pitch=1.0;
+      u.rate=1.0; u.pitch=0.95; // smooth male tone
       winmiState("talking"); u.onend=function(){ winmiState("idle"); }; u.onerror=function(){ winmiState("idle"); };
       window.speechSynthesis.speak(u);
     }catch(e){ winmiState("idle"); } }
@@ -152,6 +154,9 @@
   function wmScrollTop(b,d){ if(!b||!d) return; var go=function(){ try{ var top=d.getBoundingClientRect().top - b.getBoundingClientRect().top + b.scrollTop; b.scrollTop=Math.max(0,top-6); }catch(e){ b.scrollTop=b.scrollHeight; } }; go(); setTimeout(go,60); setTimeout(go,260); }
   function addBubble(who,txt){ var b=document.getElementById("wmSunMsgs"); if(!b) return null; var d=document.createElement("div"); d.className="wmB "+(who==="u"?"u":"b"); if(who==="u"){ d.textContent=txt; } else { d.innerHTML=fmtBotHtml(txt); } b.appendChild(d); if(who==="b"){ wmScrollTop(b,d); } else { b.scrollTop=b.scrollHeight; } return d; }
   function addChips(list){ if(!list||!list.length) return; var b=document.getElementById("wmSunMsgs"); if(!b) return; var w=document.createElement("div"); w.className="wmChips"; list.slice(0,6).forEach(function(it){ if(!it||!it.label) return; var c=document.createElement("button"); c.type="button"; c.className="wmChip"; c.textContent=it.label; c.onclick=function(){ if(it&&it.url){ try{ window.open(it.url,"_blank","noopener"); }catch(e){} } else if(it&&it.q){ send(it.q); } }; w.appendChild(c); }); b.appendChild(w); }
+  function addPhotos(list){ if(!list||!list.length) return; var b=document.getElementById("wmSunMsgs"); if(!b) return; var g=document.createElement("div"); g.className="wmGal";
+    list.slice(0,18).forEach(function(u){ if(typeof u!=="string"||!/^https:\/\/(windmar-service-app|windmar-itinerary)\.vercel\.app\/api\/sitecapture\?/.test(u)) return; var a=document.createElement("a"); a.href=u; a.target="_blank"; a.rel="noopener"; var im=document.createElement("img"); im.src=u; im.loading="lazy"; im.alt="job photo"; a.appendChild(im); g.appendChild(a); });
+    if(g.children.length){ b.appendChild(g); } }
   function typing(on){ var b=document.getElementById("wmSunMsgs"); if(!b) return; var ex=document.getElementById("wmSunTyp"); if(ex)ex.remove(); if(on){ var d=document.createElement("div"); d.id="wmSunTyp"; d.className="wmB b"; d.innerHTML='<span class="wmTypDot"></span><span class="wmTypDot" style="animation-delay:.2s"></span><span class="wmTypDot" style="animation-delay:.4s"></span>'; b.appendChild(d); b.scrollTop=b.scrollHeight; } }
 
   function send(text){ text=(text||"").trim(); if(!text) return; stopSpeak();
@@ -160,7 +165,7 @@
     typing(true); winmiState("thinking");
     fetch(WINMI_API,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({messages:history,lang:es()?"es":"en"})})
       .then(function(r){return r.json();}).then(function(j){ typing(false);
-        if(j&&j.ok&&j.answer){ addBubble("b",j.answer); addChips(j.suggestions); history.push({role:"assistant",content:j.answer}); winmiState("idle"); speak(j.answer); }
+        if(j&&j.ok&&j.answer){ addBubble("b",j.answer); addChips(j.suggestions); addPhotos(j.photos); history.push({role:"assistant",content:j.answer}); winmiState("idle"); speak(j.answer); }
         else if(j&&j.configured===false){ winmiState("idle"); addBubble("b",T("I'm almost ready! An admin just needs to add my AI key (ANTHROPIC_API_KEY) in the app settings, then I can answer anything about your projects.","¡Casi listo! Un administrador debe agregar mi clave de IA (ANTHROPIC_API_KEY) en la configuración y podré responder sobre tus proyectos.")); }
         else{ winmiState("idle"); addBubble("b",T("Hmm, I couldn't reach my brain just now. Please try again in a moment.","Mmm, no pude conectar ahora mismo. Inténtalo de nuevo en un momento.")); }
       }).catch(function(){ typing(false); winmiState("idle"); addBubble("b",T("Network hiccup — please try again.","Fallo de red — inténtalo de nuevo.")); });
