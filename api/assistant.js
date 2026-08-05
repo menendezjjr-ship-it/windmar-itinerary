@@ -183,7 +183,7 @@ async function toolSearchProjects(input) {
   const fields = "Deal_Name,Stage,Address,City,State,Zip,Installation_Team,Installation_Start_Date";
   const rows = await zohoSearch("Deals",
     `word=${encodeURIComponent(query)}&fields=${encodeURIComponent(fields)}&per_page=25&page=1`, token);
-  const matches = rows.slice(0, 8).map((d) => {
+  const matches = rows.slice(0, 15).map((d) => { // keep more so name-overlap ranking can find the exact match
     const p = parseDeal(d.Deal_Name);
     const address = [clean(d.Address), clean(d.City), [clean(d.State), clean(d.Zip)].filter(Boolean).join(" ")]
       .filter(Boolean).join(", ") || p.address || "";
@@ -819,11 +819,16 @@ async function gatherContext(text) {
     if (!search || !search.matches || !search.matches.length) {
       try { const r = await smartProjectSearch(text); if (r.res && Array.isArray(r.res.matches) && r.res.matches.length) { search = r.res; parts.push('PROJECT SEARCH for "' + r.query + '":\n' + JSON.stringify(r.res)); used.push("search_projects"); } } catch (e) {}
     }
-    // Deep-fetch ONLY the single best match → the report shows just the job the user asked about
-    // (not a second unrelated project). If there are other matches, the user can name the DL#.
+    // Deep-fetch ONLY the single BEST match → the report shows just the job the user asked about.
+    // Rank matches by how many of the query's proper-noun words they contain, so "Angel Nieves"
+    // resolves to Angel Nieves — not another "Angel" that Zoho happened to return first.
     if (search && Array.isArray(search.matches) && search.matches.length) {
-      const dls = search.matches.map((m) => normDL(m.dl)).filter((d) => /^(?:RDL|RL|DL|MSP|S)\d{2,}$/.test(d));
-      const top = [...new Set(dls)].slice(0, 1);
+      const qWords = (String(text).match(/\b[A-Z][a-z]{2,}\b/g) || []).map((w) => w.toLowerCase()).filter((w) => !STOP.has(w) && !GENERIC.has(w));
+      const score = (m) => { const nm = ((m.customer || "") + " " + (m.address || "")).toLowerCase(); return qWords.reduce((a, w) => a + (nm.indexOf(w) >= 0 ? 1 : 0), 0); };
+      const ranked = search.matches.map((m, i) => ({ m, i, s: score(m) })).sort((a, b) => (b.s - a.s) || (a.i - b.i));
+      search.matches = ranked.map((r) => r.m); // best-match-first (also improves the fmtMatches fallback)
+      const bestDl = ranked.length ? normDL(ranked[0].m.dl) : "";
+      const top = /^(?:RDL|RL|DL|MSP|S)\d{2,}$/.test(bestDl) ? [bestDl] : [];
       if (top.length) {
         const deep = await Promise.all(top.map((dl) => toolGetJobDetails({ dl }).catch((e) => ({ error: String((e && e.message) || e) }))));
         deep.forEach((r2, i) => { records.push(r2); parts.push("PROJECT " + top[i] + " (full Zoho record):\n" + JSON.stringify(r2)); });
