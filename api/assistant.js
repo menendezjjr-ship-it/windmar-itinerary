@@ -814,6 +814,20 @@ function fmtApp(lang) {
   const es = lang === "es";
   return (es ? "Esto es lo que puedes hacer en la app 👇\n\n" : "Here's what you can do in the app 👇\n\n") + APP_GUIDE;
 }
+// Contextual "what info do you want next" chips for a project report — tappable options in the widget.
+function reportSuggestions(r, lang) {
+  if (!r) return [];
+  const es = lang === "es";
+  const dl = r.dl || "";
+  const who = r.customer || dl;
+  const out = [];
+  out.push({ label: es ? "📷 Fotos" : "📷 Photos", q: (es ? "Fotos de SiteCapture de " : "SiteCapture photos for ") + who });
+  if (r.address) out.push({ label: es ? "🗺️ Cómo llegar" : "🗺️ Directions", url: "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(r.address) });
+  if (r.phone) out.push({ label: es ? "📞 Llamar" : "📞 Call", url: "tel:" + String(r.phone).replace(/[^\d+]/g, "") });
+  out.push({ label: es ? "📝 Últimas notas" : "📝 Latest notes", q: (es ? "Notas más recientes de " : "most recent notes for ") + dl });
+  if (r.zohoUrl) out.push({ label: "🔗 Zoho", url: r.zohoUrl });
+  return out;
+}
 
 // Compact, accurate guide to the app so WinMI can walk users through anything (fed as knowledge).
 const APP_GUIDE = [
@@ -903,7 +917,7 @@ export default async function handler(req, res) {
     const found = (records || []).filter((r) => r && r.found !== false && !r.error);
 
     // ── LOCAL-FIRST fast paths (instant, no LLM) — ONLY for clear, non-analytical data hits.
-    if (found.length) return res.status(200).json({ ok: true, answer: fmtReport(found, lang), used: [...new Set(used)], source: "local" });
+    if (found.length) return res.status(200).json({ ok: true, answer: fmtReport(found, lang), used: [...new Set(used)], source: "local", suggestions: found.length === 1 ? reportSuggestions(found[0], lang) : [] });
     if (search && Array.isArray(search.matches) && search.matches.length) return res.status(200).json({ ok: true, answer: fmtMatches(search.matches, lang), used: [...new Set(used)], source: "local" });
     if (sitecapture && sitecapture.count) return res.status(200).json({ ok: true, answer: fmtSiteCapture(sitecapture, lang), used: [...new Set(used)], source: "local" });
 
