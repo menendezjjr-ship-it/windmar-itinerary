@@ -449,6 +449,63 @@ async function toolCountJobs(input) {
   };
 }
 
+// 5) find_jobs — search Zoho DEALS by ATTRIBUTE (not by name): mounting type, roof type, system size,
+// module count, battery, city, county, utility, or stage. Answers "find ground-mount jobs", "tile-roof
+// installs over 15 kW", "Tesla battery jobs in Orange County". Builds an AND criteria and returns
+// matches with ACTIVE jobs first (many attribute jobs are old / Closed-Lost).
+const MOUNT_MAP = { ground: "Ground Mount", shingle: "Shingle", tile: "Tile", flat: "Flat", metal: "Metal", pergola: "Pergola/Carport", carport: "Pergola/Carport" };
+async function toolFindJobs(input) {
+  if (!hasZoho()) return { error: "Zoho is not configured on this server" };
+  input = input || {};
+  const token = await getAccessToken();
+  const crit = [], applied = {};
+  const num = (v) => (v == null || v === "" || isNaN(Number(v))) ? null : Number(v);
+
+  if (input.mount) {
+    const m = String(input.mount).toLowerCase();
+    if (/roof/.test(m) && !/ground|pergola|carport/.test(m)) { crit.push("(Roof_Mounting_Type:in:Shingle,Flat,Tile,Metal)"); applied.mount = "roof-mounted (Shingle/Flat/Tile/Metal)"; }
+    else { let v = null; for (const k in MOUNT_MAP) { if (m.indexOf(k) >= 0) { v = MOUNT_MAP[k]; break; } } if (v) { crit.push(`(Roof_Mounting_Type:equals:${v})`); applied.mount = v; } }
+  }
+  if (input.roofType) { const rt = { shingle: "Shingle", tile: "Tile", flat: "Flat", metal: "Metal" }[String(input.roofType).toLowerCase()]; if (rt) { crit.push(`(Roof_Type:equals:${rt})`); applied.roofType = rt; } }
+  const minKw = num(input.minKw), maxKw = num(input.maxKw), minMod = num(input.minModules), maxMod = num(input.maxModules);
+  if (minKw != null) { crit.push(`(System_Size_kW1:greater_equal:${minKw})`); applied.minKw = minKw; }
+  if (maxKw != null) { crit.push(`(System_Size_kW1:less_equal:${maxKw})`); applied.maxKw = maxKw; }
+  if (minMod != null) { crit.push(`(Module_Count:greater_equal:${minMod})`); applied.minModules = minMod; }
+  if (maxMod != null) { crit.push(`(Module_Count:less_equal:${maxMod})`); applied.maxModules = maxMod; }
+  if (input.battery) {
+    const b = String(input.battery).toLowerCase();
+    if (/tesla|powerwall/.test(b)) { crit.push("(Battery_Brand:equals:Tesla)"); applied.battery = "Tesla"; }
+    else if (/generac/.test(b)) { crit.push("(Battery_Brand:equals:Generac)"); applied.battery = "Generac"; }
+    else if (/enphase/.test(b)) { crit.push("(Battery_Brand:equals:Enphase)"); applied.battery = "Enphase"; }
+    else { crit.push("(Battery_Brand:in:Tesla,Generac,Enphase,Other)"); applied.battery = "any"; }
+  }
+  if (input.city) { crit.push(`(City:starts_with:${String(input.city).trim()})`); applied.city = input.city; }
+  if (input.county) { const c = String(input.county).replace(/\s*county\s*$/i, "").trim(); crit.push(`(County1:equals:${c})`); applied.county = c; }
+  if (input.utility) { crit.push(`(Utility_Picklist:equals:${String(input.utility).trim()})`); applied.utility = input.utility; }
+  if (input.stage) { crit.push(`(Stage:equals:${String(input.stage).trim()})`); applied.stage = input.stage; }
+  if (!crit.length) return { error: "no searchable attribute given. Supported: mount, roofType, minKw, maxKw, minModules, maxModules, battery, city, county, utility, stage." };
+  if (crit.length > 10) return { error: "too many filters at once (max ~10)" };
+
+  const criteria = crit.length > 1 ? "(" + crit.join("and") + ")" : crit[0];
+  const fields = "Deal_Name,Stage,Roof_Mounting_Type,Roof_Type,System_Size_kW1,Module_Count,City,County1,Battery_Brand";
+  const rows = await pageSearch("Deals", criteria, fields, token);
+  if (rows && rows.error) return rows;
+  const DEAD = /closed\s*lost|dead|cancel/i;
+  const items = (rows || []).map((d) => { const p = parseDeal(d.Deal_Name); return { dl: p.num || d.Deal_Name, customer: p.customer || "", city: d.City || "", stage: d.Stage || "", kw: (d.System_Size_kW1 != null ? d.System_Size_kW1 : null), mount: d.Roof_Mounting_Type || "", modules: (d.Module_Count != null ? d.Module_Count : null), battery: d.Battery_Brand || "", live: !DEAD.test(d.Stage || "") };
+  });
+  const includeInactive = input.includeInactive === true;
+  const live = items.filter((x) => x.live);
+  const shown = (includeInactive || !live.length) ? items.slice() : live.slice();
+  shown.sort((a, b) => (b.live - a.live) || ((b.kw || 0) - (a.kw || 0)));
+  return {
+    filters: applied, criteria,
+    total: items.length, liveCount: live.length, closedLostCount: items.length - live.length,
+    showing: includeInactive ? "all (incl. Closed-Lost)" : "active first (pass includeInactive:true for Closed-Lost too)",
+    note: "Attribute search over Zoho Deals. Many attribute jobs (esp. ground mounts) are old/Closed-Lost — active shown first. mount values: Ground Mount/Shingle/Tile/Flat/Metal/Pergola-Carport.",
+    sample: shown.slice(0, 30).map((x) => ({ dl: x.dl, customer: x.customer, city: x.city, kw: x.kw, mount: x.mount, modules: x.modules, battery: x.battery, stage: x.stage, live: x.live })),
+  };
+}
+
 const TOOLS = [
   {
     name: "search_projects",
@@ -464,6 +521,24 @@ const TOOLS = [
     name: "search_sitecapture",
     description: "Search SiteCapture field-project records by name or address. Returns project name, address, status, and photo/media count when available.",
     input_schema: { type: "object", properties: { query: { type: "string", description: "Customer name or address to search SiteCapture for." } }, required: ["query"] },
+  },
+  {
+    name: "find_jobs",
+    description: "Search WindMar's Zoho Deals by ATTRIBUTE (not by customer name) and list the matches. Use for ANY 'find/show/how many jobs with <attribute>' question: mounting type (ground mount, tile, shingle, flat, metal, pergola/carport, or 'roof'), roof type, system size (minKw/maxKw), module/panel count (minModules/maxModules), battery (Tesla/Generac/Enphase or any), city, county (e.g. 'Orange'), utility (e.g. FPL, Duke Energy, TECO, OUC), or deal stage. Filters AND together. Returns matches with ACTIVE jobs first (many attribute jobs — especially ground mounts — are old/Closed-Lost; pass includeInactive:true to include those). NEVER tell the user you can't search by an attribute — use this tool.",
+    input_schema: { type: "object", properties: {
+      mount: { type: "string", description: "Mounting type: 'ground', 'tile', 'shingle', 'flat', 'metal', 'pergola'/'carport', or 'roof' (any roof-mounted)." },
+      roofType: { type: "string", description: "Roof type: shingle | tile | flat | metal." },
+      minKw: { type: "number", description: "Minimum system size (kW)." },
+      maxKw: { type: "number", description: "Maximum system size (kW)." },
+      minModules: { type: "number", description: "Minimum module/panel count." },
+      maxModules: { type: "number", description: "Maximum module/panel count." },
+      battery: { type: "string", description: "Battery: 'tesla'/'powerwall', 'generac', 'enphase', or 'any' for jobs with any battery." },
+      city: { type: "string", description: "City (starts-with match)." },
+      county: { type: "string", description: "County name, e.g. 'Orange', 'Osceola', 'Polk' (the ' County' suffix is stripped)." },
+      utility: { type: "string", description: "Electric utility, e.g. 'FPL', 'Duke Energy', 'TECO', 'OUC', 'Duke Energy'." },
+      stage: { type: "string", description: "Deal stage, e.g. 'Install', 'In Service - Complete'." },
+      includeInactive: { type: "boolean", description: "Include Closed-Lost/dead deals too (default false → active first)." },
+    }, required: [] },
   },
   {
     name: "count_jobs",
@@ -485,6 +560,7 @@ async function runTool(name, input) {
     if (name === "get_job_details") return await toolGetJobDetails(input);
     if (name === "search_sitecapture") return await toolSearchSitecapture(input);
     if (name === "count_jobs") return await toolCountJobs(input);
+    if (name === "find_jobs") return await toolFindJobs(input);
     return { error: `unknown tool: ${name}` };
   } catch (e) {
     return { error: String(e && e.message || e) };
@@ -622,7 +698,7 @@ async function callClaudeAgentic(apiKey, question, history, lang) {
   const today = todayISO();
   const guide =
     "\n\nTODAY'S DATE: " + today + ". Use it to resolve 'this month', 'July', 'last week', 'this year' into concrete from/to dates. For a bare month name with NO year, assume the most recent PAST occurrence.\n" +
-    "TOOLS: You have LIVE read-only tools. ALWAYS use a tool for anything about a specific customer/project (search_projects → get_job_details), a name/address lookup, SiteCapture, or a COUNT/total/tally over a period (count_jobs). NEVER guess project data or make up numbers — if a tool returns nothing, say so. Answer NEC/electrical/equipment/how-to-use-the-app questions directly from your knowledge (no tool needed).\n" +
+    "TOOLS: You have LIVE read-only tools. ALWAYS use a tool for anything about a specific customer/project (search_projects → get_job_details), a name/address lookup, SiteCapture, a COUNT/total/tally over a period (count_jobs), or a search by ATTRIBUTE — mounting type (ground mount, tile, shingle, flat, metal, pergola), roof type, system size, panel/module count, battery brand, city, county, utility, or stage (find_jobs). NEVER say you can't search by an attribute and NEVER tell the user to go filter it themselves — call find_jobs. NEVER guess project data or make up numbers — if a tool returns nothing, say so. Answer NEC/electrical/equipment/how-to-use-the-app questions directly from your knowledge (no tool needed).\n" +
     "CREWS: INSTALL crews (do Installations) = Crew H, Elite Crew #2, Elite Crew #3, Windmar Roofing. SERVICE crews (do Service tickets) = Crew #1S (Leonardo Torres), Crew #2S (David Radke), Crew #3S (Luis Morales), plus techs Carlos Acevedo / Jose Menendez / Luis G. Ortiz and subcontractors Eagle Eye / Holi Solar. MSP (Main Service Panel) work happens BOTH as an install line-item (install crews) AND as a service job 'MSP/Electrical Work' (service crews) — so for ANY MSP-by-crew or 'how many MSP' question, call count_jobs with module:'both' so a service crew's MSPs aren't reported as 0.";
   const sys = systemPrompt(lang) + guide + "\n\n" + WINDMAR_KB + "\n\n" + APP_GUIDE + "\n\n" + ZOHO_GUIDE;
   const msgs = (history || []).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: String((m && (m.text || m.content)) || "") })).filter((m) => m.content);
@@ -852,6 +928,7 @@ const ZOHO_GUIDE = [
   "• Service_Ticket (links via `Associated_Deal`) = a service visit. Ticket_Status lifecycle: '1. Reported' → '2. Under review' → '3. Need Schedule' → '4. Scheduled' → '5. Need Reschedule' → '6. Tier 3/RMA/Warranty' → '7. Complete' → '8. Complete/Contacted' (plus 9-12 for more-info / financing / up-sales / quote). Key fields: Assigned_Technician (+ Visit_2/_3), Scheduled_Visit_1/2/3, Priority, Service_Type1, Area_of_Service, Ticket_Completion_Date.",
   "• Final_Inspectin (label 'Post Installation', links via `Deal`) = final inspection. Final_Inspection_Stage: 'Ready for QA', 'Ready to Schedule', 'Inspection Scheduled', 'Inspection Failed - Corrections/Plan Revision', 'Partial Approval', 'All Inspections Approved' (+ 'by VIP waiting BD confirmation'), 'Building Department Hold', 'On-Hold (Legal Action)'. Key fields: Final_Inspection_Scheduled, Final_Inspection_Approved.",
   "• Related modules: Roofing & Roofers (roofing jobs + crews; Deal Pipeline=Roofing), Permit & Engineering, Installation_Team/Installer (crew rosters that Installation_Team points to), Contacts/Accounts, and stage-change history modules (Installation_Stage_History, Final_Inspection_Stage_History).",
+  "• SEARCHABLE Deal attributes (use the find_jobs tool — you CAN filter jobs by these, never say you can't): Roof_Mounting_Type (Shingle/Flat/Tile/Metal/Ground Mount/Pergola-Carport), Roof_Type (Shingle/Tile/Flat/Metal), System_Size_kW1 (kW, range), Module_Count (# panels), Module_Wattage, Battery_Brand (Tesla/Generac/Enphase/Other) + Tesla_Powerwall_Quantity ('Battery Type': Powerwall 3, N Powerwalls, Generac kWh…), City, County1 (bare county name e.g. Orange/Osceola/Polk/Miami-dade), Utility_Picklist (FPL, Duke Energy, TECO, OUC, Clay Electric, SECO, LCEC…), Roof_Required, Windmar_Roofing (Solar Only/Roof Only/Roof and Solar…), Stage. NOTE: ground-mount and other attribute pools are heavy with old Closed-Lost deals — find_jobs shows ACTIVE jobs first.",
 ].join("\n");
 
 // ---- handler ----------------------------------------------------------------
