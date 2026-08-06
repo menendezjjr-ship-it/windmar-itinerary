@@ -122,15 +122,30 @@
     .replace(/\*\*([^*]+)\*\*/g,"$1").replace(/`([^`]+)`/g,"$1").replace(/[*_#>`|]/g," ")
     .replace(/^\s*[-•]\s*/gm,"").replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}️]/gu," ")
     .replace(/\s{2,}/g," ").trim(); }catch(e){ return String(t||"").replace(/[*_#`]/g,""); } }
-  function speak(txt){ if(muted||!window.speechSynthesis||!txt){ winmiState("idle"); return; }
-    try{ window.speechSynthesis.cancel(); var spoken=wmSpokenText(txt); if(!spoken){ winmiState("idle"); return; }
-      var u=new SpeechSynthesisUtterance(spoken); var sp=es(); u.lang=sp?"es-ES":"en-US";
-      var v=wmPickVoice(sp); if(v){ u.voice=v; if(v.lang) u.lang=v.lang; }
-      u.rate=1.12; u.pitch=1.0; // brisker + natural male tone (was dragging/robotic)
+  // WinMI voice: try the NEURAL cloud voice (smooth male, same on every device) first; fall back to
+  // the device Web Speech voice if there's no TTS key or audio can't play. WM_TTS: undefined=probe,
+  // true=neural available, false=device-voice only.
+  var wmAudio=null, WM_TTS;
+  function wmTtsUrl(){ try{ return (window.WINMI_API||"/api/assistant").replace(/\/assistant(\?.*)?$/,"/tts"); }catch(e){ return "/api/tts"; } }
+  function speakWeb(spoken){ if(muted||!window.speechSynthesis||!spoken){ winmiState("idle"); return; }
+    try{ window.speechSynthesis.cancel(); var u=new SpeechSynthesisUtterance(spoken); var sp=es(); u.lang=sp?"es-ES":"en-US";
+      var v=wmPickVoice(sp); if(v){ u.voice=v; if(v.lang) u.lang=v.lang; } u.rate=1.12; u.pitch=1.0;
       winmiState("talking"); u.onend=function(){ winmiState("idle"); }; u.onerror=function(){ winmiState("idle"); };
       window.speechSynthesis.speak(u);
     }catch(e){ winmiState("idle"); } }
-  function stopSpeak(){ try{ window.speechSynthesis&&window.speechSynthesis.cancel(); }catch(e){} winmiState("idle"); }
+  function speak(txt){ if(muted||!txt){ winmiState("idle"); return; }
+    var spoken=wmSpokenText(txt); if(!spoken){ winmiState("idle"); return; }
+    stopSpeak();
+    if(WM_TTS===false){ speakWeb(spoken); return; } // no neural key → device voice
+    winmiState("talking");
+    try{
+      fetch(wmTtsUrl(),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:spoken.slice(0,900),lang:es()?"es":"en"})})
+        .then(function(r){ var ct=(r.headers.get("content-type")||""); if(r.ok&&ct.indexOf("audio")>=0){ WM_TTS=true; return r.blob(); } if(ct.indexOf("json")>=0) WM_TTS=false; throw 0; })
+        .then(function(b){ try{if(wmAudio){wmAudio.pause();}}catch(e){} var url=URL.createObjectURL(b); wmAudio=new Audio(url); wmAudio.onended=function(){ winmiState("idle"); try{URL.revokeObjectURL(url);}catch(e){} }; wmAudio.onerror=function(){ speakWeb(spoken); };
+          var pr=wmAudio.play(); if(pr&&pr.catch) pr.catch(function(){ speakWeb(spoken); }); })
+        .catch(function(){ speakWeb(spoken); });
+    }catch(e){ speakWeb(spoken); } }
+  function stopSpeak(){ try{ window.speechSynthesis&&window.speechSynthesis.cancel(); }catch(e){} try{ if(wmAudio){ wmAudio.pause(); wmAudio=null; } }catch(e){} winmiState("idle"); }
 
   // Light, SAFE markdown → HTML for WinMI's answers so descriptions read clean (bold, bullets, spacing).
   function wmEsc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
