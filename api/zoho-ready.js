@@ -270,6 +270,36 @@ function mapReadyService(r, todayISO) {
   };
 }
 
+// ── COORDINATION READY (reflects the Zoho "Coordination Trigger" report) ────────────────────────
+// Deals in the coordination phase — Stage Engineering or Permitting — whose ENGINEERING/plans are
+// Complete (digital plans uploaded / printed & mailed) or In Process. These are the jobs a
+// coordinator should act on next (push permit → schedule). Engineering_Stage is free-text, so we
+// fetch the two stages and filter it in code. Shown as its own Coordinator section.
+const COORD_CRITERIA = "((Stage:equals:Engineering)or(Stage:equals:Permitting))";
+const COORD_FIELDS = "Deal_Name,Stage,Engineering_Stage,Address,City,State,Zip,Client_Phone,Client_Mobile,System_Size_kW1,Authority_Having_Jurisdiction_AHJ,County1,Post_Install_QA_Stage,Project_Coordinator,Module_Count";
+const COORD_ENG_RX = /digital plans uploaded|printed and mailed|in[\s-]?process|in[\s-]?progress/i;
+const cclean = (s) => String(s || "").replace(/[\s,]+$/, "").trim();
+function mapCoordinationDeal(d) {
+  const p = parseDeal(d.Deal_Name);
+  const address = [cclean(d.Address), cclean(d.City), [cclean(d.State), cclean(d.Zip)].filter(Boolean).join(" ")].filter(Boolean).join(", ") || p.address || "";
+  const coord = lookup(d.Project_Coordinator) || "";
+  return {
+    id: p.num || d.id, recordId: d.id, dealId: d.id, num: p.num || "",
+    kind: "coordination", code: p.code || "DL",
+    project: p.customer || d.Deal_Name || "", address,
+    crew: "z-coordination", crewLabel: coord || "Coordination",
+    date: null, status: "ready", cat: "coordination",
+    stage: d.Stage || "", dealStage: d.Stage || "",
+    engStage: cclean(d.Engineering_Stage), qaStage: cclean(d.Post_Install_QA_Stage), coordinator: coord,
+    systemKw: (d.System_Size_kW1 != null && d.System_Size_kW1 !== 0) ? d.System_Size_kW1 : null,
+    ahj: lookup(d.Authority_Having_Jurisdiction_AHJ) || "", county: d.County1 || "",
+    msp: false, phone: cclean(d.Client_Phone) || cclean(d.Client_Mobile) || "", geo: null,
+    scope: cclean(d.Engineering_Stage) || "Coordination",
+    zohoUrl: `https://crm.zoho.com/crm/org666151142/tab/Potentials/${d.id}`,
+    ready: true,
+  };
+}
+
 export const config = { maxDuration: 30 };
 
 export default async function handler(req, res) {
@@ -279,10 +309,12 @@ export default async function handler(req, res) {
   const todayISO = new Date().toISOString().slice(0, 10);
   try {
     const token = await getAccessToken();
-    const [installs, services] = await Promise.all([
+    const [installs, services, coordDeals] = await Promise.all([
       searchAll("Installation", READY_INSTALL_CRITERIA, INSTALL_FIELDS, token),
       // starts_with:3 captures "3. Need Schedule" (+ any 3.x variant); mapper keeps only needs_schedule.
       searchAll("Service_Ticket", "(Ticket_Status:starts_with:3)", SERVICE_FIELDS, token),
+      // Coordination-ready = Deals at Engineering/Permitting with plans complete / engineering in process.
+      searchAll("Deals", COORD_CRITERIA, COORD_FIELDS, token),
     ]);
 
     const instJobsRaw = installs.map(mapReadyInstall);
@@ -314,11 +346,16 @@ export default async function handler(req, res) {
       jobs.push(j);
     }
 
+    // Coordination-ready Deals → their own section (kept separate from the schedule list; a DL can be
+    // in coordination AND have a ready install, so we don't dedupe these against the above).
+    const coordJobs = coordDeals.map(mapCoordinationDeal).filter((j) => COORD_ENG_RX.test(j.engStage));
+    jobs.push(...coordJobs);
+
     return res.status(200).json({
       configured: true,
       ok: true,
       updated: new Date().toISOString(),
-      counts: { installs: instJobs.length, services: svcJobs.length, jobs: jobs.length, filteredStale },
+      counts: { installs: instJobs.length, services: svcJobs.length, coordination: coordJobs.length, jobs: jobs.length, filteredStale },
       jobs,
     });
   } catch (e) {
