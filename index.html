@@ -1495,9 +1495,10 @@ function coordGroupHTML(title,group,rec,editing){ const rows=COORD_EDIT_FIELDS.f
   return `<div style="grid-column:1/-1;margin-top:8px"><div style="font-size:11px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">${esc(title)}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px">${rows.map(fd=>coordFieldCell(fd,rec,editing)).join("")}</div></div>`;
 }
 // ── Coordinator classification buckets (rendered as report sections, in this order) ──
-const COORD_BUCKETS=["install","msp","reinstall","removal","service","inspection"];
+const COORD_BUCKETS=["coordination","install","msp","reinstall","removal","service","inspection"];
 function coordBucketMeta(b){
   const es=S.lang==="es";
+  if(b==="coordination") return {label:es?"Coordinación — Planos Listos":"Coordination Ready — Plans Done", color:"#7C3AED", icon:"📐"};
   if(b==="inspection") return {label:es?"Inspecciones":"Inspections", color:"#0EA5E9", icon:"🔍"};
   const t=JOB_TYPES[b]||JOB_TYPES.install;
   return {label:(es?t.es:t.en), color:t.color, icon:t.icon};
@@ -1509,12 +1510,14 @@ function coordItems(){
   const out=[];
   const pByNum={}; (S.proj.list||[]).forEach(p=>{ if(p.num) pByNum[String(p.num).toUpperCase().replace(/\s+/g,"")]=p; });
   (S.coord.ready.list||[]).forEach(j=>{
+    const isCoord=j.kind==="coordination";
     const cls={type:j.kind==="service"?"service":"", code:j.code, msp:j.msp, scope:j.scope, dlNumber:j.num};
-    const bucket=jobType(cls); // install | msp | reinstall | removal | service
+    const bucket=isCoord?"coordination":jobType(cls); // install | msp | reinstall | removal | service | coordination
     const p=pByNum[String(j.num||"").toUpperCase().replace(/\s+/g,"")]||null;
     out.push({ key:"r|"+(j.id||j.num), source:"ready", bucket, kind:j.kind,
       num:j.num||"", name:j.project||(p&&p.name)||"", address:j.address||(p&&p.address)||"",
-      ahj:(p&&p.ahj)||"", stage:j.stage||"", crewLabel:j.crewLabel||"", scope:j.scope||"",
+      ahj:j.ahj||(p&&p.ahj)||"", stage:j.stage||"", crewLabel:j.crewLabel||"", scope:j.scope||"",
+      engStage:j.engStage||"", coordinator:j.coordinator||"", qaStage:j.qaStage||"", systemKw:j.systemKw||null, zohoUrl:j.zohoUrl||"",
       recordId:j.recordId||"", svcRec:j.svcRec||null, installRec:j.installRec||null, msp:j.msp, code:j.code, job:j, p:p, it:null });
   });
   const DEAD=/closed\s*lost|dead|cancell?ed/i; // guard: never surface a dead sale as ready
@@ -1786,7 +1789,7 @@ function editContext(){
 function coordDetailModal(){
   const es=S.lang==="es";
   const item=coordSelectedItem(); if(!item) return "";
-  const p=item.p||null; const it=item.it||null; const isService=item.kind==="service";
+  const p=item.p||null; const it=item.it||null; const isService=item.kind==="service"; const isCoord=item.kind==="coordination";
   const m=coordBucketMeta(item.bucket); const tel=(p&&(p.mobile||p.phone))||"";
   const dlKey=String(item.num||"").toUpperCase().replace(/\s+/g,"");
   const nc=S.coord.notes[dlKey]||{status:"idle",text:"",recordId:"",rec:null};
@@ -1815,6 +1818,11 @@ function coordDetailModal(){
     } else {
       recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px">🔧 ${es?"Sin ticket de servicio editable. Usa \"Abrir en Zoho\".":"No editable service ticket. Use \"Open in Zoho\"."}</div>`;
     }
+  } else if(isCoord){
+    // Coordination-ready Deal → show the engineering/coordination context + notes; edit happens in Zoho.
+    const rows=[[es?"Etapa Ingeniería":"Engineering Stage",item.engStage],[es?"Coordinador":"Project Coordinator",item.coordinator],[es?"Estado QA":"QA Status",item.qaStage],[es?"Sistema":"System",item.systemKw?item.systemKw+" kW":""]].filter(x=>x[1]);
+    recBlock=`<div style="grid-column:1/-1;margin-top:8px"><div style="font-size:11px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">📐 ${es?"Coordinación":"Coordination"}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px">${rows.map(x=>`<div><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">${esc(x[0])}</div><div style="font-size:13.5px;font-weight:500">${esc(x[1])}</div></div>`).join("")}</div></div>`;
+    noteBox=noteBoxHTML("Deals",String(item.recordId||"").replace(/[^0-9]/g,""));
   } else {
     const ed=installEditorParts(dlKey);
     recBlock=ed.recBlock; savedFlash=ed.savedFlash; editBanner=ed.editBanner; actionsRO=ed.actionsRO; actionsEdit=ed.actionsEdit; fieldsLoading=ed.fieldsLoading; noteBox=ed.noteBox;
@@ -1824,10 +1832,12 @@ function coordDetailModal(){
   const postId=(it&&p&&p.postInstallId)?p.postInstallId:"";
   const zohoUrl=postId
     ? `https://crm.zoho.com/crm/${ZOHO_ORG}/tab/CustomModule11/${encodeURIComponent(postId)}`
+    : isCoord
+    ? (item.zohoUrl||(item.recordId?`https://crm.zoho.com/crm/${ZOHO_ORG}/tab/Potentials/${encodeURIComponent(item.recordId)}`:`https://crm.zoho.com/crm/${ZOHO_ORG}/search?searchword=${encodeURIComponent(item.num||item.name||"")}`))
     : isService
     ? (item.recordId?`https://crm.zoho.com/crm/${ZOHO_ORG}/tab/CustomModule40/${encodeURIComponent(item.recordId)}`:`https://crm.zoho.com/crm/${ZOHO_ORG}/search?searchword=${encodeURIComponent(item.num||item.name||"")}`)
     : (nc.recordId?`https://crm.zoho.com/crm/${ZOHO_ORG}/tab/CustomModule7/${encodeURIComponent(nc.recordId)}`:`https://crm.zoho.com/crm/${ZOHO_ORG}/search?searchword=${encodeURIComponent(item.num||item.name||"")}`);
-  const zohoLabel=postId?(es?"Abrir Post-Instalación en Zoho":"Open Post-Installation in Zoho"):isService?(es?"Abrir Ticket en Zoho":"Open Ticket in Zoho"):(es?"Abrir en Zoho Instalación":"Open in Zoho Install");
+  const zohoLabel=postId?(es?"Abrir Post-Instalación en Zoho":"Open Post-Installation in Zoho"):isCoord?(es?"Abrir Deal en Zoho":"Open Deal in Zoho"):isService?(es?"Abrir Ticket en Zoho":"Open Ticket in Zoho"):(es?"Abrir en Zoho Instalación":"Open in Zoho Install");
   const inner=`<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px"><div style="min-width:0">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">${it?`<span class="pill" style="background:${inspTypeMeta(it.type).c};font-size:10px">🔍 ${esc(inspTypeText(it.type))}</span>`:`<span class="pill" style="background:${m.color};color:${textOn(m.color)};font-size:10px">${m.icon} ${esc(m.label)}</span>`}<span class="pill" style="background:#F89B24;font-size:10px">${es?"Listo p/Programar":"Ready to Schedule"}</span>${editing?`<span class="pill" style="background:#0EA5E9;font-size:10px">✏️ ${es?"Editando":"Editing"}</span>`:""}</div>
       <h3 style="margin:0;font-size:20px;font-weight:700">${item.num?`<span style="color:var(--wh-orange)">${esc(item.num)} </span>`:""}${esc(item.name||"")}</h3>
