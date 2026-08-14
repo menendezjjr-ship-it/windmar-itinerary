@@ -152,14 +152,18 @@ function latestFile(field) {
     .sort((a, b) => String(b.modified).localeCompare(String(a.modified)));
   return files[0] || null;
 }
-const SERVICE_FIELDS = "Name,Scheduled_Visit_1,Assigned_Technician,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description,Priority";
+// A service ticket can have up to 3 scheduled visits (Scheduled_Visit_1/2/3), each with its own
+// technician (Assigned_Technician / Assigned_Technician_Visit_2 / Assigned_Technician_Visit_3).
+const SERVICE_FIELDS = "Name,Scheduled_Visit_1,Assigned_Technician,Scheduled_Visit_2,Assigned_Technician_Visit_2,Scheduled_Visit_3,Assigned_Technician_Visit_3,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description,Priority";
 
 // Editable Service_Ticket fields surfaced to the Coordinator/Calendar editor. Ticket_Status is
-// the "Stage". Type_of_Service (multiselect) + Assigned_Technician (lookup) are for read-only
-// display; only Ticket_Status/Priority/Service_Description/Scheduled_Visit_1 are writable.
+// the "Stage". Type_of_Service (multiselect) + Assigned_Technician* (lookups) are read-only display;
+// the per-visit Scheduled_Visit_N is writable (the editor targets the visit that was clicked).
 const SERVICE_EDIT_FIELDS = [
   "Ticket_Status", "Priority", "Type_of_Service", "Service_Description",
   "Scheduled_Visit_1", "Assigned_Technician",
+  "Scheduled_Visit_2", "Assigned_Technician_Visit_2",
+  "Scheduled_Visit_3", "Assigned_Technician_Visit_3",
 ];
 // Build the editable-record shape from a raw Service_Ticket row (shared by mapService — so the
 // editor loads synchronously from the feed — and by the ?svc= single-record lookup fallback).
@@ -167,7 +171,7 @@ function buildServiceRec(row) {
   const rec = {};
   for (const k of SERVICE_EDIT_FIELDS) {
     const v = row[k];
-    if (k === "Assigned_Technician") rec[k] = (v && typeof v === "object") ? { id: String(v.id || ""), name: v.name || "" } : (v || null);
+    if (/^Assigned_Technician/.test(k)) rec[k] = (v && typeof v === "object") ? { id: String(v.id || ""), name: v.name || "" } : (v || null);
     else if (k === "Type_of_Service") rec[k] = Array.isArray(v) ? v : (v == null ? [] : [v]);
     else rec[k] = (v === undefined ? null : v);
   }
@@ -214,10 +218,13 @@ export function mapInstall(r, todayISO) {
   };
 }
 
-export function mapService(r, todayISO) {
+// Map ONE scheduled visit of a service ticket → a calendar job. `visitN` (1|2|3) picks the date +
+// technician; visitDateField/visitTechField tell the editor which Zoho fields THIS card writes to
+// (so rescheduling a "Visit 2" card never clobbers Visit 1).
+function mapServiceVisit(r, todayISO, visitN, dt, tech) {
   const deal = parseDeal(lookup(r.Associated_Deal));
-  const crew = normCrew(lookup(r.Assigned_Technician) || "Unassigned");
-  const v = splitDT(r.Scheduled_Visit_1);
+  const crew = normCrew(lookup(tech) || "Unassigned");
+  const v = splitDT(dt);
   const st = (r.Ticket_Status || "").trim();
   let status = "scheduled";
   if (/^(7|8)\b/.test(st) || /complete/i.test(st)) status = "done";
@@ -232,13 +239,16 @@ export function mapService(r, todayISO) {
   else cat = "scheduled";
   const svc = Array.isArray(r.Type_of_Service) ? r.Type_of_Service.join(", ") : (r.Type_of_Service || "");
   return {
-    id: deal.num ? `${deal.num} · ${r.Name}` : r.Name,
+    id: (deal.num ? `${deal.num} · ${r.Name}` : r.Name) + (visitN > 1 ? ` #${visitN}` : ""),
     recordId: r.id,           // real Zoho Service_Ticket record id (for editing/attachments)
     num: deal.num || r.Name,
     kind: "service",
     code: "S",
     priority: r.Priority || "",
     ticketNo: r.Name,
+    visit: visitN,            // which of the up-to-3 visits this card represents
+    visitDateField: visitN === 1 ? "Scheduled_Visit_1" : `Scheduled_Visit_${visitN}`,
+    visitTechField: visitN === 1 ? "Assigned_Technician" : `Assigned_Technician_Visit_${visitN}`,
     project: deal.customer || r.Name,
     address: deal.address || "",
     crew: crew.id,
@@ -252,10 +262,24 @@ export function mapService(r, todayISO) {
     msp: false,
     phone: "",
     geo: null,
-    scope: (svc || "Service").replace(/\(\d+\)\s*/g, "").trim(),
+    scope: ((svc || "Service").replace(/\(\d+\)\s*/g, "").trim()) + (visitN > 1 ? ` · Visit ${visitN}` : ""),
     desc: (r.Service_Description || "").trim(), // full work-order description for the ticket
     svcRec: buildServiceRec(r), // editable fields embedded so the service editor loads synchronously (no per-open token refresh)
   };
+}
+// Fan a service ticket out into one calendar job PER populated scheduled visit (1/2/3).
+export function expandServiceVisits(r, todayISO) {
+  const out = [];
+  [[1, r.Scheduled_Visit_1, r.Assigned_Technician],
+   [2, r.Scheduled_Visit_2, r.Assigned_Technician_Visit_2],
+   [3, r.Scheduled_Visit_3, r.Assigned_Technician_Visit_3]].forEach(function (spec) {
+    if (spec[1]) out.push(mapServiceVisit(r, todayISO, spec[0], spec[1], spec[2]));
+  });
+  return out;
+}
+// Back-compat single-entry mapper (visit 1) — kept for any caller expecting one record per ticket.
+export function mapService(r, todayISO) {
+  return mapServiceVisit(r, todayISO, 1, r.Scheduled_Visit_1, r.Assigned_Technician);
 }
 
 // Look up a single DL's Installation record (word-search the Installation module) — a FALLBACK
@@ -340,11 +364,12 @@ export default async function handler(req, res) {
     const only = String(req.query.only || ""); // only=install → skip service tickets (Install Map's all-time pull)
     const [installs, services] = await Promise.all([
       only === "service" ? Promise.resolve([]) : searchAll("Installation", `(Installation_Start_Date:between:${from},${to})`, INSTALL_FIELDS, token),
-      only === "install" ? Promise.resolve([]) : searchAll("Service_Ticket", `(Scheduled_Visit_1:between:${from}T00:00:00${TZ},${to}T23:59:59${TZ})`, SERVICE_FIELDS, token),
+      only === "install" ? Promise.resolve([]) : searchAll("Service_Ticket", `((Scheduled_Visit_1:between:${from}T00:00:00${TZ},${to}T23:59:59${TZ})or(Scheduled_Visit_2:between:${from}T00:00:00${TZ},${to}T23:59:59${TZ})or(Scheduled_Visit_3:between:${from}T00:00:00${TZ},${to}T23:59:59${TZ}))`, SERVICE_FIELDS, token),
     ]);
     const jobs = [
       ...installs.map((r) => mapInstall(r, todayISO)),
-      ...services.map((r) => mapService(r, todayISO)),
+      // Each service ticket fans out into one job PER scheduled visit; keep only visits inside the window.
+      ...services.flatMap((r) => expandServiceVisits(r, todayISO)).filter((j) => j.date && j.date >= from && j.date <= to),
     ].filter((j) => j.date);
 
     return res.status(200).json({

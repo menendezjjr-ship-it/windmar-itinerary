@@ -576,7 +576,7 @@ function calTMin(r){ if(!r) return 1e9;
   var m=s.match(/(\d{1,2}):(\d{2})\s*([AaPp][Mm])?/); if(!m) return 1e9;
   var hh=+m[1], mm=+m[2], ap=(m[3]||"").toUpperCase(); if(ap==="PM"&&hh!==12)hh+=12; if(ap==="AM"&&hh===12)hh=0; return hh*60+mm;
 }
-function calRec(j){ return { type:j.kind, id:j.id, recordId:j.recordId||"", plan:j.plan||null, bom:j.bom||null, team:j.crewLabel||"Unassigned", startDate:j.date, daysNeeded:j.days||1, hhmm:j.hhmm||"", startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", desc:j.desc||"", code:j.code||"", msp:!!j.msp, phone:j.phone||"", installNotes:j.installNotes||"", svcRec:j.svcRec||null, installRec:j.installRec||null, cat:jobCat(j) }; }
+function calRec(j){ return { type:j.kind, id:j.id, recordId:j.recordId||"", plan:j.plan||null, bom:j.bom||null, team:j.crewLabel||"Unassigned", startDate:j.date, daysNeeded:j.days||1, hhmm:j.hhmm||"", startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", desc:j.desc||"", code:j.code||"", msp:!!j.msp, phone:j.phone||"", installNotes:j.installNotes||"", svcRec:j.svcRec||null, installRec:j.installRec||null, visit:j.visit||1, visitDateField:j.visitDateField||"Scheduled_Visit_1", cat:jobCat(j) }; }
 // Multi-day jobs: ISO dates a record occupies (start day + continuation days).
 function calSpan(r){ if(!r.startDate)return []; const n=Math.max(1,Math.min(21,parseInt(r.daysNeeded,10)||1)); const base=new Date(r.startDate+"T12:00:00"); const out=[]; for(let i=0;i<n;i++){const x=new Date(base);x.setDate(base.getDate()+i);out.push(calYMD(x));} return out; }
 async function loadOpsCal(silent){
@@ -720,7 +720,7 @@ function calDetailHTML(r){
     // SERVICES → Service_Ticket editor (Ticket_Status = "Stage"). Both reuse the shared helpers.
     const es=S.lang==='es';
     if(isS){ if(!r.recordId) return "";
-      const ed=serviceEditorParts(r.recordId);
+      const ed=serviceEditorParts(r.recordId,r.visit,r.visitDateField);
       const hdr=`<div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em">✏️ ${es?'Editar servicio (Zoho)':'Edit Service (Zoho)'}</div>`;
       return `<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">${hdr}${ed.editing?'':ed.actionsRO}</div>${ed.savedFlash}${ed.recBlock}${ed.fieldsLoading}${ed.editBanner}${ed.actionsEdit}${ed.noteBox}</div>`;
     }
@@ -1743,16 +1743,19 @@ function svcFieldCell(fd,rec,editing){ const es=S.lang==="es", lbl=es?fd.es:fd.e
 }
 // Build the service editor parts for a given recordId. Returns the same shape family as
 // installEditorParts so the calendar/coordinator surfaces render it identically.
-function serviceEditorParts(recordId){ const es=S.lang==="es", rid=String(recordId||"").replace(/[^0-9]/g,"");
+function serviceEditorParts(recordId,visitN,visitField){ const es=S.lang==="es", rid=String(recordId||"").replace(/[^0-9]/g,"");
   const rc=S.svc.rec[rid]||{status:"idle",rec:null};
   const editing=!!(S.svc.edit&&S.svc.edit.rid===rid);
   const rec=editing?S.svc.edit._rec:rc.rec;
   const E=S.svc.edit;
+  // Multi-visit: a "Visit 2/3" card shows THAT visit's date (read-only) so editing can't move Visit 1.
+  const vN=Number(visitN)||1, vF=visitField||"Scheduled_Visit_1";
+  const flds=vN>1?SERVICE_EDIT_FIELDS.map(fd=>fd.dt?{k:vF,en:"Scheduled Visit "+vN,es:"Visita Programada "+vN,dt:1,ro:1}:fd):SERVICE_EDIT_FIELDS;
   let recBlock="",fieldsLoading="",editBanner="",savedFlash="",actionsRO="",actionsEdit="",noteBox="";
   if(rc.status==="loading"||rc.status==="idle") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">⟳ ${es?"Cargando ticket de servicio…":"Loading service ticket…"}</div>`;
   else if(rc.status==="error") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--warn)">${es?"No se pudo cargar el ticket.":"Couldn't load the ticket."}</div>`;
   else if(!rec) recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">${es?"No se encontró un ticket editable.":"No editable ticket found."}</div>`;
-  else recBlock=`<div style="grid-column:1/-1;margin-top:8px"><div style="font-size:11px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">🔧 ${es?"Editar Ticket de Servicio (Zoho)":"Edit Service Ticket (Zoho)"}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px">${SERVICE_EDIT_FIELDS.map(fd=>svcFieldCell(fd,rec,editing)).join("")}</div></div>`;
+  else recBlock=`<div style="grid-column:1/-1;margin-top:8px"><div style="font-size:11px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">🔧 ${es?"Editar Ticket de Servicio (Zoho)":"Edit Service Ticket (Zoho)"}${vN>1?` · ${es?"Visita":"Visit"} ${vN}`:""}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px">${flds.map(fd=>svcFieldCell(fd,rec,editing)).join("")}</div></div>`;
   editBanner=editing&&E&&E.err?`<div style="grid-column:1/-1;margin-top:10px;background:rgba(239,68,68,.12);border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--warn)">⚠ ${esc(E.err)}</div>`:"";
   savedFlash=(!editing&&S.svc.savedMsg&&S.svc.savedMsg.rid===rid)?`<div style="margin-top:12px;background:rgba(34,197,94,.12);border:1px solid var(--ok);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--ok)">✓ ${es?"Guardado en Zoho":"Saved to Zoho"} (${S.svc.savedMsg.n} ${es?"campo(s)":"field(s)"})</div>`:"";
   const canUpd=S.svc.scope.status==="live"?S.svc.scope.canUpdate:true; // optimistic until probe returns; save still fails-safe
@@ -1807,7 +1810,7 @@ function coordDetailModal(){
   // Middle block: SERVICE = info only (no Installation edit); INSTALL/INSPECTION = editable record (shared editor).
   let recBlock="", savedFlash="", editBanner="", actionsRO="", actionsEdit="", fieldsLoading="", noteBox="";
   if(isService){
-    if(item.recordId){ const ed=serviceEditorParts(item.recordId);
+    if(item.recordId){ const ed=serviceEditorParts(item.recordId,item.job&&item.job.visit,item.job&&item.job.visitDateField);
       recBlock=ed.recBlock; savedFlash=ed.savedFlash; editBanner=ed.editBanner; actionsRO=ed.actionsRO; actionsEdit=ed.actionsEdit; fieldsLoading=ed.fieldsLoading; noteBox=ed.noteBox;
     } else {
       recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px">🔧 ${es?"Sin ticket de servicio editable. Usa \"Abrir en Zoho\".":"No editable service ticket. Use \"Open in Zoho\"."}</div>`;
