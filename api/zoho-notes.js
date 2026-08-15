@@ -32,11 +32,21 @@ function clean(s) {
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "s-maxage=20, stale-while-revalidate=60");
   const id = String(req.query.id || "").replace(/[^0-9]/g, "");
+  // Which module the record lives in. Defaults to Deals so every existing caller is unchanged.
+  // Service_Ticket was previously unreachable here: both apps WRITE notes onto a ticket
+  // (api/zoho-add-note.js, windmar-operations/api/zoho-note.js) and nothing could read them
+  // back, so crew notes went into a hole. Allow-listed rather than passed straight through —
+  // this value goes into the request path.
+  // indexOf, not a lookup object: `MODULES["constructor"]` would be truthy through the
+  // prototype chain and put an attacker-chosen segment into the Zoho request path.
+  const MODULES = ["Deals", "Service_Ticket", "Installation", "CustomModule11"];
+  const wanted = String(req.query.module || "Deals");
+  const moduleName = MODULES.indexOf(wanted) >= 0 ? wanted : "Deals";
   if (!id) return res.status(200).json({ ok: false, error: "id required", notes: [] });
   if (!hasCreds()) return res.status(200).json({ configured: false, ok: false, notes: [] });
   try {
     const token = await getAccessToken();
-    const url = `${API_DOMAIN}/crm/${API_VERSION}/Deals/${id}/Notes?fields=Note_Title,Note_Content,Created_Time,Owner&per_page=100&sort_by=Created_Time&sort_order=desc`;
+    const url = `${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(moduleName)}/${id}/Notes?fields=Note_Title,Note_Content,Created_Time,Owner&per_page=100&sort_by=Created_Time&sort_order=desc`;
     const r = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
     if (r.status === 204) return res.status(200).json({ ok: true, count: 0, notes: [] });
     if (!r.ok) return res.status(200).json({ ok: false, error: `Zoho ${r.status}: ${(await r.text()).slice(0, 160)}`, notes: [] });

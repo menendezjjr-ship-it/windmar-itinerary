@@ -424,7 +424,7 @@ const S={
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
   dispatch:{ open:false, updated:null, sig:null, geo:{status:"idle"}, filter:"all" }, // filter: all | service | insp
   coord:{ q:"", tile:"", /* tile: "" = show everything, else a bucket id */ selected:null, collapsed:{}, notes:{}, fields:{status:"idle",map:{},team:[]}, edit:null, savedMsg:null, addNote:{text:"",sending:false,err:"",okDl:""}, ready:{status:"idle",list:[],err:""}, view:"type", geo:{status:"idle"}, geoSig:"" }, // view: "type" (by job type) | "area" (by geographic proximity for route scheduling) // Coordinator tab: search, open detail key, per-section collapsed state, per-DL record cache, field metadata, active editor, /api/zoho-ready feed (Pending-Schedule installs + Need-Schedule services)
-  svc:{ rec:{}, fields:{status:"idle",map:{}}, edit:null, savedMsg:null, scope:{status:"idle",canUpdate:false} }, // Service_Ticket editor: per-recordId editable-record cache, field metadata (picklists), active editor, UPDATE-scope probe
+  svc:{ rec:{}, notes:{}, /* Zoho Notes ON the ticket, per recordId — read-back, previously write-only */ fields:{status:"idle",map:{}}, edit:null, savedMsg:null, scope:{status:"idle",canUpdate:false} }, // Service_Ticket editor: per-recordId editable-record cache, field metadata (picklists), active editor, UPDATE-scope probe
   attachScope:{status:"idle",canAttach:false}, // Attachments CREATE scope probe (gates the photo picker so no broken button ever ships)
   note:{ text:"", sending:false, err:"", okKey:"", prog:"" }, // unified note+photo box (install AND service), keyed by module:recordId
   zx:{ proj:{q:"",status:"idle",list:[],err:""}, cal:{q:"",status:"idle",list:[],err:""} }, // all-time Zoho word-search augmentation for both search bars
@@ -797,7 +797,7 @@ function calDetailHTML(r){
   // Service description rendered as the crew card (problem / house + access / numbered steps /
   // ⚠ important / step diagram), with the original ticket text one tap away. Falls back to the
   // raw text verbatim when the ticket does not match WindMar's numbered template.
-  const descBlock=(isS&&r.desc)?`<div style="grid-column:1/-1;margin-top:2px"><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">${S.lang==='es'?'Descripción del servicio':'Service Description'}</div>${crewCardHTML(r.desc)}</div>`:"";
+  const descBlock=(isS&&r.desc)?`<div style="grid-column:1/-1;margin-top:2px"><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">${S.lang==='es'?'Descripción del servicio':'Service Description'}</div>${crewCardHTML(r.desc)}${serviceNotesHTML(r.recordId)}</div>`:"";
   const body=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">${isS?(f(S.lang==='es'?'Programado':'Scheduled',(r.startDate||"")+(r.startTime?" · "+r.startTime:""))+f(S.lang==='es'?'Estado':'Status',r.status)+f(S.lang==='es'?'Prioridad':'Priority',r.priority)+f(S.lang==='es'?'Servicio':'Service',r.scope)):(f(S.lang==='es'?'Fecha':'Start Date',r.startDate)+f(S.lang==='es'?'Estado':'Status',r.status)+f(S.lang==='es'?'Alcance':'Scope',r.scope))}<div style="grid-column:1/-1">${f(S.lang==='es'?'Dirección':'Address',r.address)}</div>${descBlock}</div>`;
   // 📋 Plan-Analyzer BOM / estimator notes for this install (async-loaded into S.cal.bomNotes on open).
   const bomBlock=(function(){
@@ -1731,6 +1731,36 @@ function loadCoordFields(){ const F=S.coord.fields; if(F.status==="loading"||F.s
 }
 // ── Service_Ticket editor loaders (Feature 1) ──
 // Fetch one Service_Ticket's editable record by recordId (cached per recordId).
+/* Zoho Notes attached to a SERVICE TICKET. Both apps have always written notes onto the
+   ticket (api/zoho-add-note.js here, api/zoho-note.js in the Field HUB) and neither could
+   read them back — api/zoho-notes.js was hardcoded to Deals — so every crew note written on
+   a ticket was invisible in both apps. This closes that loop. */
+function loadServiceNotes(recordId,force){
+  const rid=String(recordId||"").replace(/[^0-9]/g,""); if(!rid) return;
+  const cur=S.svc.notes[rid]; if(!force&&cur&&(cur.status==="loading"||cur.status==="live")) return;
+  S.svc.notes[rid]={status:"loading",list:(cur&&cur.list)||[]};
+  fetch("/api/zoho-notes?module=Service_Ticket&id="+encodeURIComponent(rid),{cache:"no-store"})
+    .then(r=>r.json()).then(j=>{
+      S.svc.notes[rid]=(j&&j.ok&&Array.isArray(j.notes))?{status:"live",list:j.notes}:{status:"error",list:[],err:(j&&j.error)||"error"};
+      if(["coordinator","calendar"].includes(S.tab)) render(true);
+    }).catch(e=>{ S.svc.notes[rid]={status:"error",list:[],err:String(e)}; if(["coordinator","calendar"].includes(S.tab)) render(true); });
+}
+// Renders the ticket's note history under the service editor.
+function serviceNotesHTML(recordId){
+  const rid=String(recordId||"").replace(/[^0-9]/g,""); if(!rid) return "";
+  const es=S.lang==="es", n=S.svc.notes[rid];
+  if(!n||n.status==="loading") return `<div style="font-size:12px;color:var(--text-dim);margin-top:8px">⟳ ${es?"Cargando notas…":"Loading notes…"}</div>`;
+  if(n.status==="error") return `<div style="font-size:12px;color:var(--warn);margin-top:8px">${es?"No se pudieron cargar las notas.":"Couldn't load notes."}</div>`;
+  if(!n.list.length) return `<div style="font-size:12px;color:var(--text-dim);margin-top:8px">${es?"Sin notas en este ticket todavía.":"No notes on this ticket yet."}</div>`;
+  return `<div style="margin-top:10px"><div style="font-size:10px;font-weight:900;letter-spacing:.05em;text-transform:uppercase;color:var(--text-dim);margin-bottom:5px">📒 ${es?"Notas del ticket":"Ticket notes"} (${n.list.length})</div>`
+    +n.list.slice(0,25).map(function(x){
+      const who=esc(x.author||""), when=x.time?new Date(x.time).toLocaleString(es?"es":"en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):"";
+      return `<div style="background:var(--bg-2);border:1px solid var(--line);border-left:3px solid var(--wh-orange);border-radius:8px;padding:8px 10px;margin-bottom:6px">
+        <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap"><span style="font-size:11.5px;font-weight:800">${who||(es?"Nota":"Note")}</span><span style="font-size:10px;color:var(--text-dim);margin-left:auto">${esc(when)}</span></div>
+        ${x.title?`<div style="font-size:12px;font-weight:700;margin-top:2px">${esc(x.title)}</div>`:""}
+        <div style="font-size:12.5px;white-space:pre-wrap;word-break:break-word;margin-top:3px">${esc(x.content||"")}</div></div>`;
+    }).join("")+`</div>`;
+}
 function loadServiceRec(recordId,force){ const rid=String(recordId||"").replace(/[^0-9]/g,""); if(!rid) return;
   const cur=S.svc.rec[rid]; if(!force&&cur&&(cur.status==="loading"||cur.status==="live")) return;
   S.svc.rec[rid]={status:"loading",rec:(cur&&cur.rec)||null,module:"Service_Ticket"};
@@ -2159,7 +2189,7 @@ function coordDetailModal(){
     ${p?f(es?"Financiamiento":"Finance",p.finance):""}
     ${isService?f(es?"Servicio":"Service",item.scope):""}
     <div style="grid-column:1/-1">${f(es?"Dirección":"Address",item.address)}</div>
-    ${isService&&item.job&&item.job.desc?`<div style="grid-column:1/-1">${f(es?"Descripción":"Description",item.job.desc)}</div>`:""}</div>`;
+    ${isService&&item.job&&item.job.desc?`<div style="grid-column:1/-1"><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">${es?"Descripción del servicio":"Service Description"}</div>${crewCardHTML(item.job.desc)}${serviceNotesHTML(item.recordId)}</div>`:""}</div>`;
   // Middle block: SERVICE = info only (no Installation edit); INSTALL/INSPECTION = editable record (shared editor).
   let recBlock="", savedFlash="", editBanner="", actionsRO="", actionsEdit="", fieldsLoading="", noteBox="";
   if(isService){
@@ -3206,7 +3236,7 @@ document.addEventListener("click",e=>{
     case "closeProject": S.proj.selected=null; S.proj.noteFrom=null; render(); break;
     case "coordSelect": { S.coord.selected=id; S.coord.edit=null; S.coord.savedMsg=null; S.svc.edit=null; S.svc.savedMsg=null; S.note={text:"",sending:false,err:"",okKey:"",prog:""}; loadAttachScope(); const item=coordSelectedItem();
       if(item&&item.kind==="service"){ const rid=String(item.recordId||"").replace(/[^0-9]/g,""); const sr=item.svcRec||(item.job&&item.job.svcRec)||null;
-        if(rid){ if(sr) S.svc.rec[rid]={status:"live",rec:sr,module:"Service_Ticket"}; else loadServiceRec(rid); loadServiceFields(); loadSvcScope(); } }
+        if(rid){ if(sr) S.svc.rec[rid]={status:"live",rec:sr,module:"Service_Ticket"}; else loadServiceRec(rid); loadServiceFields(); loadSvcScope(); loadServiceNotes(rid); } }
       else if(item&&item.num){ const ir=item.installRec||(item.job&&item.job.installRec)||null;
         if(ir) setInstallRecSync(item.num,ir,item.recordId); else loadCoordNotes(item.num); // sync from feed; ?dl= fallback (inspections have no installRec)
         loadCoordFields(); }
@@ -3378,7 +3408,7 @@ document.addEventListener("click",e=>{
       if(_jr&&_jr.type==="service"){ const rid=String(_jr.recordId||"").replace(/[^0-9]/g,"");
         // Editable record travels WITH the feed record (svcRec) → set it synchronously so the editor
         // opens on THIS ticket's current stage with no async gap and no per-open Zoho token refresh.
-        if(rid){ if(_jr.svcRec) S.svc.rec[rid]={status:"live",rec:_jr.svcRec,module:"Service_Ticket"}; else loadServiceRec(rid); loadServiceFields(); loadSvcScope(); } }
+        if(rid){ if(_jr.svcRec) S.svc.rec[rid]={status:"live",rec:_jr.svcRec,module:"Service_Ticket"}; else loadServiceRec(rid); loadServiceFields(); loadSvcScope(); loadServiceNotes(rid); } }
       else if(_jr&&_jr.dlNumber){ loadBomNotes(_jr.dlNumber);
         // Install editor loads SYNCHRONOUSLY from the feed-embedded record (no per-open ?dl= token refresh); ?dl= only as fallback.
         if(_jr.installRec) setInstallRecSync(_jr.dlNumber,_jr.installRec,_jr.recordId); else loadCoordNotes(_jr.dlNumber);
