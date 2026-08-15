@@ -2393,7 +2393,7 @@ function itineraryHTML(){
 function activeSource(){ return (S.crews.fleet && S.crews.fleet.length) ? S.crews.fleet : CREWS; }
 function crewName(c){ return c.type ? (c.type+" ("+c.lead+")") : c.name; }
 function nearestOther(c){ const src=activeSource(); let best=null,bd=Infinity; src.forEach(o=>{ if(o.id===c.id||!o.gps)return; const d=miles(c.gps,o.gps); if(d<bd){bd=d;best=o;} }); return {crew:best,d:bd}; }
-async function loadFleet(){
+async function loadFleet(silent){
   try{
     const r=await fetch("/api/crews",{cache:"no-store"});
     const j=await r.json();
@@ -2413,7 +2413,7 @@ async function loadFleet(){
     } else if(j&&j.configured){ S.crews.fleet=[]; S.crews.fleetState="error"; }
     else { S.crews.fleet=[]; S.crews.fleetState="sample"; }
   }catch(e){ S.crews.fleet=[]; S.crews.fleetState="sample"; }
-  render();
+  render(!!silent); // silent on the live auto-refresh — no animation replay, and initCrewMap keeps the user's pan/zoom
 }
 function crewsHTML(){
   const src=activeSource();
@@ -2591,8 +2591,10 @@ function scStatusStyle(st){ st=(st||"").toUpperCase();
   if(st.indexOf("NEW")>=0)return"var(--wh-blue)";
   return"var(--wh-grey)"; }
 /* ── Crew Records: permanent, searchable archive of crew status updates (shared Supabase) ── */
-async function loadCrewRecords(){
-  S.crewRec.status="loading"; render();
+async function loadCrewRecords(silent){
+  // silent = background auto-refresh: never blank the tab to "loading", never replay
+  // entry animations. Only an explicit open/⟳ shows the loading state.
+  if(!silent){ S.crewRec.status="loading"; render(); }
   try{
     const SB="https://lmlixmzmzpzgeggvywwb.supabase.co", K="sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
     const r=await fetch(SB+"/rest/v1/job_status_events?source=in.(field-hub,plan-analyzer)&order=created_at.desc&limit=1000",{headers:{apikey:K,Authorization:"Bearer "+K},cache:"no-store"});
@@ -2600,7 +2602,7 @@ async function loadCrewRecords(){
     S.crewRec.status="live"; S.crewRec.list=Array.isArray(rows)?rows.filter(x=>!isVoided(x)):[]; // hide reverted rows
     S.crewRec.voided=Array.isArray(rows)?rows.filter(isVoided):[]; // reverted rows → shown only in the admin Revert log
   }catch(e){ S.crewRec.status="error"; S.crewRec.list=[]; S.crewRec.voided=[]; }
-  render();
+  render(!!silent); // silent on auto-refresh so the log does not flash or replay animations
 }
 function crewRecColor(s){ s=(s||"").toLowerCase(); if(/insp/.test(s))return /complet|conclu/.test(s)?"#06b6d4":"#F89B24"; if(/complet|conclu/.test(s))return "#22c55e"; if(/resched|reprogram|reagend/.test(s))return "#ef4444"; return "#1D429B"; }
 // Plan-Analyzer BOM/estimator notes for one install DL (shown in the calendar job detail). Cached per DL in S.cal.bomNotes.
@@ -2883,9 +2885,14 @@ function tabAllowed(id){ return allowedTabs().some(tb=>tb.id===id); }
 function initCrewMap(){
   if(typeof L==="undefined") return;
   const el=document.getElementById("crewMap"); if(!el) return;
-  if(window._cm){ try{window._cm.remove();}catch(e){} window._cm=null; }
+  // Every repaint of this tab tears the Leaflet instance down and builds a new one. That was
+  // survivable when the tab only rendered on user actions, but the crew feed now auto-refreshes,
+  // so remember where the user was looking and put them back — otherwise a live GPS update
+  // snaps them out of whatever they had panned/zoomed to.
+  let _keep=null;
+  if(window._cm){ try{ _keep={c:window._cm.getCenter(),z:window._cm.getZoom()}; }catch(e){} try{window._cm.remove();}catch(e){} window._cm=null; }
   const src=activeSource();
-  const m=L.map(el).setView([28.45,-81.4],8); window._cm=m;
+  const m=L.map(el).setView(_keep?[_keep.c.lat,_keep.c.lng]:[28.45,-81.4],_keep?_keep.z:8); window._cm=m;
   L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19,attribution:"© CARTO"}).addTo(m);
   const pts=[];
   L.marker([HQ.lat,HQ.lon],{icon:L.divIcon({className:"",html:'<div style="font-size:26px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,.5));transform:translate(-50%,-90%)">🏢</div>',iconSize:[0,0]})}).addTo(m).bindTooltip("🏢 "+HQ.name,{direction:"top",permanent:true,className:"distlbl",offset:[0,-22]});
@@ -2907,7 +2914,7 @@ function initCrewMap(){
     L.polyline([[dr.target.lat,dr.target.lon],[dr.crew.gps.lat,dr.crew.gps.lon]],{color:"#F89B24",weight:3,opacity:.9}).addTo(m);
     pts.push([dr.target.lat,dr.target.lon]);
   }
-  if(pts.length>1){ try{ m.fitBounds(pts,{padding:[40,40]}); }catch(e){} }
+  if(pts.length>1 && !_keep){ try{ m.fitBounds(pts,{padding:[40,40]}); }catch(e){} } // only auto-fit on FIRST build, never on a live refresh
   setTimeout(function(){ try{m.invalidateSize();}catch(e){} },140);
 }
 // ── Address→lat/lon cache (localStorage) + reusable pin map (Job Map / Install Map) ──
@@ -2989,6 +2996,11 @@ function _render(noAnim){
   document.documentElement.setAttribute("data-theme",S.theme);
   wmJtipInit();
   const ae=document.activeElement, aeId=ae&&ae.id, caret=ae&&ae.selectionStart;
+  // Background refreshes replace #root.innerHTML, which drops scroll position. Focus and caret
+  // were already preserved below; scroll was not, so a silent 25s repaint yanked a coordinator
+  // back to the top mid-read. Captured for SILENT renders only — an explicit action (tab switch,
+  // opening a job) should still land at the top.
+  const _sy=noAnim?(window.scrollY||window.pageYOffset||0):0;
   const VTABS=allowedTabs();
   // If S.tab isn't one this user may open (restricted set, or a stale/removed id in
   // localStorage), fall back to their first tab. Without this, active.fn() below throws
@@ -3017,6 +3029,7 @@ function _render(noAnim){
       </div></nav>
     <main style="max-width:1180px;margin:0 auto;padding:22px 20px 70px">${active.fn()}</main>${notifPanelHTML()}`;
   if(aeId){const el=document.getElementById(aeId);if(el){el.focus();if(caret!=null&&el.setSelectionRange){try{el.setSelectionRange(caret,caret);}catch(e){}}}}
+  if(_sy>0){ try{ window.scrollTo(0,_sy); }catch(e){} } // hold the reader's place through a silent refresh
   if(S.tab==="crews") setTimeout(initCrewMap,0);
   // Job Map (calendar): geocode this week's jobs then pin them
   if(S.tab==="calendar" && S.cal.view==="map"){
@@ -3409,6 +3422,37 @@ loadSCTemplates();
 loadSiteCapture("",true); // log in to SiteCapture immediately so the tab opens instantly (silent — no flash)
 // Live polling so Engineering-stage alerts fire app-wide while the dashboard is open (silent — no flash).
 setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
+
+/* ── Live auto-refresh ────────────────────────────────────────────────────────────
+   Every tab keeps itself current with no manual refresh. Before this, only the
+   Calendar (30s), the board (90s), Projects (75s) and the crew status feed (25s)
+   refreshed themselves — the Coordinator tab, where jobs actually get scheduled, had
+   NO timer at all and only updated on tab entry or the ⟳ button. Same for live truck
+   GPS and the Field Status Record.
+
+   Rules that keep this safe rather than thrashy:
+   • only the tab you are looking at refreshes, and only while the document is visible,
+     so a backgrounded phone doesn't burn Zoho/Samsara API quota;
+   • every call uses the SILENT path — no "loading" blank, no entry-animation replay;
+   • _render preserves focus, caret and (for silent renders) scroll position, so a
+     refresh can't yank you mid-read or eat half-typed text;
+   • Install Map and SiteCapture are deliberately excluded — the install map geocodes
+     ~2,300 pins and re-running that on a timer would hammer the geocoder for nothing.
+   Feeds that already had their own timers are left alone; this only fills the gaps. */
+function liveRefreshNow(){
+  if(document.hidden) return;
+  try{
+    if(S.tab==="coordinator"){ loadCoordReady(true); }
+    else if(S.tab==="crews"){ loadFleet(true); }
+    else if(S.tab==="records"){ loadCrewRecords(true); }
+    else if(S.tab==="itinerary"){ if(S.live&&S.live.ok) loadJobs(true); }
+    else if(S.tab==="calendar"){ if(S.cal.status==="live") loadOpsCal(true); }
+  }catch(e){}
+}
+setInterval(liveRefreshNow,30000);
+// Coming back to the app should feel instant, not "wait up to 30s".
+window.addEventListener("focus",liveRefreshNow);
+document.addEventListener("visibilitychange",function(){ if(!document.hidden) liveRefreshNow(); });
 </script>
 <script>
 /* WindMar crew status notifications — polls shared Supabase, alerts the coordinator */
