@@ -1287,7 +1287,11 @@ function attentionHTML(){
     if(/roofing/.test(n)) return "Windmar Roofing";
     return c||(es?"Sin cuadrilla":"Unassigned");
   };
-  const crewBuckets={}; Object.keys(CREW_ROSTER).forEach(function(c){ crewBuckets[c]=[]; });
+  // Support roles that are in CREW_ROSTER but are not dispatch crews — no card on the
+  // Dashboard. Filtered in crewOrder (below) rather than at bucketing, so crewShown and
+  // crewPending are derived from the same list that renders and can never disagree.
+  const DASH_HIDE=/^warehouse tech$/i;
+  const crewBuckets={}; Object.keys(CREW_ROSTER).forEach(function(c){ if(!DASH_HIDE.test(c)) crewBuckets[c]=[]; });
   crewFeed.forEach(function(e){ var c=dashCrew(e); if(/^📐/.test(c)) return; (crewBuckets[c]=crewBuckets[c]||[]).push(e); });
   // Today's ETA per crew, split by meaning: heading TO a job vs heading BACK to HQ.
   // Both arrive as "ETA …" strings; merging them into one slot would be misleading.
@@ -1299,7 +1303,7 @@ function attentionHTML(){
     if(/(→|->)\s*(hq|base)|\bto hq\b|\bback to (hq|base)\b/i.test(e.status||"")){ if(!b.hq)b.hq=e; } else if(!b.job) b.job=e; // feed is newest-first
   });
   const etaTime=function(s){ return String(s||"").replace(/^\s*eta\s*(→|->)?\s*(hq|base)?\s*/i,"").trim()||String(s||""); };
-  const crewOrder=Object.keys(crewBuckets).sort(function(a,b){
+  const crewOrder=Object.keys(crewBuckets).filter(function(c){return !DASH_HIDE.test(c);}).sort(function(a,b){
     var la=crewBuckets[a][0], lb=crewBuckets[b][0];
     if(!!la!==!!lb) return la?-1:1;                                                    // crews with updates first
     if(la&&lb) return String(lb.created_at||"").localeCompare(String(la.created_at||"")); // then newest first
