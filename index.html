@@ -765,6 +765,10 @@ function wmJtipInit(){ if(window.__wmjtip) return; window.__wmjtip=true;
   window.addEventListener("scroll",()=>{ tip.style.display="none"; },true);
 }
 function calQMatch(r,q){ if(!q)return true; const s=String(q).toLowerCase(); return String(r.dlNumber||"").toLowerCase().indexOf(s)>=0||String(r.customerName||"").toLowerCase().indexOf(s)>=0||String(r.address||"").toLowerCase().indexOf(s)>=0||String(r.team||"").toLowerCase().indexOf(s)>=0; }
+// City from a full address, module-scope so calChip can use it. The calendar view has its own
+// local `cityOf` const that is NOT in scope here — calling that one from calChip threw a
+// ReferenceError and blanked the entire calendar.
+function calCityOf(a){ if(!a) return ""; const p=String(a).split(","); let cc=p.length>=2?p[1]:p[0]; return cc.replace(/\bFL\b/ig,"").replace(/\d{5}(-\d{4})?/g,"").replace(/[,\s]+$/,"").trim(); }
 function calChip(r,cont,compact){
   const tc=jobTypeColor(r), isS=r.type==="service", hot=isS&&calHot(r.priority);
   const base="display:block;width:100%;box-sizing:border-box;font-size:11.5px;padding:4px 7px;margin-bottom:3px;border-radius:6px;cursor:pointer;overflow:hidden;font-weight:700;line-height:1.3;";
@@ -777,7 +781,7 @@ function calChip(r,cont,compact){
   const dn=calDone(r);
   const chk=dn?`<span title="${esc((S.lang==="es"?'Completado por ':'Completed by ')+(dn.team||'crew'))}" style="margin-left:auto;flex-shrink:0;font-weight:900">✓</span>`:"";
   // compact = the dense Crew Grid / Month cells: city only, the full address does not fit.
-  const aTxt=compact?(cityOf(r.address)||r.customerName||""):(r.address||"");
+  const aTxt=compact?(calCityOf(r.address)||r.customerName||""):(r.address||"");
   const addr=aTxt?`<div style="font-size:10px;font-weight:500;opacity:.82;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px">${compact?"":"📍 "}${esc(aTxt)}</div>`:"";
   return `<div data-action="calSelectJob" data-id="${esc(r.id)}" data-jtip="${esc(r.id)}" style="${style}"><div style="display:flex;align-items:center;gap:4px;overflow:hidden;white-space:nowrap"><span style="flex-shrink:0">${cont?"↪":jobTypeIcon(r)}</span><span style="overflow:hidden;text-overflow:ellipsis">${tm}${esc(r.dlNumber||r.customerName||"")}</span>${dur}${chk}</div>${addr}</div>`;
 }
