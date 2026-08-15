@@ -765,7 +765,7 @@ function wmJtipInit(){ if(window.__wmjtip) return; window.__wmjtip=true;
   window.addEventListener("scroll",()=>{ tip.style.display="none"; },true);
 }
 function calQMatch(r,q){ if(!q)return true; const s=String(q).toLowerCase(); return String(r.dlNumber||"").toLowerCase().indexOf(s)>=0||String(r.customerName||"").toLowerCase().indexOf(s)>=0||String(r.address||"").toLowerCase().indexOf(s)>=0||String(r.team||"").toLowerCase().indexOf(s)>=0; }
-function calChip(r,cont){
+function calChip(r,cont,compact){
   const tc=jobTypeColor(r), isS=r.type==="service", hot=isS&&calHot(r.priority);
   const base="display:block;width:100%;box-sizing:border-box;font-size:11.5px;padding:4px 7px;margin-bottom:3px;border-radius:6px;cursor:pointer;overflow:hidden;font-weight:700;line-height:1.3;";
   const style=base+"background:"+tc+";color:"+textOn(tc)+";"+(hot?"border-left:4px solid #ef4444;":"");
@@ -776,7 +776,9 @@ function calChip(r,cont){
   // ✓ = the crew reported this job Complete from Field HUB (shared Supabase feed, ~25s live).
   const dn=calDone(r);
   const chk=dn?`<span title="${esc((S.lang==="es"?'Completado por ':'Completed by ')+(dn.team||'crew'))}" style="margin-left:auto;flex-shrink:0;font-weight:900">✓</span>`:"";
-  const addr=r.address?`<div style="font-size:10px;font-weight:500;opacity:.82;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px">📍 ${esc(r.address)}</div>`:"";
+  // compact = the dense Crew Grid / Month cells: city only, the full address does not fit.
+  const aTxt=compact?(cityOf(r.address)||r.customerName||""):(r.address||"");
+  const addr=aTxt?`<div style="font-size:10px;font-weight:500;opacity:.82;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px">${compact?"":"📍 "}${esc(aTxt)}</div>`:"";
   return `<div data-action="calSelectJob" data-id="${esc(r.id)}" data-jtip="${esc(r.id)}" style="${style}"><div style="display:flex;align-items:center;gap:4px;overflow:hidden;white-space:nowrap"><span style="flex-shrink:0">${cont?"↪":jobTypeIcon(r)}</span><span style="overflow:hidden;text-overflow:ellipsis">${tm}${esc(r.dlNumber||r.customerName||"")}</span>${dur}${chk}</div>${addr}</div>`;
 }
 function calRow(r,cont){
@@ -880,7 +882,7 @@ function opsCalHTML(){
     ${gDays.map(d=>{const td=calYMD(d)===calYMD(today);return `<div style="padding:8px 6px;text-align:center;border-bottom:2px solid var(--line);border-right:1px solid var(--line);background:${td?'rgba(248,155,36,.12)':'var(--panel)'}"><div style="font-weight:800;font-size:12px;color:${td?'var(--wh-orange)':'var(--text)'}">${D[d.getDay()]}</div><div style="font-size:11px;color:var(--text-dim)">${M[d.getMonth()].slice(0,3)} ${d.getDate()}</div></div>`;}).join("")}</div>`;
   const gBody=gTeams.map(team=>{ const col=teamColor(team);
     const cells=gDays.map(d=>{ const iso=calYMD(d); const td=iso===calYMD(today); const jobs=gByTeam[team].filter(r=>calSpan(r).indexOf(iso)>=0).sort((a,b)=>(calTMin(a)-calTMin(b)));
-      return `<div style="padding:4px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);min-height:58px;background:${td?'rgba(248,155,36,.05)':'transparent'}">${jobs.map(j=>{const jc=jobTypeColor(j);const jcont=j.startDate!==iso;return `<div data-action="calSelectJob" data-id="${esc(j.id)}" data-jtip="${esc(j.id)}" style="background:${jc};color:${textOn(jc)};border-radius:6px;padding:3px 6px;margin-bottom:3px;cursor:pointer;font-size:10.5px;line-height:1.22;overflow:hidden">${jcont?'<span style="font-weight:900">↪ </span>':'<span style="opacity:.9">'+jobTypeIcon(j)+' </span>'}<span style="font-weight:800">${esc(j.dlNumber||j.id)}</span><div style="opacity:.92;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(cityOf(j.address)||j.customerName||"")}</div></div>`;}).join("")}</div>`;
+      return `<div style="padding:4px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);min-height:58px;background:${td?'rgba(248,155,36,.05)':'transparent'}">${jobs.map(j=>calChip(j,j.startDate!==iso,1)).join("")}</div>`;
     }).join("");
     return `<div style="display:grid;grid-template-columns:${gCols}"><div style="padding:8px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);border-left:4px solid ${col};position:sticky;left:0;background:var(--bg-2);z-index:2"><div style="font-weight:800;font-size:12.5px;line-height:1.2">${esc(team)}</div><div style="font-size:10px;color:var(--text-dim)">${gByTeam[team].length} ${es?'trab.':'jobs'}</div></div>${cells}</div>`;
   }).join("");
@@ -896,7 +898,7 @@ function opsCalHTML(){
     ${mDays.map(d=>{const td=calYMD(d)===calYMD(today);return `<div style="padding:8px 4px;text-align:center;border-bottom:2px solid var(--line);border-right:1px solid var(--line);background:${td?'rgba(248,155,36,.12)':'var(--panel)'}"><div style="font-weight:700;font-size:10px;color:var(--text-dim);text-transform:uppercase">${D[d.getDay()]}</div><div style="font-weight:800;font-size:13px;color:${td?'var(--wh-orange)':'var(--text)'}">${d.getDate()}</div></div>`;}).join("")}</div>`;
   const mBody=mTeams.map(team=>{ const col=teamColor(team);
     const cells=mDays.map(d=>{ const iso=calYMD(d); const td=iso===calYMD(today); const jobs=mByTeam[team].filter(r=>calSpan(r).indexOf(iso)>=0).sort((a,b)=>(calTMin(a)-calTMin(b)));
-      return `<div style="padding:4px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);min-height:58px;background:${td?'rgba(248,155,36,.05)':'transparent'}">${jobs.map(j=>{const jc=jobTypeColor(j);const jcont=j.startDate!==iso;return `<div data-action="calSelectJob" data-id="${esc(j.id)}" data-jtip="${esc(j.id)}" style="background:${jc};color:${textOn(jc)};border-radius:6px;padding:3px 6px;margin-bottom:3px;cursor:pointer;font-size:10.5px;line-height:1.22;overflow:hidden">${jcont?'<span style="font-weight:900">↪ </span>':'<span style="opacity:.9">'+jobTypeIcon(j)+' </span>'}<span style="font-weight:800">${esc(j.dlNumber||j.id)}</span><div style="opacity:.92;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(cityOf(j.address)||j.customerName||"")}</div></div>`;}).join("")}</div>`;
+      return `<div style="padding:4px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);min-height:58px;background:${td?'rgba(248,155,36,.05)':'transparent'}">${jobs.map(j=>calChip(j,j.startDate!==iso,1)).join("")}</div>`;
     }).join("");
     return `<div style="display:grid;grid-template-columns:${mCols};min-width:${mMinW}px"><div style="padding:8px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);border-left:4px solid ${col};position:sticky;left:0;background:var(--bg-2);z-index:2"><div style="font-weight:800;font-size:12.5px;line-height:1.2">${esc(team)}</div><div style="font-size:10px;color:var(--text-dim)">${mByTeam[team].length} ${es?'trab.':'jobs'}</div></div>${cells}</div>`;
   }).join("");
@@ -904,7 +906,7 @@ function opsCalHTML(){
   // list
   const byTeam={}; visible.forEach(r=>{(byTeam[r.team]=byTeam[r.team]||[]).push(r);});
   const listKeys=Object.keys(byTeam).sort((a,b)=>byTeam[b].length-byTeam[a].length);
-  const listView=`<div style="display:flex;flex-direction:column;gap:12px">${listKeys.length?listKeys.map(team=>{const list=byTeam[team].sort((a,b)=>(a.startDate||"").localeCompare(b.startDate||"")||(calTMin(a)-calTMin(b)));const col=teamColor(team);return `<div class="card" style="border-radius:12px;overflow:hidden"><div style="padding:10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;background:${col}18"><span style="width:12px;height:12px;border-radius:3px;background:${col}"></span><span style="font-weight:700;font-size:14px">${esc(team)}</span><span style="color:var(--text-dim);font-size:12px;margin-left:auto">${list.length} ${list.length!==1?(S.lang==='es'?'trabajos':'jobs'):(S.lang==='es'?'trabajo':'job')}</span></div><div>${list.map(calRow).join("")}</div></div>`;}).join(""):`<div style="text-align:center;padding:40px;color:var(--text-dim)">${S.lang==='es'?'Sin trabajos programados':'No jobs scheduled'}</div>`}</div>`;
+  const listView=`<div style="display:flex;flex-direction:column;gap:12px">${listKeys.length?listKeys.map(team=>{const list=byTeam[team].sort((a,b)=>(a.startDate||"").localeCompare(b.startDate||"")||(calTMin(a)-calTMin(b)));const col=teamColor(team);return `<div class="card" style="border-radius:12px;overflow:hidden"><div style="padding:10px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;background:${col}18"><span style="width:12px;height:12px;border-radius:3px;background:${col}"></span><span style="font-weight:700;font-size:14px">${esc(team)}</span><span style="color:var(--text-dim);font-size:12px;margin-left:auto">${list.length} ${list.length!==1?(S.lang==='es'?'trabajos':'jobs'):(S.lang==='es'?'trabajo':'job')}</span></div><div>${list.map(r=>calRow(r,0)).join("")}</div></div>`;}).join(""):`<div style="text-align:center;padding:40px;color:var(--text-dim)">${S.lang==='es'?'Sin trabajos programados':'No jobs scheduled'}</div>`}</div>`;
   // Job Map view — pins for the week's jobs (or a single day), geocoded + cached. Staged for the render hook.
   const es2=S.lang==="es";
   const mapSpan=c.mapSpan||"week";
@@ -925,7 +927,7 @@ function opsCalHTML(){
     : `<div class="card" style="padding:44px;text-align:center;color:var(--text-dim)"><div style="font-size:26px;margin-bottom:8px">🗺</div>${es2?"Ubicando trabajos":"Locating jobs"} ${mpm.total?((mpm.done||0)+"/"+mpm.total):"…"}<div style="font-size:11px;margin-top:6px">${es2?"(en caché — la próxima vez es instantáneo)":"(cached — instant next time)"}</div></div>`);
   const view=c.status==="loading"?`<div style="text-align:center;padding:50px;color:var(--text-dim)">⟳ ${S.lang==='es'?'Cargando…':'Loading…'}</div>`:c.status==="error"?`<div class="card" style="padding:18px;color:var(--warn)">API error: ${esc(c.err||"")}</div>`:c.view==="month"?monthGrid:c.view==="week"?weekView:c.view==="grid"?gridView:c.view==="map"?mapView:listView;
   const navLabel=(c.view==="week"||c.view==="grid"||c.view==="map")?(M[ws.getMonth()].slice(0,3)+" "+ws.getDate()+" - "+(ws.getMonth()!==we.getMonth()?M[we.getMonth()].slice(0,3)+" ":"")+we.getDate()+", "+we.getFullYear()):(M[c.m-1]+" "+c.y);
-  const dayModal=c.dayPanel!=null?calModal((function(){const recs=byDate[c.dayPanel]||[];return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><h3 style="margin:0;font-size:18px;font-weight:700">${M[c.m-1]} ${c.dayPanel}, ${c.y} <span style="color:var(--text-dim);font-weight:500;font-size:14px">· ${recs.length} ${recs.length!==1?'jobs':'job'}</span></h3><button class="btn3d grey sm" data-action="calClose">✕</button></div><div style="display:flex;flex-direction:column;gap:8px">${recs.map(calRow).join("")}</div>`;})()):"";
+  const dayModal=c.dayPanel!=null?calModal((function(){const recs=byDate[c.dayPanel]||[];return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><h3 style="margin:0;font-size:18px;font-weight:700">${M[c.m-1]} ${c.dayPanel}, ${c.y} <span style="color:var(--text-dim);font-weight:500;font-size:14px">· ${recs.length} ${recs.length!==1?'jobs':'job'}</span></h3><button class="btn3d grey sm" data-action="calClose">✕</button></div><div style="display:flex;flex-direction:column;gap:8px">${recs.map(r=>calRow(r,r.startDate!==c.dayPanel)).join("")}</div>`;})()):"";
   const selModal=c.selected?(function(){const r=c.records.find(x=>x.id===c.selected);if(!r)return "";const editingInst=r.type!=="service"&&!!(S.coord.edit&&S.coord.edit.dl===String(r.dlNumber||"").toUpperCase().replace(/\s+/g,""));const editingSvc=r.type==="service"&&!!(S.svc.edit&&S.svc.edit.rid===String(r.recordId||"").replace(/[^0-9]/g,""));return calModal(calDetailHTML(r),editingInst||editingSvc);})():"";
   // ── KPI summary (Installation / Service totals + complete/in-progress/past-due) ──
   const calKpi=(type)=>{ const arr=scoped.filter(r=>r.type===type); const o={total:arr.length,complete:0,inprogress:0,pastdue:0}; arr.forEach(r=>{ if(r.cat==="completed")o.complete++; else if(r.cat==="in_progress")o.inprogress++; else if(r.cat==="pastdue")o.pastdue++; }); return o; };
@@ -959,7 +961,7 @@ function opsCalHTML(){
       <button class="btn3d grey sm" data-action="calNext">▶</button>
     </div>
     ${teamsPresent.length?`<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;align-items:center"><span style="font-size:11px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em">${S.lang==='es'?'Equipos:':'Teams:'}</span>${teamsPresent.map(tt=>{const team=tt[0],n=tt[1],col=teamColor(team),act=c.teamFilter.indexOf(team)>=0,dim=c.teamFilter.length&&!act;return `<button data-action="calTeam" data-id="${esc(team)}" style="display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600;background:${act?col:'var(--panel)'};color:${act?textOn(col):'var(--text)'};border:1.5px solid ${col};opacity:${dim?.4:1}"><span style="width:9px;height:9px;border-radius:50%;background:${act?textOn(col):col}"></span>${esc(team)}<span style="opacity:.7;font-weight:700">${n}</span></button>`;}).join("")}${c.teamFilter.length?`<button class="btn3d ghost sm" data-action="calClearTeams">✕ ${S.lang==='es'?'Limpiar':'Clear'}</button>`:""}</div>`:""}
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px"><span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin-right:2px">${es?'Tipo':'Type'}</span>${Object.keys(JOB_TYPES).map(k=>{const tt=JOB_TYPES[k];return `<span style="display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:999px;background:var(--panel);border:1px solid var(--line);font-size:12px;font-weight:700;color:var(--text)"><span style="width:11px;height:11px;border-radius:50%;background:${tt.color};box-shadow:0 0 0 3px ${tt.color}26"></span><span style="font-size:12.5px">${tt.icon}</span>${es?tt.es:tt.en}</span>`;}).join("")}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px"><span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin-right:2px">${es?'Tipo':'Type'}</span>${Object.keys(JOB_TYPES).filter(k=>k!=="roofing").map(k=>{const tt=JOB_TYPES[k];return `<span style="display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:999px;background:var(--panel);border:1px solid var(--line);font-size:12px;font-weight:700;color:var(--text)"><span style="width:11px;height:11px;border-radius:50%;background:${tt.color};box-shadow:0 0 0 3px ${tt.color}26"></span><span style="font-size:12.5px">${tt.icon}</span>${es?tt.es:tt.en}</span>`;}).join("")}</div>
     ${view}${dayModal}${selModal}</div>`;
 }
 function calendarTabHTML(){ return opsCalHTML(); }
@@ -2121,6 +2123,10 @@ function svcFieldInputHTML(fd){ const es=S.lang==="es", E=S.svc.edit, meta=(S.sv
   return `<input type="text" id="${id}" data-sf="${fd.k}" value="${esc(val)}" style="${base}"/>`;
 }
 function svcFieldCell(fd,rec,editing){ const es=S.lang==="es", lbl=es?fd.es:fd.en, span=fd.ta?"grid-column:1/-1":"";
+  // Both modals already render the description as the plain-language crew card above this
+  // editor. Repeating it here as a raw wall of text is the thing the crew card exists to
+  // replace, so read mode skips it — edit mode still shows the textarea.
+  if(fd.k==="Service_Description"&&!editing) return "";
   const inner=editing?svcFieldInputHTML(fd):`<div style="font-size:13.5px;font-weight:500;white-space:pre-wrap;line-height:1.5">${esc(svcRecVal(fd,rec))||'<span style="color:var(--text-dim)">—</span>'}</div>`;
   return `<div style="${span}"><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">${esc(lbl)}</div>${inner}</div>`;
 }
@@ -2440,7 +2446,8 @@ function itineraryHTML(){
   const fJobs=S.boardFilter==="all"?dayJobs:dayJobs.filter(j=>jobCat(j)===S.boardFilter);
   const sel=S.selectedJob?activeJobs().find(j=>j.id===S.selectedJob):null;
   const dayCrews=boardCrews(fJobs);
-  const ETAMAP=etaByDL(); // today's crew ETAs, keyed by DL — surfaced on each job chip
+  const ETAMAP=(S.dayOffset===0)?etaByDL():{}; // today's crew ETAs, keyed by DL — surfaced on each job chip.
+  // Empty on any other day: the feed only carries today, so paging would mis-stamp the ETA.
   const cols=dayCrews.map(crew=>{
     const cj=fJobs.filter(j=>j.crew===crew.id).sort((a,b)=>(a.hhmm||a.window||"").localeCompare(b.hhmm||b.window||""));
     const chips=cj.length?cj.map(job=>{const s=JOB_CODE[job.code];
