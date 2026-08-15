@@ -25,11 +25,22 @@ export default async function handler(req, res) {
     }
     const body = await r.json();
     const crews = (body.data || []).filter((v) => CREW_RX.test(v.name || "")).map((v) => {
+      // Vehicle reassignment. "CAMION DE PRUEBA" is now William Sierra's truck, so it carries
+      // his identity (and therefore the Elite Crew #3 colour, since teamColor matches on the
+      // name). Its Samsara label was never updated. The truck he used to drive is relabelled
+      // so two vehicles can't both claim to be him — it stays visible because it is still a
+      // real vehicle reporting GPS, just no longer his.
+      const rawName = v.name || ("Vehicle " + v.id);
+      const nm = rawName.toUpperCase().replace(/\s+/g, " ").trim();
+      const name = /CAMION DE PRUEBA/.test(nm) ? "IN HOUSE 3 (WILLIAM SIERRA)"
+                 : /IN ?HOUSE ?3/.test(nm)     ? "IN HOUSE 3 (PREVIOUS TRUCK)"
+                 : rawName;
       const g = v.gps || {};
       const lat = g.latitude, lon = g.longitude;
       return {
         id: String(v.id),
-        name: v.name || ("Vehicle " + v.id),
+        name,
+        rawName, // the untouched Samsara label, so the reassignment stays auditable
         gps: (lat != null && lon != null) ? { lat, lon } : null,
         mph: g.speedMilesPerHour != null ? Math.round(g.speedMilesPerHour) : 0,
         heading: g.headingDegrees != null ? g.headingDegrees : null,
