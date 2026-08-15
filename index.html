@@ -712,6 +712,7 @@ function calRow(r,cont){
     ${cont?`<span title="continues from a previous day" style="flex-shrink:0;font-weight:900;color:${col}">↪</span>`:""}
     <span style="${calTypeBadge(r.type)};flex-shrink:0">${isS?"🔧 SVC":"⚡ INST"}</span>
     ${r.startTime?`<span style="font-size:12px;color:var(--text-dim);min-width:56px;flex-shrink:0;font-weight:600">${esc(r.startTime)}</span>`:""}
+    ${(isS&&r.hours>0)?`<span title="${esc(r.blocks+" × 2h reserved block"+(r.blocks===1?"":"s")+(r.blockWindow?" · "+r.blockWindow:""))}" style="flex-shrink:0;font-size:11.5px;font-weight:800;padding:2px 7px;border-radius:6px;background:${r.hours>=8?'rgba(220,38,38,.16)':'rgba(6,182,212,.14)'};border:1px solid ${r.hours>=8?'rgba(220,38,38,.5)':'rgba(6,182,212,.45)'};color:${r.hours>=8?'#fca5a5':'#67e8f9'}">⏱ ${r.hours}h</span>`:""}
     <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="color:var(--wh-orange)">${esc(r.dlNumber||"")}</span> <span style="font-weight:500">${esc(r.customerName||"")}</span></div>
       <div style="font-size:11px;color:#7c8aa5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="color:${col}">${esc(r.team)}</span>${r.address?" · "+esc(r.address):""}</div></div>
     ${isS&&calHot(r.priority)?'<span style="flex-shrink:0">🔥</span>':""}</div>`;
