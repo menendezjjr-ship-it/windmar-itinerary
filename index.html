@@ -578,7 +578,7 @@ function calTMin(r){ if(!r) return 1e9;
   var m=s.match(/(\d{1,2}):(\d{2})\s*([AaPp][Mm])?/); if(!m) return 1e9;
   var hh=+m[1], mm=+m[2], ap=(m[3]||"").toUpperCase(); if(ap==="PM"&&hh!==12)hh+=12; if(ap==="AM"&&hh===12)hh=0; return hh*60+mm;
 }
-function calRec(j){ return { type:j.kind, id:j.id, recordId:j.recordId||"", plan:j.plan||null, bom:j.bom||null, team:j.crewLabel||"Unassigned", startDate:j.date, daysNeeded:j.days||1, hhmm:j.hhmm||"", startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", desc:j.desc||"", code:j.code||"", msp:!!j.msp, phone:j.phone||"", installNotes:j.installNotes||"", svcRec:j.svcRec||null, installRec:j.installRec||null, visit:j.visit||1, visitDateField:j.visitDateField||"Scheduled_Visit_1", cat:jobCat(j) }; }
+function calRec(j){ return { type:j.kind, id:j.id, recordId:j.recordId||"", plan:j.plan||null, bom:j.bom||null, team:j.crewLabel||"Unassigned", startDate:j.date, daysNeeded:j.days||1, hhmm:j.hhmm||"", startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", desc:j.desc||"", code:j.code||"", msp:!!j.msp, blocks:j.blocks||0, hours:j.hours||0, blockWindow:j.blockWindow||"", phone:j.phone||"", installNotes:j.installNotes||"", svcRec:j.svcRec||null, installRec:j.installRec||null, visit:j.visit||1, visitDateField:j.visitDateField||"Scheduled_Visit_1", cat:jobCat(j) }; }
 // Multi-day jobs: ISO dates a record occupies (start day + continuation days).
 function calSpan(r){ if(!r.startDate)return []; const n=Math.max(1,Math.min(21,parseInt(r.daysNeeded,10)||1)); const base=new Date(r.startDate+"T12:00:00"); const out=[]; for(let i=0;i<n;i++){const x=new Date(base);x.setDate(base.getDate()+i);out.push(calYMD(x));} return out; }
 async function loadOpsCal(silent){
@@ -591,7 +591,10 @@ async function loadOpsCal(silent){
   try{
     const r=await fetch("/api/zoho-jobs?from="+from+"&to="+to,{cache:"no-store"});
     const j=await r.json();
-    if(j&&j.ok&&Array.isArray(j.jobs)){ S.cal.records=dedupCalRecs(j.jobs.map(calRec)); S.cal.status="live"; }
+    // Roofing-only jobs (RL) are hidden from THIS app — the coordinator board tracks
+    // DL / RDL / S. Filtered client-side on purpose: the Zoho feed is shared with the Field
+    // HUB, and stripping RL server-side would empty the Windmar Roofing crew's own calendar.
+    if(j&&j.ok&&Array.isArray(j.jobs)){ S.cal.records=dedupCalRecs(j.jobs.map(calRec)).filter(x=>String(x.code||"").toUpperCase()!=="RL"); S.cal.status="live"; }
     else if(j&&j.configured){ S.cal.records=[]; S.cal.status="error"; S.cal.err=j.error||"error"; }
     else { S.cal.records=[]; S.cal.status="unconfigured"; }
   }catch(e){ S.cal.records=[]; S.cal.status="error"; S.cal.err=String(e); }
@@ -604,6 +607,7 @@ const JOB_TYPES={
   reinstall:{en:"Re-install", es:"Reinstalación",color:"#F59E0B", icon:"♻"},
   removal:  {en:"Removal",    es:"Retiro",       color:"#E11D48", icon:"⛔"},
   service:  {en:"Service",    es:"Servicio",     color:"#14B8A6", icon:"🔧"},
+  roofing:  {en:"Roofing",    es:"Techado",      color:"#DC2626", icon:"🏠"},
 };
 function jobType(r){
   if(!r) return "install";
@@ -615,7 +619,19 @@ function jobType(r){
   const code=String(r.code||"").toUpperCase();
   const s=((r.scope||"")+" "+(r.dlNumber||"")).toLowerCase();
   if(code==="RM"||code==="RMV"||/\bremov|decommission|uninstall/.test(s)) return "removal";
-  if(code==="RDL"||code==="RL"||/re-?install|re-?roof|reinstall/.test(s)) return "reinstall";
+  // Verified against live Zoho (289 RDL / 586 RL deals):
+  //   RL  = roofing-only work. Pipeline "Roofing" on 586/586, Product_Selected "Roofing" on 569.
+  //   RDL = a NEW solar/battery install bundled with a roof job — Pipeline "Solar" on 287/289,
+  //         Windmar_Roofing "Solar Associated with a Roofing Deal" (248) or "Roof and Solar" (35).
+  //         It is NOT a re-install: Existing_System_Size_kW is null on every RDL, and the roof
+  //         always completes BEFORE the install. Calling it ♻ Re-install told crews to expect
+  //         panels to strip and re-set; they arrive to a bare roof and a brand-new array.
+  // Real remove-and-reinstall is a SERVICE ticket (Area_of_Service "(14) Remove/Re-install
+  // System") — 7 live records, on 6 DL deals and 1 RL, and ZERO RDL. Handled via r.reinstall.
+  // The old /re-?roof/ scope regex is deleted on purpose: "re-roof" is the commonest phrase in
+  // RDL/RL scope text and is precisely NOT a re-install — that regex manufactured the bug.
+  if(code==="RL") return "roofing";
+  if(code==="RDL") return "install";
   // MSP is a job TYPE only when the DEAL is MSP-coded (name "MSP####"). Do NOT type an
   // install as MSP just because MSP_Upgrade_Required is set / its scope mentions a panel
   // upgrade — that's a normal install that happens to include a panel upgrade.
@@ -684,8 +700,11 @@ function calChip(r,cont){
   // How long this visit is booked for, in reserved 2-hour blocks (4 blocks = 8h = all day).
   // On the chip so a coordinator can see a crew is already tied up before stacking another job.
   const dur=(isS&&r.hours>0)?`<span style="opacity:.95;font-weight:800;background:rgba(0,0,0,.22);border-radius:4px;padding:0 4px;margin-left:3px">${r.hours}h</span>`:"";
+  // ✓ = the crew reported this job Complete from Field HUB (shared Supabase feed, ~25s live).
+  const dn=calDone(r);
+  const chk=dn?`<span title="${esc((S.lang==="es"?'Completado por ':'Completed by ')+(dn.team||'crew'))}" style="margin-left:auto;flex-shrink:0;font-weight:900">✓</span>`:"";
   const addr=r.address?`<div style="font-size:10px;font-weight:500;opacity:.82;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px">📍 ${esc(r.address)}</div>`:"";
-  return `<div data-action="calSelectJob" data-id="${esc(r.id)}" data-jtip="${esc(r.id)}" style="${style}"><div style="display:flex;align-items:center;gap:4px;overflow:hidden;white-space:nowrap"><span style="flex-shrink:0">${cont?"↪":jobTypeIcon(r)}</span><span style="overflow:hidden;text-overflow:ellipsis">${tm}${esc(r.dlNumber||r.customerName||"")}</span>${dur}</div>${addr}</div>`;
+  return `<div data-action="calSelectJob" data-id="${esc(r.id)}" data-jtip="${esc(r.id)}" style="${style}"><div style="display:flex;align-items:center;gap:4px;overflow:hidden;white-space:nowrap"><span style="flex-shrink:0">${cont?"↪":jobTypeIcon(r)}</span><span style="overflow:hidden;text-overflow:ellipsis">${tm}${esc(r.dlNumber||r.customerName||"")}</span>${dur}${chk}</div>${addr}</div>`;
 }
 function calRow(r,cont){
   const col=teamColor(r.team), isS=r.type==="service";
@@ -892,7 +911,10 @@ async function loadJobs(silent){
   if(!silent || S.tab==="itinerary") render(silent);
 }
 // Active jobs = live Zoho when available, else the built-in demo set.
-function activeJobs(){ return (S.live&&S.live.ok&&S.live.jobs&&S.live.jobs.length)?S.live.jobs:JOBS; }
+// Roofing-only (RL) jobs are hidden from this board — it tracks DL / RDL / S. Same reasoning
+// as the calendar: filtered here, not in the shared Zoho feed, so the Roofing crew keeps
+// seeing their own work in the Field HUB.
+function activeJobs(){ const src=(S.live&&S.live.ok&&S.live.jobs&&S.live.jobs.length)?S.live.jobs:JOBS; return src.filter(j=>String((j&&j.code)||"").toUpperCase()!=="RL"); }
 // Auto-refresh the live feed while viewing the board (every 90s).
 setInterval(function(){ if(S.live&&S.live.ok&&S.tab==="itinerary"&&S.itinView==="board") loadJobs(true); },90000);
 
@@ -1213,6 +1235,33 @@ function tomorrowVisits(){ const t=new Date(); t.setDate(t.getDate()+1); const t
    cards above (job_status_events rows whose status starts with "ETA"), keyed by DL so a
    job chip can show the ETA for its own job. "ETA → HQ" is excluded — that is the crew
    heading home, not an arrival time for any job. Newest-first feed → first hit wins. */
+/* Jobs the CREW has reported complete, keyed by DL#. This is the live link between the
+   apps: Field HUB posts "Complete" to the shared Supabase job_status_events table and the
+   Itinerary already polls it every 25s, so a crew tapping Complete in the field puts a ✓ on
+   the coordinator's calendar within a minute — no extra plumbing, no new endpoint.
+   NOTE Field HUB's own ✓ is localStorage-only (wm_completed_jobs), i.e. per-device, so it is
+   NOT the shared signal — the Supabase status is.
+   "Inspection Complete" is deliberately excluded: that's a different milestone, not the job
+   being finished. Memoised on the feed identity so this isn't rebuilt for every chip. */
+let _doneCache={sig:null,map:null};
+function completedByDL(){
+  const feed=window.CREW_FEED||[];
+  const sig=feed.length+"|"+((feed[0]&&feed[0].id)||"");
+  if(_doneCache.sig===sig&&_doneCache.map) return _doneCache.map;
+  const out={};
+  feed.forEach(function(e){
+    if(!e||String(e.status||"").indexOf("[VOID]")===0) return;
+    const st=String(e.status||"");
+    if(!/complet|conclu/i.test(st)) return;
+    if(/insp/i.test(st)) return; // "Inspection Complete" ≠ job complete
+    const k=String(e.dl_number||"").toUpperCase().replace(/\s+/g,"");
+    if(!k||out[k]) return; // feed is newest-first
+    out[k]={at:e.created_at||"",team:e.team||"",status:st};
+  });
+  _doneCache={sig:sig,map:out};
+  return out;
+}
+function calDone(r){ const k=String((r&&r.dlNumber)||"").toUpperCase().replace(/\s+/g,""); return k?(completedByDL()[k]||null):null; }
 function etaByDL(){
   const out={};
   (window.CREW_FEED||[]).forEach(function(e){
