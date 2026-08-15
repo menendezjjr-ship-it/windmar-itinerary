@@ -420,7 +420,7 @@ const S={
   crewRec:{status:"idle",list:[],voided:[],revlogOpen:false,crew:"all",user:"all",q:""},
   instMap:{status:"idle",items:[],pinState:{status:"idle"}},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
-  dispatch:{ open:false, updated:null, sig:null, geo:{status:"idle"} },
+  dispatch:{ open:false, updated:null, sig:null, geo:{status:"idle"}, filter:"all" }, // filter: all | service | insp
   coord:{ q:"", selected:null, collapsed:{}, notes:{}, fields:{status:"idle",map:{},team:[]}, edit:null, savedMsg:null, addNote:{text:"",sending:false,err:"",okDl:""}, ready:{status:"idle",list:[],err:""}, view:"type", geo:{status:"idle"}, geoSig:"" }, // view: "type" (by job type) | "area" (by geographic proximity for route scheduling) // Coordinator tab: search, open detail key, per-section collapsed state, per-DL record cache, field metadata, active editor, /api/zoho-ready feed (Pending-Schedule installs + Need-Schedule services)
   svc:{ rec:{}, fields:{status:"idle",map:{}}, edit:null, savedMsg:null, scope:{status:"idle",canUpdate:false} }, // Service_Ticket editor: per-recordId editable-record cache, field metadata (picklists), active editor, UPDATE-scope probe
   attachScope:{status:"idle",canAttach:false}, // Attachments CREATE scope probe (gates the photo picker so no broken button ever ships)
@@ -1052,10 +1052,74 @@ function inspEntryCard(p,it){ const sm=inspMeta(it.status), tm=inspTypeMeta(it.t
 /* ── 🗺 Schedule Nearest Crew: dispatch view for inspections that still NEED SCHEDULING ──
    Reuses inspNeedsScheduling() (the "missing"/"ready" set), live crew GPS (S.crews.fleet from
    /api/crews), geocodeInto()/GEO_CACHE and initPinMap(). Distances are real Haversine miles. */
-function dispatchItems(){ // one item per pending inspection, keyed for geocode + ranking
-  return inspEntries().filter(e=>e.it.status==="ready"&&e.it.type!=="roofing").map(e=>({ id:e.p.id+"|"+e.it.type, zid:e.p.id, postInstallId:e.p.postInstallId||"", address:e.p.address||"",
-    num:e.p.num||"", name:e.p.name||"", type:e.it.type, ahj:e.p.ahj||"", stage:e.p.stage, scheduled:e.it.scheduled||null }));
+/* Priority colour scale for the dispatch board. Service tickets carry Zoho's Priority
+   field (observed values: High, Normal). Inspections have no equivalent field, so they
+   get their own neutral colour + pill rather than a made-up priority — that keeps red
+   meaning exactly one thing: a high-priority service ticket. */
+const DISP_PRIO={
+  urgent:{k:"urgent",c:"#B91C1C",en:"Urgent",es:"Urgente"},
+  high:{k:"high",c:"#DC2626",en:"High",es:"Alta"},
+  normal:{k:"normal",c:"#F59E0B",en:"Normal",es:"Normal"},
+  low:{k:"low",c:"#64748B",en:"Low",es:"Baja"},
+  none:{k:"none",c:"#94A3B8",en:"No priority",es:"Sin prioridad"},
+  insp:{k:"insp",c:"#0EA5E9",en:"Inspection",es:"Inspección"},
+};
+function dispPrioKey(it){
+  if(!it||it.src==="insp") return "insp";
+  const p=String(it.priority||"").trim().toLowerCase();
+  if(/urgent|critical|emergen/.test(p)) return "urgent";
+  if(/high|alta|^1\b/.test(p)) return "high";
+  if(/normal|medium|media|^2\b/.test(p)) return "normal";
+  if(/low|baja|^3\b/.test(p)) return "low";
+  return "none"; // unknown/blank → grey, never silently coloured as urgent
 }
+function dispPrio(it){ return DISP_PRIO[dispPrioKey(it)]||DISP_PRIO.none; }
+function dispPrioText(it){ const m=dispPrio(it); return S.lang==="es"?m.es:m.en; }
+// Inspections sit mid-pack: above unknown/low service work, below anything explicitly
+// prioritised. Without this a blank-priority ticket 60 mi away outranks an inspection
+// 2 mi from a crew, which is not what a dispatcher wants.
+const DISP_RANK={urgent:0,high:1,normal:2,insp:3,none:4,low:5};
+function dispPrioRank(it){ const r=DISP_RANK[dispPrioKey(it)]; return r==null?9:r; }
+/* Feed health. The board draws on TWO independent feeds — service tickets from
+   /api/zoho-ready (S.coord.ready) and inspections from /api/zoho-projects (S.proj).
+   Either can fail on its own, so track them separately and never render an empty
+   list as "nothing to schedule" for a side we simply couldn't load. */
+function dispFeeds(){
+  const P=S.proj, R=S.coord.ready;
+  const svcOK=(R.status==="live")||!!(R.list&&R.list.length);
+  const inspOK=(P.status==="live")||!!(P.list&&P.list.length);
+  return { svcOK:svcOK, inspOK:inspOK, ready:svcOK||inspOK,
+           svcLoading:(R.status==="idle"||R.status==="loading"), inspLoading:(P.status==="idle"||P.status==="loading") };
+}
+/* Defensive only. In practice neither branch below can currently trip it:
+   /api/zoho-projects only ever returns Stage NTP…Post-Installation, and a service ticket's
+   Ticket_Status encodes ticket state, not whether the underlying deal died. KNOWN GAP: a
+   service ticket sitting on a Closed-Lost deal will still be dispatched — filtering that
+   needs the deal Stage joined into the service rows in api/zoho-ready.js. */
+const DISP_DEAD=/closed\s*lost|dead|cancell?ed/i;
+function dispatchItems(){ // every job that still needs a crew scheduled — services + inspections
+  const out=[], f=dispFeeds();
+  // Service tickets pending schedule. /api/zoho-ready queries Ticket_Status:starts_with:3
+  // ("3. Need Schedule"), so every service row in that feed is by definition unscheduled.
+  if(f.svcOK) (S.coord.ready.list||[]).forEach(j=>{
+    if(!j||j.kind!=="service"||DISP_DEAD.test(j.stage||"")) return;
+    out.push({ src:"service", id:"s|"+(j.id||j.recordId||j.num), recordId:j.recordId||"", zid:"", postInstallId:"",
+      address:j.address||"", num:j.num||"", name:j.project||"", type:"service", ahj:"",
+      stage:j.rawStatus||j.stage||"", priority:j.priority||"", scope:j.scope||"",
+      ticketNo:j.ticketNo||"", phone:j.phone||"", scheduled:null });
+  });
+  // Inspections still needing a crew (unchanged set), now with the dead-sale guard
+  // coordItems() already applies. Belt-and-braces: S.proj can't currently hold a dead stage.
+  if(f.inspOK) inspEntries().filter(e=>e.it.status==="ready"&&e.it.type!=="roofing"&&!DISP_DEAD.test(e.p.stage||"")).forEach(e=>{
+    out.push({ src:"insp", id:"i|"+e.p.id+"|"+e.it.type, recordId:"", zid:e.p.id, postInstallId:e.p.postInstallId||"",
+      address:e.p.address||"", num:e.p.num||"", name:e.p.name||"", type:e.it.type, ahj:e.p.ahj||"",
+      stage:e.p.stage||"", priority:"", scope:"", ticketNo:"", phone:"", scheduled:e.it.scheduled||null });
+  });
+  return out;
+}
+// Geocoding always runs over the FULL set so flipping the filter never re-geocodes;
+// the filter is applied at display time only.
+function dispatchVisible(list){ const f=S.dispatch.filter||"all"; return (f==="all")?list:list.filter(x=>x&&x.src===f); }
 function dispatchCrews(){ return (S.crews.fleet||[]).filter(c=>c&&c.gps&&c.gps.lat!=null&&c.gps.lon!=null); } // live GPS only
 function nearestCrews(lat,lon,n){ // top-N live crews by real Haversine miles
   return dispatchCrews().map(c=>({crew:c,d:haversineMi(lat,lon,c.gps.lat,c.gps.lon)}))
@@ -1066,51 +1130,69 @@ function dirLinkFrom(crew,lat,lon){ if(!crew||!crew.gps||lat==null)return ""; co
   return `<a href="https://www.google.com/maps/dir/?api=1&origin=${o}&destination=${d}" target="_blank" rel="noopener" style="display:inline-block;padding:4px 9px;border-radius:8px;background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff;font-weight:800;font-size:11px;text-decoration:none">🧭 ${es?"Cómo llegar":"Directions"}</a>`; }
 function dispatchHTML(){
   const es=S.lang==="es", D=S.dispatch, G=D.geo||{status:"idle"};
-  const items=dispatchItems(), crews=dispatchCrews();
+  const allItems=dispatchItems(), crews=dispatchCrews(), feeds=dispFeeds();
+  const items=dispatchVisible(allItems); // filter chips narrow the view, not the geocode set
+  const nSvc=allItems.filter(x=>x.src==="service").length, nInsp=allItems.filter(x=>x.src==="insp").length;
   const liveCrews=S.crews.fleetState==="live";
-  const pins=(G.status==="ready")?(G.pins||[]):[];
+  const pins=(G.status==="ready")?dispatchVisible(G.pins||[]):[];
   const located=pins.length, total=items.length;
   const foundIds={}; pins.forEach(p=>foundIds[p.id]=1);
   const missingGeo=(G.status==="ready")?items.filter(it=>!foundIds[it.id]):[];
   const upd=D.updated?new Date(D.updated).toLocaleTimeString(es?"es":"en-US",{hour:"numeric",minute:"2-digit"}):"—";
-  // Ranked rows (located inspections, nearest live crew first).
+  // Ranked rows: highest priority first, then nearest crew within each priority band.
   const rows=pins.map(p=>({p:p,near:liveCrews?nearestCrews(p.lat,p.lon,3):[]}))
-    .sort((a,b)=>((a.near[0]?a.near[0].d:1e9)-(b.near[0]?b.near[0].d:1e9)));
+    .sort((a,b)=>(dispPrioRank(a.p)-dispPrioRank(b.p))||((a.near[0]?a.near[0].d:1e9)-(b.near[0]?b.near[0].d:1e9)));
+  const chip=(id,label,n)=>`<button class="btn3d ${(S.dispatch.filter||"all")===id?'':'ghost'} sm" data-action="dispFilter" data-id="${id}" style="${(S.dispatch.filter||"all")===id?'background:#0EA5E9':''}">${label} ${n}</button>`;
+  const filterBar=`<div style="display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 10px">${chip("all",es?"Todos":"All",allItems.length)}${chip("service","🔧 "+(es?"Servicio":"Service"),nSvc)}${chip("insp","🔍 "+(es?"Inspección":"Inspection"),nInsp)}</div>`;
+  // A feed that failed must read as "unknown", never as zero.
+  const feedWarn=(feeds.svcOK&&feeds.inspOK)?"":`<div class="card" style="padding:10px 14px;margin-bottom:10px;border-left:5px solid #F59E0B;background:rgba(245,158,11,.08);font-size:12.5px">⚠ ${!feeds.svcOK?(feeds.svcLoading?(es?"Cargando tickets de servicio…":"Loading service tickets…"):(es?"No se pudieron cargar los tickets de servicio — esta lista está incompleta.":"Couldn't load service tickets — this list is incomplete.")):(feeds.inspLoading?(es?"Cargando inspecciones…":"Loading inspections…"):(es?"No se pudieron cargar las inspecciones — esta lista está incompleta.":"Couldn't load inspections — this list is incomplete."))}</div>`;
   const crewNote=!liveCrews
     ?`<div class="card" style="padding:14px 16px;border-left:5px solid #DC2626;background:rgba(220,38,38,.08)">⚠ ${es?"GPS de cuadrillas en vivo no disponible — no se muestran distancias para evitar datos falsos.":"Live crew GPS unavailable — distances hidden to avoid fabricated data."} <button class="btn3d sm" data-action="dispatchRefresh" style="margin-left:8px">⟳ ${es?"Reintentar":"Retry"}</button></div>`:"";
   const head=`<div class="card" style="padding:14px 16px;margin:6px 0 12px;border-left:6px solid #0EA5E9">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
       <div><div style="font-weight:900;font-size:16px">🗺 ${es?"Programar Cuadrilla Más Cercana":"Schedule Nearest Crew"}</div>
-        <div style="font-size:12px;color:var(--text-dim);margin-top:2px">${es?"Inspecciones por programar + la cuadrilla en vivo más cercana (millas reales por GPS).":"Pending inspections + the nearest live crew (real GPS miles)."}</div></div>
+        <div style="font-size:12px;color:var(--text-dim);margin-top:2px">${es?"Tickets de servicio e inspecciones por programar, por prioridad + la cuadrilla en vivo más cercana (millas reales por GPS).":"Service tickets and inspections awaiting scheduling, by priority + the nearest live crew (real GPS miles)."}</div></div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span class="pill" style="background:${liveCrews?'#16A34A':'var(--wh-grey)'};font-size:10px">${liveCrews?('● '+crews.length+' '+(es?'cuadrillas en vivo':'live crews')):(es?'sin GPS':'no GPS')}</span>
         <span class="pill" style="background:var(--jc-DL);font-size:10px">${located} ${es?"de":"of"} ${total} ${es?"ubicadas":"located"}</span>
         <span style="font-size:11px;color:var(--text-dim)">${es?"act.":"upd."} ${esc(upd)}</span>
         <button class="btn3d sm" data-action="dispatchRefresh">⟳ ${es?"Actualizar":"Refresh"}</button></div></div></div>`;
   let mapBlock;
-  if(!total) mapBlock=`<div class="card" style="padding:30px;text-align:center;color:var(--text-dim)">${es?"No hay inspecciones por programar 🎉":"No inspections need scheduling 🎉"}</div>`;
+  // Only claim "nothing to schedule" when BOTH feeds actually loaded. A 🎉 sitting under a
+  // "couldn't load service tickets" banner is the worst thing this panel could say.
+  if(!total) mapBlock=`<div class="card" style="padding:30px;text-align:center;color:var(--text-dim)">${(S.dispatch.filter||"all")!=="all"?(es?"Nada en este filtro":"Nothing in this filter"):((feeds.svcOK&&feeds.inspOK)?(es?"Nada por programar 🎉":"Nothing needs scheduling 🎉"):(es?"Lista incompleta — ver aviso arriba":"List incomplete — see the notice above"))}</div>`;
   else if(G.status==="geocoding") mapBlock=`<div class="card" style="padding:30px;text-align:center;color:var(--text-dim)">🗺 ${es?"Ubicando direcciones":"Locating addresses"} ${G.done||0}/${G.total||0}…</div>`;
   else mapBlock=`<div class="card" style="border-radius:12px;overflow:hidden"><div id="dispPinMap" style="height:420px"></div></div>
-    <div style="font-size:11px;color:var(--text-dim);margin:6px 0 2px">🔵/🟠 ${es?"inspección":"inspection"} · 🟢 ${es?"cuadrilla en vivo":"live crew"}</div>`;
-  const rowCard=(r)=>{ const p=r.p, tm=inspTypeMeta(p.type), sched=p.scheduled?fmtDate(p.scheduled):"";
+    <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--text-dim);margin:6px 0 2px">
+      <span style="font-weight:700">🔧 ${es?"Servicio":"Service"}:</span>${["urgent","high","normal","low","none"].map(k=>`<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:9px;height:9px;border-radius:50%;background:${DISP_PRIO[k].c};display:inline-block"></span>${esc(es?DISP_PRIO[k].es:DISP_PRIO[k].en)}</span>`).join("")}
+      <span style="font-weight:700;margin-left:6px">🔍 ${es?"Inspección":"Inspection"}:</span>${["vip","final"].map(k=>`<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:9px;height:9px;border-radius:50%;background:${inspTypeMeta(k).c};display:inline-block"></span>${esc(inspTypeText(k))}</span>`).join("")}
+      <span style="display:inline-flex;align-items:center;gap:4px;margin-left:6px"><span style="width:9px;height:9px;border-radius:50%;background:#22c55e;display:inline-block"></span>${es?"cuadrilla en vivo":"live crew"}</span></div>`;
+  // Services are coloured by Zoho Priority; inspections keep their existing TYPE colour
+  // (VIP yellow / Install-Insp blue) so nothing regresses for the people already using them.
+  const rowCard=(r)=>{ const p=r.p, isSvc=p.src==="service", pm=dispPrio(p), tm=inspTypeMeta(p.type), bar=isSvc?pm.c:tm.c, sched=p.scheduled?fmtDate(p.scheduled):"";
     const nearHTML=!liveCrews?`<span style="font-size:12px;color:var(--text-dim)">${es?"GPS no disponible":"GPS unavailable"}</span>`
       :(!r.near.length?`<span style="font-size:12px;color:var(--text-dim)">${es?"Sin cuadrillas con GPS":"No crews with GPS"}</span>`
       :r.near.map((x,i)=>`<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;${i===0?'font-weight:800':'opacity:.85'}"><span style="color:${i===0?'var(--jc-DL)':'var(--text-dim)'};font-size:${i===0?'13':'12'}px">${i===0?'🧭 ':''}${esc(crewName(x.crew))}</span><span style="color:var(--wh-orange);font-weight:800;font-size:12.5px">${x.d.toFixed(1)} mi</span>${x.crew.addr?`<span style="font-size:11px;color:var(--text-dim)">· ${esc(cityFromAddr(x.crew.addr)||x.crew.addr)}</span>`:""}${i===0?(" "+dirLinkFrom(x.crew,p.lat,p.lon)):""}</div>`).join(""));
-    const zurl=p.postInstallId?("https://crm.zoho.com/crm/org666151142/tab/CustomModule11/"+esc(p.postInstallId)):("https://crm.zoho.com/crm/org666151142/tab/Potentials/"+esc(p.zid));
-    return `<div class="card" style="padding:12px 14px;border-left:5px solid ${tm.c}">
+    // Services live in the Service_Ticket module (CustomModule40); inspections keep the
+    // Post-Installation / Deal link they always had.
+    const zurl=isSvc?(p.recordId?("https://crm.zoho.com/crm/"+ZOHO_ORG+"/tab/CustomModule40/"+encodeURIComponent(p.recordId)):("https://crm.zoho.com/crm/"+ZOHO_ORG+"/search?searchword="+encodeURIComponent(p.num||p.name||"")))
+      :(p.postInstallId?("https://crm.zoho.com/crm/org666151142/tab/CustomModule11/"+esc(p.postInstallId)):("https://crm.zoho.com/crm/org666151142/tab/Potentials/"+esc(p.zid)));
+    return `<div class="card" style="padding:12px 14px;border-left:5px solid ${bar}">
       <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap">
         <span style="font-weight:800;font-size:14px">${esc(p.name)} <span style="color:var(--text-dim);font-weight:600;font-size:12px">${esc(p.num||"")}</span></span>
-        <span style="display:flex;gap:6px;align-items:center"><span class="pill" style="background:${tm.c};font-size:9px">🔍 ${esc(inspTypeText(p.type))}</span>${sched?`<span class="pill" style="background:var(--bg-2);border:1px solid var(--line);color:var(--text-dim);font-size:9px">📅 ${esc(sched)}</span>`:""}</span></div>
-      <div style="font-size:12px;color:var(--text-dim);margin-top:4px">📍 ${esc(p.address||"—")}${p.ahj?` · 🏛 ${esc(p.ahj)}`:""}</div>
+        <span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">${isSvc
+          ?`<span class="pill" style="background:${pm.c};font-size:9px">🔧 ${esc(dispPrioText(p))}</span>${p.ticketNo?`<span class="pill" style="background:var(--bg-2);border:1px solid var(--line);color:var(--text-dim);font-size:9px">${esc(p.ticketNo)}</span>`:""}`
+          :`<span class="pill" style="background:${tm.c};font-size:9px">🔍 ${esc(inspTypeText(p.type))}</span>`}${sched?`<span class="pill" style="background:var(--bg-2);border:1px solid var(--line);color:var(--text-dim);font-size:9px">📅 ${esc(sched)}</span>`:""}</span></div>
+      <div style="font-size:12px;color:var(--text-dim);margin-top:4px">📍 ${esc(p.address||"—")}${isSvc?(p.scope?` · 🛠 ${esc(p.scope)}`:""):(p.ahj?` · 🏛 ${esc(p.ahj)}`:"")}</div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">${nearHTML}</div>
-      <div style="margin-top:9px"><a class="btn3d blue sm" href="${zurl}" target="_blank" rel="noopener" onclick="zohoOpenedAdd('${esc(p.num||'')}');render(true)">🔗 ${es?"Abrir en Zoho":"Open in Zoho"}</a></div></div>`; };
+      <div style="margin-top:9px"><button class="btn3d blue sm" data-action="crewToZoho" data-zurl="${esc(zurl).replace(/"/g,"&quot;")}" data-dl="${esc(String(p.num||"")).replace(/"/g,"&quot;")}">🔗 ${es?"Abrir en Zoho":"Open in Zoho"}</button></div></div>`; };
   const listBlock=(G.status==="ready"&&rows.length)
     ?`<div style="display:flex;flex-direction:column;gap:9px;margin-top:12px">${rows.map(rowCard).join("")}</div>`
     :(G.status==="ready"&&!rows.length&&total?`<div class="card" style="padding:18px;color:var(--text-dim);margin-top:12px">${es?"Ninguna dirección pudo ubicarse.":"No addresses could be located."}</div>`:"");
   const missBlock=missingGeo.length?`<div class="card" style="padding:12px 14px;margin-top:12px;border-left:5px solid #F59E0B;background:rgba(245,158,11,.08)">
     <div style="font-weight:800;font-size:13.5px;margin-bottom:6px">⚠ ${es?"No se pudo ubicar":"Couldn't locate"} (${missingGeo.length}) — ${es?"verifica la dirección":"verify address"}</div>
     ${missingGeo.map(it=>`<div style="font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line)"><b>${esc(it.num||it.name)}</b> · ${esc(it.name)} — ${esc(it.address||(es?"(sin dirección)":"(no address)"))}</div>`).join("")}</div>`:"";
-  return head+crewNote+mapBlock+listBlock+missBlock;
+  return head+feedWarn+filterBar+crewNote+mapBlock+listBlock+missBlock;
 }
 /* ── "Needs Attention" dashboard (Itinerary tab) — live, big, user-friendly ── */
 function daysStuck(p){ const ref=p.stageModified||p.modified; if(!ref) return null; return (Date.now()-new Date(ref).getTime())/86400000; }
@@ -1577,19 +1659,18 @@ function coordinatorHTML(){
   // Moved here from Projects → Inspections so the whole team finds it in one place.
   // Data: inspections come from S.proj.list (setTab "coordinator" loads it); the
   // dispatchToggle handler pulls live fleet GPS when it is opened.
-  // Inspections come from S.proj (a DIFFERENT feed than the Coordinator report, which uses
-  // /api/zoho-ready). If that feed is down or still cold, S.proj.list is [] and dispatchHTML
-  // renders "No inspections need scheduling 🎉" — an all-clear that is simply wrong. Mirror
-  // the status gate projectsHTML uses so a missing feed reads as missing, not as "nothing to do".
+  // The board draws on two feeds: service tickets (S.coord.ready) and inspections (S.proj).
+  // Open the panel if EITHER is usable — dispatchHTML itself warns about whichever side is
+  // missing, so a half-loaded board says so instead of rendering a false all-clear.
   // Allow-list rather than deny-list: only "live", or a list we already hold (silent refresh).
-  // "idle" (first paint, before loadProjects runs), "loading" from cold, "error" and
-  // "unconfigured" all mean we do NOT know the inspection set and must not imply zero.
-  const dispReady=(P.status==="live")||!!(P.list&&P.list.length);
+  // "idle" (first paint), "loading" from cold and "error" all mean we do NOT know the set.
+  const dispFeed=dispFeeds();
+  const dispReady=dispFeed.ready;
   // Count what the panel will actually rank (dispatchItems), not the wider missing+ready set —
   // otherwise the button can say 12 while the panel says there is nothing to schedule.
   const dispN=dispReady?dispatchItems().length:0;
-  const dispToggle=`<div style="margin:8px 0 4px"><button class="btn3d ${S.dispatch.open?'':'ghost'} sm" data-action="dispatchToggle" style="${S.dispatch.open?'background:#0EA5E9':''}">🗺 ${es?'Programar Cuadrilla Más Cercana':'Schedule Nearest Crew'} ${dispReady?dispN:'—'}</button></div>`;
-  const dispPanel=!S.dispatch.open?"":(dispReady?dispatchHTML():`<div class="card" style="padding:22px;text-align:center;color:var(--text-dim)">${(P.status==="error"||P.status==="unconfigured")?("⚠ "+(es?"No se pudieron cargar las inspecciones — reintenta en un momento.":"Couldn't load inspections — try again in a moment.")):("⟳ "+(es?"Cargando inspecciones…":"Loading inspections…"))}</div>`);
+  const dispToggle=`<div style="margin:8px 0 4px"><button class="btn3d ${S.dispatch.open?'':'ghost'} sm" data-action="dispatchToggle" style="${S.dispatch.open?'background:#0EA5E9':''}">🗺 ${es?'Programar Cuadrilla Más Cercana':'Schedule Nearest Crew'} ${dispReady?(dispN+((dispFeed.svcOK&&dispFeed.inspOK)?'':' ⚠')):'—'}</button></div>`;
+  const dispPanel=!S.dispatch.open?"":(dispReady?dispatchHTML():`<div class="card" style="padding:22px;text-align:center;color:var(--text-dim)">${(dispFeed.svcLoading||dispFeed.inspLoading)?("⟳ "+(es?"Cargando…":"Loading…")):("⚠ "+(es?"No se pudo cargar la lista — reintenta en un momento.":"Couldn't load the list — try again in a moment."))}</div>`);
   return `<div class="fade">${head}${dispToggle}${dispPanel}${body}${C.selected?coordDetailModal():""}</div>`;
 }
 // One report section: a clickable collapsible header row (caret + icon + name + count) over compact one-line rows.
@@ -2788,11 +2869,11 @@ function _render(noAnim){
       S.dispatch.sig=sig; S.dispatch.geo={status:"geocoding",done:0,total:items.length,pins:[]};
       setTimeout(()=>geocodeInto(S.dispatch.geo, items, ()=>{ if(S.tab==="coordinator"&&S.dispatch.open) render(true); }),0);
     } else if(G.status==="ready" && document.getElementById("dispPinMap")){
-      const ipins=(G.pins||[]).map(p=>Object.assign({kind:"insp"},p));
+      const ipins=dispatchVisible(G.pins||[]).map(p=>Object.assign({kind:p.src==="service"?"svc":"insp"},p));
       const cpins=dispatchCrews().map(c=>({kind:"crew",lat:c.gps.lat,lon:c.gps.lon,name:c.name,addr:c.addr,mph:c.mph}));
       setTimeout(()=>initPinMap("dispPinMap", ipins.concat(cpins), "_dispPinMap", {
         showHQ:true, radius:(p)=>p.kind==="crew"?5:8,
-        color:(p)=>p.kind==="crew"?"#22c55e":(inspTypeMeta(p.type).c||"#DC2626"),
+        color:(p)=>p.kind==="crew"?"#22c55e":(p.src==="service"?dispPrio(p).c:inspTypeMeta(p.type).c), // must match the card border
         tooltip:(p)=>p.kind==="crew"?("🚚 "+esc(p.name)+(p.addr?"<br>"+esc(cityFromAddr(p.addr)||p.addr):"")):("<b>"+esc(p.num||"")+"</b> "+esc(p.name||"")+"<br>"+esc(cityFromAddr(p.address)||p.address||"")),
         popup:(p)=>{ if(p.kind==="crew") return "<b>🚚 "+esc(p.name)+"</b><br>"+esc(p.addr||"")+"<br><span style=\"color:#888\">"+(p.mph||0)+" mph</span>";
           const nr=(S.crews.fleetState==="live")?nearestCrews(p.lat,p.lon,1)[0]:null;
@@ -2984,6 +3065,7 @@ document.addEventListener("click",e=>{
     }
     case "zxOpen": { const u=el.getAttribute("data-url"); if(u) window.open(u,"_blank","noopener"); break; }
     case "projStage": S.proj.stageFilter=id; S.proj.selected=null; render(); break;
+    case "dispFilter": S.dispatch.filter=(id==="service"||id==="insp")?id:"all"; render(); break; // display-only; never re-geocodes
     case "dispatchToggle": {
       S.dispatch.open=!S.dispatch.open;
       if(S.dispatch.open){ // opening → pull live crew GPS + timestamp; geocode kicks off in render()
@@ -2994,6 +3076,11 @@ document.addEventListener("click",e=>{
     }
     case "dispatchRefresh": {
       S.dispatch.sig=null; S.dispatch.geo={status:"idle"}; // force re-geocode + re-rank
+      // Reload the WORK as well, not just crew GPS. Service tickets have no auto-refresh at
+      // all, so without this the "upd." stamp advances while the list stays stale — and a
+      // ticket someone already scheduled in Zoho keeps showing a crew + Directions.
+      try{ loadCoordReady(true); }catch(e){}
+      try{ loadProjects(true,true); }catch(e){}
       var _p=loadFleet(); // re-fetch live crew GPS then re-render
       S.dispatch.updated=new Date();
       if(_p&&_p.then){ _p.then(function(){ S.dispatch.updated=new Date(); try{render(true);}catch(e){} }); }
