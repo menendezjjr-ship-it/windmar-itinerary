@@ -172,7 +172,7 @@ const LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAoAAAAGNCAYAAACBu8BgAADG8ElEQVR42uz9fX
 const I18N = {
  en:{
   appName:"Itinerary", appTagline:"Dispatch & Field Operations", lang:"Español",
-  tab_itinerary:"Itinerary", tab_coordinator:"Coordinator", tab_projects:"Projects", tab_crews:"Crews", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_records:"Crew Records", tab_instmap:"Install Map", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar",
+  tab_itinerary:"Dashboard", tab_coordinator:"Coordinator", tab_projects:"Projects", tab_crews:"Crews", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_records:"Crew Records", tab_instmap:"Install Map", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar",
   // job codes
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Solar / Battery Install", jc_RDL_long:"Re-Roof + Solar", jc_RL_long:"Roofing", jc_S_long:"Service Call", jc_MSP_long:"Main Service Panel Upgrade",
@@ -222,7 +222,7 @@ const I18N = {
  },
  es:{
   appName:"Itinerario", appTagline:"Despacho y Operaciones de Campo", lang:"English",
-  tab_itinerary:"Itinerario", tab_coordinator:"Coordinador", tab_projects:"Proyectos", tab_crews:"Cuadrillas", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_records:"Registros de Cuadrilla", tab_instmap:"Mapa de Instalaciones", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario",
+  tab_itinerary:"Panel", tab_coordinator:"Coordinador", tab_projects:"Proyectos", tab_crews:"Cuadrillas", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_records:"Registros de Cuadrilla", tab_instmap:"Mapa de Instalaciones", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario",
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Instalación Solar / Batería", jc_RDL_long:"Re-Techado + Solar", jc_RL_long:"Techado", jc_S_long:"Llamada de Servicio", jc_MSP_long:"Mejora del Panel Principal",
   legend:"Leyenda de Códigos", crew:"Cuadrilla", today:"Hoy", prevDay:"Anterior", nextDay:"Siguiente",
@@ -416,6 +416,8 @@ const S={
   live:{status:"idle",ok:false,jobs:[],updated:null,err:""},
   proj:{status:"idle",ok:false,list:[],updated:null,err:"",selected:null,q:"",stageFilter:"all",alerts:[],notify:false,notes:{id:null,status:"idle",list:[]},noteFrom:null,atts:{id:null,status:"idle",groups:[]}},
   notif:{items:[],unread:0,open:false}, attnOpen:true,
+  crewOpen:{}, // which crew timelines are expanded — kept in state so the 25s/75s/90s
+               // auto-refresh (which replaces #root.innerHTML) can't snap them shut mid-triage
   cal:{status:"idle",records:[],y:new Date().getFullYear(),m:new Date().getMonth()+1,view:"grid",typeFilter:"all",teamFilter:[],q:"",selected:null,dayPanel:null,weekStartISO:null,err:"",bomNotes:{}},
   crewRec:{status:"idle",list:[],voided:[],revlogOpen:false,crew:"all",user:"all",q:""},
   instMap:{status:"idle",items:[],pinState:{status:"idle"}},
@@ -1198,17 +1200,36 @@ function dispatchHTML(){
 function daysStuck(p){ const ref=p.stageModified||p.modified; if(!ref) return null; return (Date.now()-new Date(ref).getTime())/86400000; }
 function stuckProjects(){ return (S.proj.list||[]).filter(p=>p.stage!=="Post-Installation").map(p=>({p:p,d:daysStuck(p)})).filter(x=>x.d!=null&&x.d>3).sort((a,b)=>b.d-a.d); }
 function tomorrowVisits(){ const t=new Date(); t.setDate(t.getDate()+1); const tISO=t.toISOString().slice(0,10); return (S.live.jobs||[]).filter(j=>j.date===tISO); }
+/* Today's crew ETA per DL#, for the job cards on the board. Same source as the crew
+   cards above (job_status_events rows whose status starts with "ETA"), keyed by DL so a
+   job chip can show the ETA for its own job. "ETA → HQ" is excluded — that is the crew
+   heading home, not an arrival time for any job. Newest-first feed → first hit wins. */
+function etaByDL(){
+  const out={};
+  (window.CREW_FEED||[]).forEach(function(e){
+    if(!e||!/^eta\b/i.test(e.status||"")) return;
+    if(String(e.status||"").indexOf("[VOID]")===0) return;
+    if(/hq|base/i.test(e.status||"")) return;
+    if(!e.created_at) return;
+    const d=new Date(e.created_at), n=new Date();
+    if(d.getFullYear()!==n.getFullYear()||d.getMonth()!==n.getMonth()||d.getDate()!==n.getDate()) return;
+    const k=String(e.dl_number||"").toUpperCase().replace(/\s+/g,"");
+    if(!k||out[k]) return;
+    out[k]={t:String(e.status||"").replace(/^\s*eta\s*/i,"").trim(),crew:canonCrew(e)||e.team||""};
+  });
+  return out;
+}
 function attentionHTML(){
   const es=S.lang==="es";
   const stuck=stuckProjects(), visits=tomorrowVisits();
   const recent=(S.notif.items||[]).filter(n=>n.type==="moved"||n.type==="added"||n.type==="completed").slice(0,10);
-  const inspNeed=inspNeedsScheduling();
   if(!S.attnOpen){
     return `<div class="card tap" data-action="attnToggle" style="padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border-left:6px solid var(--wh-orange)">
       <span style="font-weight:800;font-size:15px">🔔 ${es?'Atención Requerida':'Needs Attention'}</span>
       <span class="pill" style="background:#DC2626">${stuck.length} ${es?'estancados':'stuck'}</span>
       <span class="pill" style="background:var(--wh-blue)">${visits.length} ${es?'visitas mañana':'visits tomorrow'}</span>
-      <span class="pill" style="background:#0EA5E9">${inspNeed.length} ${es?'inspecciones':'inspections'}</span>
+      ${/* inspections pill removed with the Inspections column — the collapsed bar must not
+            advertise a count that has no counterpart when you expand the panel */""}
       <span class="pill" style="background:#F89B24">${(window.CREW_FEED||[]).filter(e=>!isVoided(e)&&(e&&e.source||'')!=='plan-analyzer').length} ${es?'cuadrillas':'crew'}</span>
       <span style="margin-left:auto;color:var(--text-dim);font-size:12px">${es?'mostrar ▾':'show ▾'}</span></div>`;
   }
@@ -1227,12 +1248,6 @@ function attentionHTML(){
     :`<div style="color:var(--text-dim);font-size:13px;padding:10px;text-align:center">${es?'Sin visitas mañana':'No visits tomorrow'}</div>`;
   const recentCards=recent.length?recent.map(n=>`<div ${n.projId?`data-action="notifOpen" data-id="${esc(n.projId)}"`:""} style="padding:9px 12px;border-radius:10px;background:var(--bg-2);border:1px solid var(--line);margin-bottom:8px;cursor:${n.projId?'pointer':'default'}"><div style="font-weight:700;font-size:12.5px">${esc(n.title)}</div>${n.body?`<div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">${esc(n.body)}</div>`:""}</div>`).join("")
     :`<div style="color:var(--text-dim);font-size:13px;padding:10px;text-align:center">${es?'Sin cambios recientes':'No recent changes'}</div>`;
-  const inspCards=inspNeed.length?inspNeed.map(e=>{const p=e.p,it=e.it,sm=inspMeta(it.status),tm=inspTypeMeta(it.type);
-    return `<div data-action="notifOpen" data-id="${esc(p.id)}" style="padding:10px 12px;border-radius:10px;background:var(--bg-2);border:1px solid var(--line);border-left:4px solid ${sm.c};margin-bottom:8px;cursor:pointer">
-      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:13.5px">${esc(p.num||p.name)}</span><span class="pill" style="background:${tm.c};font-size:9px">${esc(inspTypeText(it.type))}</span></div>
-      <div style="font-size:12.5px;color:var(--text-dim);margin-top:2px">${esc(p.name)}</div>
-      <div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span class="pill" style="background:${sm.c};font-size:9px">${esc(inspText(it.status))}</span><span style="font-size:11px;color:var(--text-dim)">${esc(stageLabel(p.stage))}${it.vip?" · VIP":""}</span></div></div>`;}).join("")
-    :`<div style="color:var(--text-dim);font-size:13px;padding:10px;text-align:center">${es?'Todo programado ✅':'All scheduled ✅'}</div>`;
   // Status updates pushed via the shared Supabase feed. field-hub = crews; plan-analyzer = estimators.
   const allFeed=(window.CREW_FEED||[]);
   const isEta=e=>/^eta\b/i.test((e&&e.status)||'');
@@ -1246,24 +1261,111 @@ function attentionHTML(){
   const zohoForDL=(dl)=>{ const k=String(dl||"").toUpperCase().replace(/\s+/g,""); const idv=dealByDL[k]||dealByDL["DL"+k.replace(/^DL/,"")]; return idv?("https://crm.zoho.com/crm/org666151142/tab/Potentials/"+idv):("https://crm.zoho.com/crm/org666151142/search?searchword="+encodeURIComponent(dl||"")); };
   const projForDL=(dl)=>{ const k=String(dl||"").toUpperCase().replace(/\s+/g,""); return projByDL[k]||projByDL["DL"+k.replace(/^DL/,"")]||null; };
   const ackSet=stageAckSet();
-  const crewPending=crewFeed.filter(e=>e&&e.id!=null&&!ackSet.has(String(e.id))).length;
-  const crewCards=crewFeed.length?crewFeed.slice(0,30).map(function(e){var c=crewC(e.status);var who=[e.dl_number,e.customer].filter(Boolean).join(' ')||e.job_id||'Job';var tm=e.created_at?new Date(e.created_at).toLocaleString(es?'es':'en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';var note=e.note?String(e.note).trim():'';
-    var zurl=zohoForDL(e.dl_number||who); var pending=e.id!=null&&!ackSet.has(String(e.id)); var pid=String(e.id==null?'':e.id);
-    var canRev=e.id!=null&&(e.source||'')==='field-hub'&&canRevert(); // admin undo for a mistaken crew status
-    var proj=projForDL(e.dl_number||who); // join crew update → live pipeline deal by DL#
-    var stagePill=proj?`<span class="pill" style="background:${(STAGE_META[proj.stage]||{c:'var(--wh-grey)'}).c};font-size:9px;margin-top:6px;display:inline-block">${esc(stageLabel(proj.stage))}</span>`:'';
-    return `<div data-action="crewToZoho" data-zurl="${esc(zurl)}" data-dl="${esc(e.dl_number||who)}" title="${es?'Abrir este trabajo en Zoho para cambiar la etapa':'Open this job in Zoho to change the stage'}" style="padding:13px 15px;border-radius:12px;background:var(--bg-2);border:1px solid ${pending?'#ef4444':'var(--line)'};border-left:5px solid ${c};margin-bottom:10px;cursor:pointer;${pending?'box-shadow:0 0 0 1px #ef444455, 0 0 16px -3px #ef444477;':''}" ${pending?'class="prioPulse"':''}>
-      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:15px;color:${c}">${esc(e.status)}</span><span style="font-size:11px;color:var(--text-dim)">${esc(tm)}</span></div>
-      <div style="font-size:14.5px;font-weight:800;margin-top:3px">${esc(who)}</div>
-      <div style="font-size:12.5px;color:var(--text-dim);margin-top:2px">${esc(e.team||'')}</div>
-      ${stagePill}${stageMoverLine(proj)}
-      ${note?`<div style="font-size:13.5px;color:var(--text);margin-top:8px;background:var(--panel);border:1px solid var(--line);border-left:3px solid ${c};border-radius:9px;padding:9px 11px;white-space:pre-wrap;word-break:break-word;line-height:1.45">📝 ${esc(note)}</div>`:""}
-      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <span class="btn3d blue sm" style="pointer-events:none">🔗 ${es?'Abrir en Zoho':'Open in Zoho'} ↗</span>${zohoOpenedBadge(e.dl_number||who)}
-        ${pending?`<button class="btn3d green sm" data-action="crewAck" data-id="${esc(pid)}">✓ ${es?'Etapa actualizada':'Stage updated'}</button><span class="pill" style="background:#ef4444;font-size:9px;font-weight:800;letter-spacing:.3px">⚠ ${es?'CAMBIAR ETAPA':'NEEDS STAGE CHANGE'}</span>`:`<span class="pill" data-action="crewUnack" data-id="${esc(pid)}" title="${es?'Marcar como pendiente otra vez':'Mark pending again'}" style="background:#22c55e;font-size:9px;cursor:pointer">✓ ${es?'Etapa actualizada':'Stage updated'}</span>`}
-        ${canRev?`<button class="btn3d grey sm" data-action="crewRevert" data-id="${esc(pid)}" data-status="${esc(e.status||'')}" title="${es?'Deshacer este estado (enviado por error)':'Undo this status (sent by mistake)'}" style="margin-left:auto">↩ ${es?'Revertir':'Revert'}</button>`:""}
-      </div></div>`;}).join("")
-    :`<div style="color:var(--text-dim);font-size:13px;padding:10px;text-align:center">${es?'Sin actualizaciones de cuadrilla aún':'No crew updates yet'}</div>`;
+  // crewPending is computed from the BUCKETS further down, not from crewFeed — counting an
+  // event that never renders would light the panel red with nothing on screen to acknowledge.
+  /* ── Per-crew grouping ───────────────────────────────────────────────────────────
+     Bucketed through canonCrew() — the same resolver the Crew Records tab uses — so a
+     person name that lands in the `team` column (e.g. "David Radke") folds into their
+     crew instead of rendering as a card of its own. Every CREW_ROSTER crew is rendered
+     even with nothing in the feed, so a silent crew reads as silent instead of vanishing
+     (that is why Crew H and Warehouse Tech always have a card). */
+  /* canonCrew() resolves roster keys and person names, but NOT Zoho's team aliases
+     ("In House #2", "T2 - Leonardo Torres", "Holi"). Without this the same crew renders
+     twice — one roster card falsely reading "silent", one alias card holding the real
+     updates. Mirrors canonTeam() in api/zoho-jobs.js. Never returns "": an event we can't
+     place goes to an Unassigned card, because a dropped event still counts toward the red
+     "needs stage change" badge and would otherwise be impossible to clear. */
+  const dashCrew=function(e){
+    var c=canonCrew(e); if(c&&CREW_ROSTER[c]) return c;
+    var n=String((e&&e.team)||c||"").toLowerCase().replace(/[-_]/g," ").replace(/\s+/g," ").trim();
+    if(/elite crew #?3|in ?house #?3|william sierra|luis vargas/.test(n)) return "Elite Crew #3";
+    if(/elite crew #?2|in ?house #?2|tailor herrera|maykel pimentel/.test(n)) return "Elite Crew #2";
+    if(/crew #?1s|leonardo torres/.test(n)) return "Crew #1S";
+    if(/crew #?2s|david radke/.test(n)) return "Crew #2S";
+    if(/crew #?3s|luis morales/.test(n)) return "Crew #3S";
+    if(/crew h|holi/.test(n)) return "Crew H";
+    if(/roofing/.test(n)) return "Windmar Roofing";
+    return c||(es?"Sin cuadrilla":"Unassigned");
+  };
+  const crewBuckets={}; Object.keys(CREW_ROSTER).forEach(function(c){ crewBuckets[c]=[]; });
+  crewFeed.forEach(function(e){ var c=dashCrew(e); if(/^📐/.test(c)) return; (crewBuckets[c]=crewBuckets[c]||[]).push(e); });
+  // Today's ETA per crew, split by meaning: heading TO a job vs heading BACK to HQ.
+  // Both arrive as "ETA …" strings; merging them into one slot would be misleading.
+  const etaByCrew={};
+  allFeed.filter(function(e){return isEta(e)&&isToday(e)&&!isVoided(e);}).forEach(function(e){
+    var c=dashCrew(e); if(/^📐/.test(c)) return;
+    if(!crewBuckets[c]) crewBuckets[c]=[]; // a crew that has only sent an ETA still gets a card
+    var b=etaByCrew[c]||(etaByCrew[c]={job:null,hq:null});
+    if(/(→|->)\s*(hq|base)|\bto hq\b|\bback to (hq|base)\b/i.test(e.status||"")){ if(!b.hq)b.hq=e; } else if(!b.job) b.job=e; // feed is newest-first
+  });
+  const etaTime=function(s){ return String(s||"").replace(/^\s*eta\s*(→|->)?\s*(hq|base)?\s*/i,"").trim()||String(s||""); };
+  const crewOrder=Object.keys(crewBuckets).sort(function(a,b){
+    var la=crewBuckets[a][0], lb=crewBuckets[b][0];
+    if(!!la!==!!lb) return la?-1:1;                                                    // crews with updates first
+    if(la&&lb) return String(lb.created_at||"").localeCompare(String(la.created_at||"")); // then newest first
+    return a.localeCompare(b);                                                          // silent crews alphabetical
+  });
+  const evLine=function(e){ return [e.dl_number,e.customer].filter(Boolean).join(' ')||e.job_id||''; };
+  const evTime=function(e){ return e.created_at?new Date(e.created_at).toLocaleString(es?'es':'en-US',isToday(e)?{hour:'numeric',minute:'2-digit'}:{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):''; };
+  const crewCard=function(cname){
+    var evs=crewBuckets[cname]||[], ccol=teamColor(cname);
+    var roster=(CREW_ROSTER[cname]||[]).map(function(p){return p.n;}).join(" · ");
+    var eb=etaByCrew[cname]||{};
+    var latest=evs[0]||null; // crewFeed already excludes ETA rows, so [0] is the newest work update
+    var pend=evs.filter(function(e){return e&&e.id!=null&&!ackSet.has(String(e.id));}).length;
+    var etaChip=eb.job
+      ?`<span class="pill" style="background:rgba(6,182,212,.14);border:1px solid rgba(6,182,212,.45);color:#67e8f9;font-size:10.5px">🕒 ${esc(etaTime(eb.job.status))}</span><span style="font-size:11px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(evLine(eb.job))}</span>`
+      :`<span class="pill" style="background:transparent;border:1px solid var(--line);color:var(--text-dim);font-size:10.5px;font-weight:600">${es?'sin ETA hoy':'no ETA today'}</span>`;
+    var hqChip=eb.hq?`<span class="pill" style="background:rgba(168,85,247,.14);border:1px solid rgba(168,85,247,.45);color:#d8b4fe;font-size:10.5px">🏠 HQ ${esc(etaTime(eb.hq.status))}</span>`:"";
+    var box;
+    if(!latest){
+      box=`<div style="margin:0 11px 11px;padding:14px 11px;text-align:center;color:var(--text-dim);font-size:12px;background:var(--bg-2);border:1px dashed var(--line);border-radius:9px">${es?'Sin actualizaciones recientes':'No recent updates'}</div>`;
+    } else {
+      var c=crewC(latest.status), who=evLine(latest)||'Job', note=latest.note?String(latest.note).trim():'';
+      var lpend=latest.id!=null&&!ackSet.has(String(latest.id)), lpid=String(latest.id==null?'':latest.id);
+      var proj=projForDL(latest.dl_number||who);
+      var canRev=latest.id!=null&&(latest.source||'')==='field-hub'&&canRevert();
+      box=`<div style="margin:0 11px 11px;padding:10px 11px;background:var(--bg-2);border:1px solid ${lpend?'#ef4444':'var(--line)'};border-left:4px solid ${c};border-radius:9px;${lpend?'box-shadow:0 0 0 1px #ef444433,0 0 12px -4px #ef444455;':''}" ${lpend?'class="prioPulse"':''}>
+        <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><span style="font-weight:800;font-size:13.5px;color:${c}">${esc(latest.status)}</span><span style="font-size:10.5px;color:var(--text-dim);margin-left:auto">${esc(evTime(latest))}</span></div>
+        ${who?`<div style="font-size:12.5px;margin-top:3px"><b>${esc(latest.dl_number||'')}</b> ${esc(latest.customer||'')}</div>`:""}
+        ${proj?`<span class="pill" style="background:${(STAGE_META[proj.stage]||{c:'var(--wh-grey)'}).c};font-size:9px;margin-top:6px;display:inline-block">${esc(stageLabel(proj.stage))}</span>`:""}${stageMoverLine(proj)}
+        ${note?`<div style="font-size:11.5px;color:var(--text-dim);margin-top:5px;padding-top:5px;border-top:1px dashed var(--line);white-space:pre-wrap;word-break:break-word">📝 ${esc(note)}</div>`:""}
+        <div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <span class="btn3d blue sm" data-action="crewToZoho" data-zurl="${esc(zohoForDL(latest.dl_number||who))}" data-dl="${esc(latest.dl_number||who)}" style="font-size:10.5px;cursor:pointer">🔗 ${es?'Zoho':'Zoho'} ↗</span>${zohoOpenedBadge(latest.dl_number||who)}
+          ${lpend?`<button class="btn3d green sm" data-action="crewAck" data-id="${esc(lpid)}" style="font-size:10.5px">✓ ${es?'Etapa actualizada':'Stage updated'}</button>`:`<span class="pill" data-action="crewUnack" data-id="${esc(lpid)}" title="${es?'Marcar pendiente':'Mark pending again'}" style="background:#22c55e;font-size:9px;cursor:pointer">✓ ${es?'Etapa actualizada':'Stage updated'}</span>`}
+          ${canRev?`<button class="btn3d grey sm" data-action="crewRevert" data-id="${esc(lpid)}" data-status="${esc(latest.status||'')}" style="font-size:10.5px;margin-left:auto">↩</button>`:""}
+        </div></div>`;
+    }
+    var tl=evs.map(function(e){
+      var ec=crewC(e.status), ep=e.id!=null&&!ackSet.has(String(e.id)), eid=String(e.id==null?'':e.id), l=evLine(e);
+      var en=e.note?String(e.note).trim():""; // the crew's actual message — must not be latest-only
+      var erev=e.id!=null&&(e.source||'')==='field-hub'&&canRevert();
+      return `<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid rgba(42,63,122,.5)">
+        <span style="color:var(--text-dim);font-size:10px;min-width:58px;flex:0 0 auto;padding-top:2px">${esc(evTime(e))}</span>
+        <span style="min-width:0;flex:1"><span style="font-weight:700;font-size:12px;color:${ec}">${esc(e.status)}</span>${l?`<div style="color:var(--text-dim);font-size:10.5px">${esc(l)}</div>`:""}${en?`<div style="color:var(--text-dim);font-size:10.5px;margin-top:3px;white-space:pre-wrap;word-break:break-word">📝 ${esc(en)}</div>`:""}</span>
+        <span style="display:flex;gap:4px;flex:0 0 auto;align-items:flex-start">
+        ${ep?`<button class="btn3d green sm" data-action="crewAck" data-id="${esc(eid)}" title="${es?'Etapa actualizada':'Stage updated'}" style="font-size:9px;padding:2px 6px">✓</button>`
+            :`<span class="pill" data-action="crewUnack" data-id="${esc(eid)}" title="${es?'Marcar pendiente':'Mark pending again'}" style="background:#22c55e;font-size:8.5px;cursor:pointer">✓</span>`}
+        ${erev?`<button class="btn3d grey sm" data-action="crewRevert" data-id="${esc(eid)}" data-status="${esc(e.status||'')}" title="${es?'Revertir':'Revert'}" style="font-size:9px;padding:2px 6px">↩</button>`:""}
+        </span></div>`;}).join("");
+    return `<div class="card" style="padding:0;overflow:hidden;border-top:3px solid ${ccol};display:flex;flex-direction:column">
+      <div style="padding:11px 13px 9px">
+        <div style="display:flex;align-items:center;gap:8px"><span style="width:9px;height:9px;border-radius:50%;background:${ccol};flex:0 0 auto;display:inline-block"></span>
+          <b style="font-size:15px;font-weight:900">${esc(cname)}</b>
+          ${pend?`<span class="pill prioPulse" style="background:#ef4444;font-size:9px">⚠ ${pend}</span>`:""}
+          <span class="pill" style="margin-left:auto;background:${ccol};color:${textOn(ccol)};font-size:10px">${evs.length}</span></div>
+        ${roster?`<div style="font-size:11px;color:var(--text-dim);font-weight:600;margin:2px 0 0 17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(roster)}</div>`:""}
+        <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:7px">${etaChip}${hqChip}</div>
+      </div>
+      ${box}
+      ${evs.length?`<details ${S.crewOpen[cname]?"open":""} style="border-top:1px solid var(--line);margin-top:auto"><summary data-action="crewToggle" data-id="${esc(cname)}" style="list-style:none;cursor:pointer;padding:9px 13px;font-size:11.5px;font-weight:800;color:var(--text-dim)">${S.crewOpen[cname]?"▴":"▾"} ${es?'Actualizaciones':'Updates'} (${evs.length})</summary><div style="padding:0 13px 12px">${tl}</div></details>`:""}
+    </div>`;
+  };
+  const crewCards=crewOrder.map(crewCard).join("");
+  // Count what the cards actually show, not the raw feed — an event whose crew can't be
+  // resolved is bucketed under its own card, but the header must never claim more than is visible.
+  const crewShown=crewOrder.reduce(function(n,c){return n+crewBuckets[c].length;},0);
+  const crewPending=crewOrder.reduce(function(n,c){return n+crewBuckets[c].filter(function(e){return e&&e.id!=null&&!ackSet.has(String(e.id));}).length;},0);
   const col=(title,count,color,inner,maxH)=>`<div class="card" style="padding:0;overflow:hidden"><div style="padding:11px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;background:${color}22"><span style="font-weight:800;font-size:14px">${title}</span><span class="pill" style="background:${color};margin-left:auto">${count}</span></div><div style="padding:11px;max-height:${maxH||300}px;overflow:auto">${inner}</div></div>`;
   // Estimator / Plan Analyzer updates (windmar-plan-analyzer) — latest status per job;
   // once a job reaches the completed stage ("BOM Done & Uploaded") it drops off the board.
@@ -1283,28 +1385,21 @@ function attentionHTML(){
       ${note?`<div style="font-size:12px;color:var(--text);margin-top:6px;background:var(--panel);border:1px solid var(--line);border-left:3px solid ${c};border-radius:8px;padding:7px 9px;white-space:pre-wrap;word-break:break-word">📝 ${esc(note)}</div>`:""}</div>`;}).join("")
     :`<div style="color:var(--text-dim);font-size:13px;padding:10px;text-align:center">${es?'Sin actualizaciones del estimador':'No estimator updates'}</div>`;
   // Crew ETAs (field-hub "ETA <time>" status) — latest ETA per job, newest-first.
-  const etaSeen={}; const etaJobs=[];
-  allFeed.filter(e=>isEta(e)&&isToday(e)&&!isVoided(e)).forEach(function(e){ var k=String(e.dl_number||e.job_id||e.customer||'').toUpperCase(); if(!k||etaSeen[k])return; etaSeen[k]=1; etaJobs.push(e); });
-  const etaCards=etaJobs.length?etaJobs.slice(0,40).map(function(e){var who=[e.dl_number,e.customer].filter(Boolean).join(' ')||e.job_id||'Job';var tm=e.created_at?new Date(e.created_at).toLocaleString(es?'es':'en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';var zurl=zohoForDL(e.dl_number||who);
-    return `<div data-action="crewToZoho" data-zurl="${esc(zurl)}" title="${es?'Abrir este trabajo en Zoho':'Open this job in Zoho'}" style="padding:11px 13px;border-radius:11px;background:var(--bg-2);border:1px solid var(--line);border-left:4px solid #06b6d4;margin-bottom:9px;cursor:pointer">
-      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:14px;color:#06b6d4">🕒 ${esc(e.status)}</span><span style="font-size:10px;color:var(--text-dim)">${esc(tm)}</span></div>
-      <div style="font-size:13px;font-weight:700;margin-top:3px">${esc(who)}</div>
-      ${e.team?`<div style="font-size:11.5px;color:var(--text-dim);margin-top:1px">${esc(e.team)}</div>`:""}</div>`;}).join("")
-    :`<div style="color:var(--text-dim);font-size:13px;padding:10px;text-align:center">${es?'Sin ETAs aún':'No ETAs yet'}</div>`;
   const pushSt=window.__pushState||"off";
   const pushBtn=pushSt==="on"?`<span class="pill" style="background:#22c55e;font-size:10px" title="${es?'Recibirás alertas aunque la página esté cerrada':'You will get alerts even when the page is closed'}">🔔 ${es?'Alertas activas':'Alerts ON'}</span>`
     :pushSt==="denied"?`<span class="pill" style="background:var(--wh-grey);font-size:10px" title="${es?'Permite las notificaciones en el navegador':'Allow notifications in your browser settings'}">🔕 ${es?'Bloqueadas':'Blocked'}</span>`
     :pushSt==="unsupported"?``
     :`<button class="btn3d sm" data-action="enablePush" style="background:#ef4444;font-size:11px">🔔 ${es?'Activar alertas (aunque esté cerrada)':'Enable alerts (even when closed)'}</button>`;
-  const crewCol=`<div class="card" style="padding:0;overflow:hidden;border:1.5px solid ${crewPending?'#ef444488':'#F89B2455'}"><div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:${crewPending?'#ef444418':'#F89B2422'}"><span style="font-weight:900;font-size:17px">👷 ${es?'Actualizaciones de Cuadrilla':'Crew Updates'}</span><span style="font-size:11px;color:var(--text-dim)">${es?'en vivo desde el Field HUB':'live from Field HUB'}</span>${crewPending?`<span class="pill prioPulse" style="background:#ef4444;font-size:11px;font-weight:800">⚠ ${crewPending} ${es?'requieren cambio de etapa':'need stage change'}</span>`:''}<span style="margin-left:auto;display:flex;align-items:center;gap:8px">${pushBtn}<span class="pill" style="background:#F89B24;font-size:13px;padding:3px 11px">${crewFeed.length}</span></span></div><div style="padding:14px;max-height:520px;overflow:auto">${crewCards}</div></div>`;
+  const crewCol=`<div class="card" style="padding:0;overflow:hidden;border:1.5px solid ${crewPending?'#ef444488':'#F89B2455'}"><div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:${crewPending?'#ef444418':'#F89B2422'}"><span style="font-weight:900;font-size:17px">👷 ${es?'Actualizaciones de Cuadrilla':'Crew Updates'}</span><span style="font-size:11px;color:var(--text-dim)">${es?'en vivo desde el Field HUB':'live from Field HUB'}</span>${crewPending?`<span class="pill prioPulse" style="background:#ef4444;font-size:11px;font-weight:800">⚠ ${crewPending} ${es?'requieren cambio de etapa':'need stage change'}</span>`:''}<span style="margin-left:auto;display:flex;align-items:center;gap:8px">${pushBtn}<span class="pill" style="background:#F89B24;font-size:13px;padding:3px 11px">${crewShown}</span></span></div><div style="padding:14px;display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));align-items:stretch;max-height:min(78vh,900px);overflow:auto">${crewCards}</div></div>`;
   return `<div class="card rise" style="padding:16px 18px;margin-bottom:18px;border-left:6px solid var(--wh-orange)">
     <div class="tap" data-action="attnToggle" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;cursor:pointer"><span style="font-weight:900;font-size:18px">🔔 ${es?'Atención Requerida':'Needs Attention'}</span><span style="margin-left:auto;color:var(--text-dim);font-size:12px">${es?'ocultar ▴':'hide ▴'}</span></div>
     <div style="margin-bottom:14px">${crewCol}</div>
     <div class="stagger" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px">
       ${col("⏳ "+(es?'Estancados >3 días':'Stuck >3 days'),stuck.length,"#DC2626",stuckCards)}
-      ${col("🔍 "+(es?'Inspecciones':'Inspections'),inspNeed.length,"#0EA5E9",inspCards)}
-      ${col("🕒 "+(es?'ETAs en camino (hoy)':'ETAs en route (today)'),etaJobs.length,"#06b6d4",etaCards)}
       ${col("📐 "+(es?'Actualizaciones del Estimador':'Project Estimator Updates'),planJobs.length,"#8B5CF6",planCards)}
+      ${/* Inspections column removed — that work now lives on Coordinator → Schedule Nearest
+            Crew, which ranks it against live crew GPS. ETAs column removed — every ETA now
+            renders under its crew's name above and on the crew's job card below. */""}
     </div></div>`;
 }
 function notifPanelHTML(){
@@ -2161,6 +2256,7 @@ function itineraryHTML(){
   const fJobs=S.boardFilter==="all"?dayJobs:dayJobs.filter(j=>jobCat(j)===S.boardFilter);
   const sel=S.selectedJob?activeJobs().find(j=>j.id===S.selectedJob):null;
   const dayCrews=boardCrews(fJobs);
+  const ETAMAP=etaByDL(); // today's crew ETAs, keyed by DL — surfaced on each job chip
   const cols=dayCrews.map(crew=>{
     const cj=fJobs.filter(j=>j.crew===crew.id).sort((a,b)=>(a.hhmm||a.window||"").localeCompare(b.hhmm||b.window||""));
     const chips=cj.length?cj.map(job=>{const s=JOB_CODE[job.code];
@@ -2171,6 +2267,7 @@ function itineraryHTML(){
         <div style="font-weight:800;font-size:15px;margin-top:6px">${esc(job.project)}</div>
         <div style="font-size:12.5px;opacity:.95;margin-top:2px">${esc(job.window)}</div>
         <div style="font-size:12px;opacity:.9;margin-top:4px">📍 ${esc(job.address)}</div>
+        ${(function(){var k=String(job.num||job.id||"").toUpperCase().replace(/\s+/g,"");var m=k&&ETAMAP[k];return m?`<div style="margin-top:6px"><span style="display:inline-flex;align-items:center;gap:4px;background:rgba(255,255,255,.20);border:1px solid rgba(255,255,255,.40);border-radius:6px;padding:2px 7px;font-size:11px;font-weight:800">🕒 ETA ${esc(m.t)}${m.crew?" · "+esc(m.crew):""}</span></div>`:"";})()}
         <div style="margin-top:8px"><span class="pill" style="background:${stageMeta(jobCat(job)).color}">${stageMeta(jobCat(job)).icon} ${stageText(jobCat(job))}</span></div></div>`;
     }).join(""):`<div style="color:var(--text-dim);font-size:13px;padding:24px 8px;text-align:center">${t("noJobs")}</div>`;
     return `<div class="card" style="padding:14px">
@@ -2895,8 +2992,11 @@ document.addEventListener("click",e=>{
     case "attnToggle": S.attnOpen=!S.attnOpen; render(); break;
     case "crewToZoho": { const u=el.getAttribute("data-zurl"); const dl=el.getAttribute("data-dl"); if(dl) zohoOpenedAdd(dl); if(u) window.open(u,"_blank","noopener"); render(true); break; }
     case "enablePush": if(window.wmEnablePush) window.wmEnablePush(); break;
-    case "crewAck": stageAck(id); render(); break;
-    case "crewUnack": stageUnack(id); render(); break;
+    // render(true) — the silent variant. A plain render() replays every entry animation
+    // page-wide on each ✓, which is unusable when clearing a crew's backlog.
+    case "crewAck": stageAck(id); render(true); break;
+    case "crewUnack": stageUnack(id); render(true); break;
+    case "crewToggle": S.crewOpen[id]=!S.crewOpen[id]; render(true); break;
     case "crewRevert": {
       if(window.WM_VIEWER){ try{ alert(S&&S.lang==="es"?"Solo lectura — no tienes permiso para editar.":"View only — you don't have permission to make changes."); }catch(e){} return; }
       const es=S.lang==="es";
