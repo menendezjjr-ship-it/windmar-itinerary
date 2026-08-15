@@ -963,7 +963,10 @@ async function loadProjects(silent,fresh){
     } else if(j&&j.configured){ S.proj.status="error"; S.proj.ok=false; S.proj.list=[]; S.proj.err=j.error||"error"; }
     else { S.proj.status="unconfigured"; S.proj.ok=false; S.proj.list=[]; }
   }catch(e){ S.proj.status="error"; S.proj.ok=false; S.proj.err=String(e); }
-  if(!silent || S.tab==="projects" || S.tab==="itinerary") render(silent);
+  // "coordinator" is in this list because that tab renders project-derived data too
+  // (coordItems + the Schedule Nearest Crew panel); without it the 75s silent refresh
+  // updates S.proj.list but never repaints, leaving a stale list with no sign it's stale.
+  if(!silent || S.tab==="projects" || S.tab==="itinerary" || S.tab==="coordinator") render(silent);
 }
 // Notify when a project ENTERS Engineering. Seeds silently on first load so the
 // current backlog doesn't all fire; persists across reloads via localStorage.
@@ -1570,7 +1573,24 @@ function coordinatorHTML(){
       body=controls+`<div class="coord-report">${shownBuckets.map(b=>coordSectionHTML(b,groups[b],searching)).join("")}</div>`;
     }
   }
-  return `<div class="fade">${head}${body}${C.selected?coordDetailModal():""}</div>`;
+  // 🗺 Schedule Nearest Crew — pending inspections ranked against live crew GPS.
+  // Moved here from Projects → Inspections so the whole team finds it in one place.
+  // Data: inspections come from S.proj.list (setTab "coordinator" loads it); the
+  // dispatchToggle handler pulls live fleet GPS when it is opened.
+  // Inspections come from S.proj (a DIFFERENT feed than the Coordinator report, which uses
+  // /api/zoho-ready). If that feed is down or still cold, S.proj.list is [] and dispatchHTML
+  // renders "No inspections need scheduling 🎉" — an all-clear that is simply wrong. Mirror
+  // the status gate projectsHTML uses so a missing feed reads as missing, not as "nothing to do".
+  // Allow-list rather than deny-list: only "live", or a list we already hold (silent refresh).
+  // "idle" (first paint, before loadProjects runs), "loading" from cold, "error" and
+  // "unconfigured" all mean we do NOT know the inspection set and must not imply zero.
+  const dispReady=(P.status==="live")||!!(P.list&&P.list.length);
+  // Count what the panel will actually rank (dispatchItems), not the wider missing+ready set —
+  // otherwise the button can say 12 while the panel says there is nothing to schedule.
+  const dispN=dispReady?dispatchItems().length:0;
+  const dispToggle=`<div style="margin:8px 0 4px"><button class="btn3d ${S.dispatch.open?'':'ghost'} sm" data-action="dispatchToggle" style="${S.dispatch.open?'background:#0EA5E9':''}">🗺 ${es?'Programar Cuadrilla Más Cercana':'Schedule Nearest Crew'} ${dispReady?dispN:'—'}</button></div>`;
+  const dispPanel=!S.dispatch.open?"":(dispReady?dispatchHTML():`<div class="card" style="padding:22px;text-align:center;color:var(--text-dim)">${(P.status==="error"||P.status==="unconfigured")?("⚠ "+(es?"No se pudieron cargar las inspecciones — reintenta en un momento.":"Couldn't load inspections — try again in a moment.")):("⟳ "+(es?"Cargando inspecciones…":"Loading inspections…"))}</div>`);
+  return `<div class="fade">${head}${dispToggle}${dispPanel}${body}${C.selected?coordDetailModal():""}</div>`;
 }
 // One report section: a clickable collapsible header row (caret + icon + name + count) over compact one-line rows.
 function coordSectionHTML(bucket,items,searching){ const m=coordBucketMeta(bucket); const es=S.lang==="es";
@@ -1905,15 +1925,14 @@ function projectsHTML(){
   let groups;
   if(P.stageFilter==="inspections"){
     const entries=inspEntriesFrom(list); const rank={missing:0,ready:1,pending:2,scheduled:3,approved:4}; const TYPES=["vip","final","roofing"];
-    const needN=inspNeedsScheduling().length;
-    const dispToggle=`<div style="margin:8px 0 4px"><button class="btn3d ${S.dispatch.open?'':'ghost'} sm" data-action="dispatchToggle" style="${S.dispatch.open?'background:#0EA5E9':''}">🗺 ${S.lang==='es'?'Programar Cuadrilla Más Cercana':'Schedule Nearest Crew'} ${needN}</button></div>`;
-    if(S.dispatch.open){ groups=dispToggle+dispatchHTML(); }
-    else groups=dispToggle+`<div style="color:var(--text-dim);font-size:13px;margin:6px 0 4px">${S.lang==='es'?'Inspecciones entre Instalación y Post-Instalación, separadas por tipo (Final vs Techo). Rojo = falta programar.':'Inspections between Install and Post-Installation, split by type (Final vs Roofing). Red = needs scheduling.'}</div>`+
+    // Schedule Nearest Crew used to live here behind a toggle; it now lives in the
+    // Coordinator tab so everyone reaches it from the same place.
+    groups=`<div style="color:var(--text-dim);font-size:13px;margin:6px 0 4px">${S.lang==='es'?'Inspecciones entre Instalación y Post-Instalación, separadas por tipo (Final vs Techo). Rojo = falta programar.':'Inspections between Install and Post-Installation, split by type (Final vs Roofing). Red = needs scheduling.'}</div>`+
       TYPES.map(ty=>{ const te=entries.filter(e=>e.it.type===ty); if(!te.length) return ""; const tm=inspTypeMeta(ty);
         te.sort((a,b)=>rank[a.it.status]-rank[b.it.status]||String(a.p.num).localeCompare(String(b.p.num)));
         return `<div style="margin:18px 0 8px;display:flex;align-items:center;gap:8px"><span style="width:12px;height:12px;border-radius:3px;background:${tm.c}"></span><div style="font-weight:900;font-size:15px">🔍 ${esc(inspTypeText(ty))}</div><span style="color:var(--text-dim);font-weight:700">(${te.length})</span></div><div class="stagger" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px">${te.map(e=>inspEntryCard(e.p,e.it)).join("")}</div>`;
       }).join("");
-    if(!entries.length&&!S.dispatch.open) groups+=`<div style="color:var(--text-dim);padding:16px">${S.lang==='es'?'Sin inspecciones':'No inspections'}</div>`;
+    if(!entries.length) groups+=`<div style="color:var(--text-dim);padding:16px">${S.lang==='es'?'Sin inspecciones':'No inspections'}</div>`;
   } else {
     const shown=P.stageFilter==="all"?STAGE_ORDER:[P.stageFilter];
     groups=shown.map(s=>{
@@ -2595,7 +2614,7 @@ const TABS=[
    identified (staff-code login, Supabase unreachable) everyone sees all tabs. A lookup
    failure must never lock someone out of the app. */
 const USER_TABS={
-  "maria.robles@windmarhome.com":["itinerary","coordinator","calendar","crews"],
+  "maria.robles@windmarhome.com":["itinerary","coordinator","calendar","crews","records"],
 };
 function allowedTabs(){
   const key=String(window.wmUser||"").trim().toLowerCase();
@@ -2763,11 +2782,11 @@ function _render(noAnim){
     }
   }
   // Schedule Nearest Crew dispatch (Projects → Inspections)
-  if(S.tab==="projects" && S.proj.stageFilter==="inspections" && S.dispatch.open){
+  if(S.tab==="coordinator" && S.dispatch.open){
     const items=dispatchItems(), sig=items.map(i=>i.id+":"+geoKey(i.address)).join("|"), G=S.dispatch.geo||{status:"idle"};
     if(items.length && G.status!=="geocoding" && S.dispatch.sig!==sig){
       S.dispatch.sig=sig; S.dispatch.geo={status:"geocoding",done:0,total:items.length,pins:[]};
-      setTimeout(()=>geocodeInto(S.dispatch.geo, items, ()=>{ if(S.tab==="projects"&&S.proj.stageFilter==="inspections"&&S.dispatch.open) render(true); }),0);
+      setTimeout(()=>geocodeInto(S.dispatch.geo, items, ()=>{ if(S.tab==="coordinator"&&S.dispatch.open) render(true); }),0);
     } else if(G.status==="ready" && document.getElementById("dispPinMap")){
       const ipins=(G.pins||[]).map(p=>Object.assign({kind:"insp"},p));
       const cpins=dispatchCrews().map(c=>({kind:"crew",lat:c.gps.lat,lon:c.gps.lon,name:c.name,addr:c.addr,mph:c.mph}));
