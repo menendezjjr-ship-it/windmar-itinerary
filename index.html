@@ -172,7 +172,7 @@ const LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAoAAAAGNCAYAAACBu8BgAADG8ElEQVR42uz9fX
 const I18N = {
  en:{
   appName:"Itinerary", appTagline:"Dispatch & Field Operations", lang:"Español",
-  tab_itinerary:"Dashboard", tab_coordinator:"Coordinator", tab_projects:"Projects", tab_crews:"Crews", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_records:"Crew Records", tab_instmap:"Install Map", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar",
+  tab_itinerary:"Dashboard", tab_coordinator:"Coordinator", tab_projects:"Projects", tab_crews:"Crews", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_records:"Field Status Record", tab_instmap:"Install Map", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar",
   // job codes
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Solar / Battery Install", jc_RDL_long:"Re-Roof + Solar", jc_RL_long:"Roofing", jc_S_long:"Service Call", jc_MSP_long:"Main Service Panel Upgrade",
@@ -222,7 +222,7 @@ const I18N = {
  },
  es:{
   appName:"Itinerario", appTagline:"Despacho y Operaciones de Campo", lang:"English",
-  tab_itinerary:"Panel", tab_coordinator:"Coordinador", tab_projects:"Proyectos", tab_crews:"Cuadrillas", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_records:"Registros de Cuadrilla", tab_instmap:"Mapa de Instalaciones", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario",
+  tab_itinerary:"Panel", tab_coordinator:"Coordinador", tab_projects:"Proyectos", tab_crews:"Cuadrillas", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_records:"Registro de Estado de Campo", tab_instmap:"Mapa de Instalaciones", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario",
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Instalación Solar / Batería", jc_RDL_long:"Re-Techado + Solar", jc_RL_long:"Techado", jc_S_long:"Llamada de Servicio", jc_MSP_long:"Mejora del Panel Principal",
   legend:"Leyenda de Códigos", crew:"Cuadrilla", today:"Hoy", prevDay:"Anterior", nextDay:"Siguiente",
@@ -2597,7 +2597,7 @@ function crewRecordsHTML(){
   const dayLabel=(k)=>{ if(k===todayK)return es?"Hoy":"Today"; if(k===yK)return es?"Ayer":"Yesterday"; return new Date(k+"T12:00:00").toLocaleDateString(es?"es":"en-US",{weekday:"short",month:"short",day:"numeric"}); };
   const timeOnly=(iso)=>iso?new Date(iso).toLocaleTimeString(es?"es":"en-US",{hour:"numeric",minute:"2-digit"}):"";
   const head=`<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:4px">
-    <div><div style="font-weight:900;font-size:22px">📋 ${es?"Registros de Cuadrilla":"Crew Records"}</div>
+    <div><div style="font-weight:900;font-size:22px">📋 ${es?"Registro de Estado de Campo":"Field Status Record"}</div>
       <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Historial permanente, por fecha. Filtra por cuadrilla o persona.":"Permanent log, by date. Filter by crew or person."}</div></div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span class="pill" style="background:${R.status==="live"?"var(--jc-DL)":"var(--wh-grey)"}">${R.status==="live"?(filtered.length+" "+(es?"registros":"records")):(R.status==="loading"?(es?"Cargando…":"Loading…"):"—")}</span>
@@ -2779,9 +2779,9 @@ function zohoHTML(){
 const TABS=[
   {id:"itinerary",key:"tab_itinerary",fn:itineraryHTML},
   {id:"coordinator",key:"tab_coordinator",fn:coordinatorHTML},
+  {id:"crews",key:"tab_crews",fn:crewsHTML},
   {id:"projects",key:"tab_projects",fn:projectsHTML},
   {id:"calendar",key:"tab_calendar",fn:calendarTabHTML},
-  {id:"crews",key:"tab_crews",fn:crewsHTML},
   {id:"weather",key:"tab_weather",fn:weatherHTML},
   {id:"sitecapture",key:"tab_sitecapture",fn:siteCaptureHTML},
   {id:"records",key:"tab_records",fn:crewRecordsHTML},
@@ -3795,7 +3795,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
     function findTab(rx){ for(var i=0;i<tabs.length;i++){ if(rx.test(tabs[i].textContent||"")) return tabs[i]; } return null; }
     var steps=[{ sel:null, title:T("Hey, I'm WinMI! 👋","¡Hola, soy WinMI! 👋"), body:T("Give me ~30 seconds and I'll show you what this app can do. You can skip anytime — let's go!","Dame ~30 segundos y te muestro lo que hace esta app. Puedes saltar cuando quieras. ¡Vamos!") }];
     var add=function(rx,title,body){ var el=findTab(rx); if(el) steps.push({ el:el, title:title, body:body }); };
-    add(/itinerary|itinerario/i, T("🏠 Itinerary — your home base","🏠 Itinerario — tu base"),
+    add(/dashboard|panel|itinerary|itinerario/i, // tab was renamed Dashboard/Panel — old words kept so the step can't silently vanish again T("🏠 Itinerary — your home base","🏠 Itinerario — tu base"),
       T("The 'Needs Attention' board up top shows live crew updates, jobs stuck over 3 days, tomorrow's visits and inspections. Tap a crew update to open it in Zoho and change the stage.","El tablero 'Requiere Atención' muestra actualizaciones de cuadrillas en vivo, trabajos atascados +3 días, visitas de mañana e inspecciones. Toca una actualización para abrirla en Zoho y cambiar la etapa."));
     add(/coordinator|coordinador/i, T("📋 Coordinator — schedule with ease","📋 Coordinador — programa fácil"),
       T("Every job ready to schedule, in one list. Flip to '📍 By Area' and I'll group nearby jobs and give you a one-tap 🧭 Route in Google Maps. Click a job to edit its stage or add a note with photos.","Todos los trabajos listos para programar. Cambia a '📍 Por zona' y agrupo los cercanos con un botón 🧭 Ruta en Google Maps. Toca un trabajo para editar su etapa o agregar una nota con fotos."));
