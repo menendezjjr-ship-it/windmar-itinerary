@@ -3449,7 +3449,12 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
           var fresh=rows.filter(function(r){return !seenSet[r.id]&&!voided(r);}); // never toast a reverted row
           if(fresh.length){localStorage.setItem(KEY,JSON.stringify(rows.map(function(r){return r.id;}).concat(seen).slice(0,300)));fresh.reverse().forEach(toast);}
         }
-        if(changed&&S.tab==='itinerary'&&typeof render==='function'){try{render(true);}catch(e){}}
+        // Repaint the CALENDAR too, not just the Dashboard. The crew ✓ and the crew cards both
+        // read window.CREW_FEED, and this poll is the only thing that refreshes it — gating the
+        // re-render on 'itinerary' meant a coordinator sitting on the Calendar tab never saw a
+        // crew's Complete tick appear, because the feed updated underneath a screen that never
+        // repainted. That is why the ✓ looked like it wasn't working.
+        if(changed&&(S.tab==='itinerary'||S.tab==='calendar')&&typeof render==='function'){try{render(true);}catch(e){}}
       }).catch(function(){});
   }
   // Revert (soft-delete) a mistaken crew status. The anon key can NEITHER UPDATE nor DELETE this
