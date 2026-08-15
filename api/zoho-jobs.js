@@ -154,7 +154,7 @@ function latestFile(field) {
 }
 // A service ticket can have up to 3 scheduled visits (Scheduled_Visit_1/2/3), each with its own
 // technician (Assigned_Technician / Assigned_Technician_Visit_2 / Assigned_Technician_Visit_3).
-const SERVICE_FIELDS = "Service_Type1,Area_of_Service,Name,Scheduled_Visit_1,Assigned_Technician,Scheduled_Visit_2,Assigned_Technician_Visit_2,Scheduled_Visit_3,Assigned_Technician_Visit_3,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description,Priority";
+const SERVICE_FIELDS = "Service_Type1,Area_of_Service,Number_of_Reserved_Time_Blocks_1,Number_of_Reserved_Time_Blocks_2,Number_of_Reserved_Time_Blocks_3,Reserved_Block_Time_Visit_1,Reserved_Block_Time_Visit_2,Reserved_Block_Time_3,Name,Scheduled_Visit_1,Assigned_Technician,Scheduled_Visit_2,Assigned_Technician_Visit_2,Scheduled_Visit_3,Assigned_Technician_Visit_3,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description,Priority";
 
 // Editable Service_Ticket fields surfaced to the Coordinator/Calendar editor. Ticket_Status is
 // the "Stage". Type_of_Service (multiselect) + Assigned_Technician* (lookups) are read-only display;
@@ -218,6 +218,20 @@ export function mapInstall(r, todayISO) {
   };
 }
 
+// Service work is reserved in 2-HOUR BLOCKS. Number_of_Reserved_Time_Blocks_N = how many
+// consecutive blocks visit N consumes (Zoho integer, 1 digit); Reserved_Block_Time_Visit_N =
+// which part of the day it starts in (Early Morning / Late Morning / Early Afternoon /
+// Late Afternoon — four blocks span a working day, so 4 blocks = 8h = all day).
+// NOTE the API name for visit 3 is Reserved_Block_Time_3 — no "_Visit". Verified via getFields.
+const BLOCK_HOURS = 2;
+function visitBlocks(r, n) {
+  const raw = n === 1 ? r.Number_of_Reserved_Time_Blocks_1 : n === 2 ? r.Number_of_Reserved_Time_Blocks_2 : r.Number_of_Reserved_Time_Blocks_3;
+  const winRaw = n === 1 ? r.Reserved_Block_Time_Visit_1 : n === 2 ? r.Reserved_Block_Time_Visit_2 : r.Reserved_Block_Time_3;
+  const blocks = Math.max(0, Number(raw) || 0);
+  const win = String((winRaw && typeof winRaw === "object" ? winRaw.name : winRaw) || "").trim();
+  return { blocks, hours: blocks * BLOCK_HOURS, blockWindow: /^-?\s*none\s*-?$/i.test(win) ? "" : win };
+}
+
 // Map ONE scheduled visit of a service ticket → a calendar job. `visitN` (1|2|3) picks the date +
 // technician; visitDateField/visitTechField tell the editor which Zoho fields THIS card writes to
 // (so rescheduling a "Visit 2" card never clobbers Visit 1).
@@ -272,7 +286,8 @@ function mapServiceVisit(r, todayISO, visitN, dt, tech) {
     status,
     cat,
     rawStatus: st,
-    msp: isMsp, // MSP service work, from Service_Type1
+    msp: isMsp, // MSP service work, from Service_Type1 / Area_of_Service
+    ...visitBlocks(r, visitN), // blocks / hours / blockWindow for THIS visit
     phone: "",
     geo: null,
     scope: ((svc || "Service").replace(/\(\d+\)\s*/g, "").trim()) + (visitN > 1 ? ` · Visit ${visitN}` : ""),

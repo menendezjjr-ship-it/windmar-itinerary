@@ -636,6 +636,8 @@ function jobTipHTML(r){ if(!r) return ""; const t=jtInfo(r), es=S.lang==="es", c
     +line(es?"Fecha":"Date", dateStr+(r.startTime?" · "+r.startTime:""))
     +line(es?"Dirección":"Address", r.address)
     +line(r.type==="service"?(es?"Servicio":"Service"):(es?"Alcance":"Scope"), r.scope)
+    // Reserved duration: N blocks × 2h. Shown before the coordinator commits another job.
+    +(r.type==="service"&&r.hours>0?line(es?"Duración":"Duration",`${r.blocks} ${r.blocks===1?(es?"bloque":"block"):(es?"bloques":"blocks")} · ${r.hours}h${r.blockWindow?" · "+r.blockWindow:""}`):"")
     +line(es?"Estado":"Status", r.status)
     +((r.type!=="service"&&r.installNotes)?`<div style="margin-top:6px;padding-top:6px;border-top:1px solid #2A3F7A;color:#ffd9a8"><span style="font-weight:700">📝 </span>${esc(String(r.installNotes).length>160?String(r.installNotes).slice(0,157)+"…":r.installNotes)}</div>`:"");
 }
@@ -679,8 +681,11 @@ function calChip(r,cont){
   const base="display:block;width:100%;box-sizing:border-box;font-size:11.5px;padding:4px 7px;margin-bottom:3px;border-radius:6px;cursor:pointer;overflow:hidden;font-weight:700;line-height:1.3;";
   const style=base+"background:"+tc+";color:"+textOn(tc)+";"+(hot?"border-left:4px solid #ef4444;":"");
   const tm=(!cont&&r.startTime)?`<span style="opacity:.85;font-weight:600">${esc(r.startTime.replace(/:00 /," ").replace(" ",""))} </span>`:"";
+  // How long this visit is booked for, in reserved 2-hour blocks (4 blocks = 8h = all day).
+  // On the chip so a coordinator can see a crew is already tied up before stacking another job.
+  const dur=(isS&&r.hours>0)?`<span style="opacity:.95;font-weight:800;background:rgba(0,0,0,.22);border-radius:4px;padding:0 4px;margin-left:3px">${r.hours}h</span>`:"";
   const addr=r.address?`<div style="font-size:10px;font-weight:500;opacity:.82;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px">📍 ${esc(r.address)}</div>`:"";
-  return `<div data-action="calSelectJob" data-id="${esc(r.id)}" data-jtip="${esc(r.id)}" style="${style}"><div style="display:flex;align-items:center;gap:4px;overflow:hidden;white-space:nowrap"><span style="flex-shrink:0">${cont?"↪":jobTypeIcon(r)}</span><span style="overflow:hidden;text-overflow:ellipsis">${tm}${esc(r.dlNumber||r.customerName||"")}</span></div>${addr}</div>`;
+  return `<div data-action="calSelectJob" data-id="${esc(r.id)}" data-jtip="${esc(r.id)}" style="${style}"><div style="display:flex;align-items:center;gap:4px;overflow:hidden;white-space:nowrap"><span style="flex-shrink:0">${cont?"↪":jobTypeIcon(r)}</span><span style="overflow:hidden;text-overflow:ellipsis">${tm}${esc(r.dlNumber||r.customerName||"")}</span>${dur}</div>${addr}</div>`;
 }
 function calRow(r,cont){
   const col=teamColor(r.team), isS=r.type==="service";

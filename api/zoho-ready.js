@@ -178,7 +178,7 @@ function buildInstallRec(row) {
   return rec;
 }
 const INSTALL_FIELDS = ["Name", "Deal", "MSP_Upgrade_Required", "Battery_Type"].concat(INSTALL_EDIT_FIELDS).filter((v, i, a) => a.indexOf(v) === i).join(",");
-const SERVICE_FIELDS = "Service_Type1,Area_of_Service,Name,Scheduled_Visit_1,Assigned_Technician,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description,Priority";
+const SERVICE_FIELDS = "Service_Type1,Area_of_Service,Number_of_Reserved_Time_Blocks_1,Number_of_Reserved_Time_Blocks_2,Number_of_Reserved_Time_Blocks_3,Reserved_Block_Time_Visit_1,Reserved_Block_Time_Visit_2,Reserved_Block_Time_3,Name,Scheduled_Visit_1,Assigned_Technician,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description,Priority";
 
 // Editable Service_Ticket fields for the Coordinator/Calendar service editor (mirrors zoho-jobs.js).
 const SERVICE_EDIT_FIELDS = ["Ticket_Status", "Priority", "Type_of_Service", "Service_Description", "Scheduled_Visit_1", "Assigned_Technician"];
@@ -268,7 +268,11 @@ function mapReadyService(r, todayISO) {
     cat,
     stage: st,
     rawStatus: st,
-    msp: isMsp, // MSP service work, from Service_Type1
+    msp: isMsp, // MSP service work, from Service_Type1 / Area_of_Service
+    // 2-hour reserved blocks for visit 1 (this feed is pre-schedule, so only visit 1 applies).
+    blocks: Math.max(0, Number(r.Number_of_Reserved_Time_Blocks_1) || 0),
+    hours: Math.max(0, Number(r.Number_of_Reserved_Time_Blocks_1) || 0) * 2,
+    blockWindow: (function(){ var w=String((r.Reserved_Block_Time_Visit_1 && typeof r.Reserved_Block_Time_Visit_1==="object" ? r.Reserved_Block_Time_Visit_1.name : r.Reserved_Block_Time_Visit_1)||"").trim(); return /^-?\s*none\s*-?$/i.test(w)?"":w; })(),
     phone: "",
     geo: null,
     scope: (svc || "Service").replace(/\(\d+\)\s*/g, "").trim(),
