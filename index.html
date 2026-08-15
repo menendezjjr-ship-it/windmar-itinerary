@@ -172,7 +172,7 @@ const LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAoAAAAGNCAYAAACBu8BgAADG8ElEQVR42uz9fX
 const I18N = {
  en:{
   appName:"Itinerary", appTagline:"Dispatch & Field Operations", lang:"Español",
-  tab_itinerary:"Dashboard", tab_coordinator:"Coordinator", tab_projects:"Projects", tab_crews:"Crews", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_records:"Field Status Record", tab_instmap:"Install Map", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar",
+  tab_itinerary:"Dashboard", tab_coordinator:"Coordinator", tab_projects:"Projects", tab_crews:"Dispatch", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_records:"Field Status Record", tab_instmap:"Install Map", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar",
   // job codes
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Solar / Battery Install", jc_RDL_long:"Re-Roof + Solar", jc_RL_long:"Roofing", jc_S_long:"Service Call", jc_MSP_long:"Main Service Panel Upgrade",
@@ -222,7 +222,7 @@ const I18N = {
  },
  es:{
   appName:"Itinerario", appTagline:"Despacho y Operaciones de Campo", lang:"English",
-  tab_itinerary:"Panel", tab_coordinator:"Coordinador", tab_projects:"Proyectos", tab_crews:"Cuadrillas", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_records:"Registro de Estado de Campo", tab_instmap:"Mapa de Instalaciones", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario",
+  tab_itinerary:"Panel", tab_coordinator:"Coordinador", tab_projects:"Proyectos", tab_crews:"Despacho", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_records:"Registro de Estado de Campo", tab_instmap:"Mapa de Instalaciones", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario",
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Instalación Solar / Batería", jc_RDL_long:"Re-Techado + Solar", jc_RL_long:"Techado", jc_S_long:"Llamada de Servicio", jc_MSP_long:"Mejora del Panel Principal",
   legend:"Leyenda de Códigos", crew:"Cuadrilla", today:"Hoy", prevDay:"Anterior", nextDay:"Siguiente",
@@ -3829,7 +3829,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
       T("See every crew's week — installs ⚡ and services 🔧 by crew and day. Switch to 🗺 Map, Month or List. Tap any job to edit it or read the full work order.","Ve la semana de cada cuadrilla — instalaciones ⚡ y servicios 🔧 por cuadrilla y día. Cambia a 🗺 Mapa, Mes o Lista. Toca un trabajo para editarlo o leer la orden completa."));
     add(/projects|proyectos/i, T("📊 Projects — the pipeline","📊 Proyectos — el flujo"),
       T("Your whole Zoho pipeline by stage. Filter to 🔍 Inspections to see what needs scheduling, then use 'Schedule Nearest Crew' to send the closest crew.","Todo tu flujo de Zoho por etapa. Filtra a 🔍 Inspecciones para ver qué falta programar y usa 'Cuadrilla más cercana' para enviar la más cerca."));
-    add(/crews|cuadrillas/i, T("🚚 Crews — live GPS","🚚 Cuadrillas — GPS en vivo"),
+    add(/dispatch|despacho|crews|cuadrillas/i, T("🚚 Dispatch — live crew GPS","🚚 Despacho — GPS de cuadrillas en vivo"),
       T("Live truck locations for the whole install team. Emergency? Type an address in 'Emergency Dispatch Routing' and I'll find the closest crew + ETA.","Ubicación en vivo de todos los camiones del equipo. ¿Emergencia? Escribe una dirección en 'Ruta de Despacho' y encuentro la cuadrilla más cercana + tiempo estimado."));
     add(/weather|clima/i, T("🌤 Weather — work safe","🌤 Clima — trabaja seguro"),
       T("7-day forecast and safety alerts before rooftop work — plus LOTO steps and bilingual site phrases.","Pronóstico de 7 días y alertas de seguridad antes de trabajar en techo — además pasos LOTO y frases bilingües."));
