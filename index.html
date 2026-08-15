@@ -578,6 +578,79 @@ function calTMin(r){ if(!r) return 1e9;
   var m=s.match(/(\d{1,2}):(\d{2})\s*([AaPp][Mm])?/); if(!m) return 1e9;
   var hh=+m[1], mm=+m[2], ap=(m[3]||"").toUpperCase(); if(ap==="PM"&&hh!==12)hh+=12; if(ap==="AM"&&hh===12)hh=0; return hh*60+mm;
 }
+/* ── Crew card: plain-language service ticket + step diagram ───────────────────────
+   Same structural parse the Field HUB uses (windmar-operations/src/crewCard.js). Every line
+   shown is LIFTED from the Zoho description — no model, no rewording, nothing inferred. A
+   ticket that does not follow WindMar's numbered template returns null and the caller shows
+   the original text verbatim rather than a half-parsed guess. */
+function crewCardParse(desc){
+  var raw=String(desc==null?"":desc).replace(/\r/g,"").trim(); if(!raw) return null;
+  var lines=raw.split("\n").map(function(s){return s.trim();}).filter(Boolean);
+  var sec={},cur=null,i,m,b;
+  for(i=0;i<lines.length;i++){
+    m=lines[i].match(/^([123])\.\s*(.*)$/);
+    if(m){ cur=m[1]; sec[cur]={head:m[2].trim(),bul:[]}; continue; }
+    b=lines[i].match(/^[-•]\s*(.*)$/);
+    if(b&&cur){ if(b[1].trim()) sec[cur].bul.push(b[1].trim()); continue; }
+    if(cur&&lines[i]) sec[cur].head=(sec[cur].head?sec[cur].head+" ":"")+lines[i];
+  }
+  if(!sec["1"]||!sec["3"]) return null;
+  var access=sec["2"]?sec["2"].bul.slice():[], needs=null;
+  access.forEach(function(a){
+    if(/\bno\s+need\s+access\b/i.test(a)) needs=false;
+    else if(/\bneed\s+access\b/i.test(a)) needs=true;
+  });
+  var steps=[]; if(sec["3"].head) steps.push(sec["3"].head); steps=steps.concat(sec["3"].bul);
+  var warnRx=/previous visit|already|must be resolved|before leaving|do not leave|24-hour|return visit/i;
+  return { problem:sec["1"].head, house:sec["2"]?sec["2"].head:"", access:access,
+           needsAccess:needs, steps:steps, warn:steps.filter(function(s){return warnRx.test(s);}) };
+}
+var CC_ICON=[[/energiz|voltage|breaker|power|grid/i,"⚡"],[/wir|cable|connector|conduit|terminal/i,"🔌"],
+ [/report|communicat|signal|monitor|gateway|wi-?fi/i,"📶"],[/call|contact|support|tesla|enphase|qcell|rma/i,"📞"],
+ [/photo|picture|photograph|document/i,"📷"],[/replace|swap|install|repair/i,"🔧"],
+ [/verify|check|validat|confirm|inspect|test/i,"🔍"],[/leak|roof|water|damage/i,"💧"]];
+function ccIcon(s){ for(var i=0;i<CC_ICON.length;i++){ if(CC_ICON[i][0].test(s)) return CC_ICON[i][1]; } return "•"; }
+function ccClip(s,n){ s=String(s||"").replace(/\s+/g," ").trim(); return s.length>n?s.slice(0,n-1)+"…":s; }
+/* Deterministic step diagram — NOT model-drawn. An LLM could invent a step, a tool or an order
+   the work order never asked for; on electrical work that is a safety issue, not a cosmetic
+   one. Emits shapes + escaped text only: no script, no href/src, no foreignObject. */
+function crewCardSvg(c){
+  if(!c||!c.steps||c.steps.length<2) return "";
+  var st=c.steps.slice(0,8), ROW=46, PAD=12, W=520, H=PAD*2+st.length*ROW, o=[];
+  o.push('<svg viewBox="0 0 '+W+' '+H+'" width="100%" xmlns="http://www.w3.org/2000/svg" style="display:block;max-width:'+W+'px">');
+  o.push('<line x1="30" y1="'+(PAD+22)+'" x2="30" y2="'+(PAD+(st.length-1)*ROW+22)+'" stroke="var(--line)" stroke-width="2"/>');
+  st.forEach(function(s,i){
+    var y=PAD+i*ROW+22, w=(c.warn||[]).indexOf(s)>=0, col=w?"#DC2626":"var(--wh-blue)";
+    o.push('<circle cx="30" cy="'+y+'" r="14" fill="'+col+'"/>');
+    o.push('<text x="30" y="'+(y+5)+'" font-size="13" font-weight="700" fill="#fff" text-anchor="middle" font-family="sans-serif">'+(i+1)+'</text>');
+    o.push('<text x="56" y="'+(y+6)+'" font-size="16" font-family="sans-serif">'+ccIcon(s)+'</text>');
+    o.push('<text x="80" y="'+(y+5)+'" font-size="13" fill="'+(w?"#fca5a5":"var(--text)")+'" font-weight="'+(w?700:500)+'" font-family="sans-serif">'+esc(ccClip(s,52))+'</text>');
+  });
+  if(c.steps.length>st.length) o.push('<text x="80" y="'+(H-2)+'" font-size="11" fill="var(--text-dim)" font-family="sans-serif">+'+(c.steps.length-st.length)+'</text>');
+  o.push('</svg>'); return o.join("");
+}
+/* The rendered card for the calendar modal. Falls back to the raw description when the ticket
+   does not match the template, and keeps the original text one tap away either way — nothing
+   is ever hidden from whoever is reading it. */
+function crewCardHTML(desc){
+  var es=S.lang==="es", c=crewCardParse(desc);
+  var lbl=es?{p:"El problema",h:"La casa",s:"Haz esto, en orden",w:"Importante",a:"Necesitas entrar",n:"NO necesitas entrar",o:"Texto original del ticket"}
+            :{p:"The problem",h:"The house",s:"Do this, in order",w:"Important",a:"You need to go inside",n:"You do NOT need to go inside",o:"Original ticket text"};
+  if(!c) return '<div style="font-size:13.5px;line-height:1.55;white-space:pre-wrap;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px">'+esc(desc)+'</div>';
+  var acc=c.needsAccess===null?"":'<span class="pill" style="background:'+(c.needsAccess?"rgba(245,158,11,.16)":"rgba(148,163,184,.14)")+';border:1px solid '+(c.needsAccess?"#F59E0B":"var(--line)")+';color:'+(c.needsAccess?"#F59E0B":"var(--text-dim)")+';font-size:11px">🚪 '+esc(c.needsAccess?lbl.a:lbl.n)+'</span>';
+  var extra=c.access.filter(function(a){return !/need\s+access/i.test(a);})
+    .map(function(a){return '<span style="font-size:11.5px;color:var(--text-dim)">· '+esc(a)+'</span>';}).join("");
+  var warn=c.warn.length?'<div style="background:rgba(220,38,38,.12);border:1px solid rgba(220,38,38,.45);border-radius:10px;padding:9px 11px;margin-top:9px"><div style="font-size:10px;font-weight:900;color:#fca5a5;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px">⚠ '+esc(lbl.w)+'</div>'+c.warn.map(function(w){return '<div style="font-size:13px;font-weight:600">'+esc(w)+'</div>';}).join("")+'</div>':"";
+  var svg=crewCardSvg(c);
+  return '<div style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">'+esc(lbl.p)+'</div>'
+    +'<div style="font-size:15px;font-weight:700;line-height:1.4;margin-bottom:9px">'+esc(c.problem)+'</div>'
+    +((c.house||acc)?'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:9px">'+(c.house?'<span style="font-size:13px">🏠 '+esc(c.house)+'</span>':"")+acc+extra+'</div>':"")
+    +'<div style="font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px">'+esc(lbl.s)+'</div>'
+    +'<ol style="margin:0 0 9px;padding-left:20px">'+c.steps.map(function(s){return '<li style="font-size:13.5px;line-height:1.45;padding:3px 0">'+esc(s)+'</li>';}).join("")+'</ol>'
+    +warn
+    +(svg?'<div style="background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px 8px;margin-top:10px">'+svg+'</div>':"")
+    +'<details style="margin-top:9px"><summary style="cursor:pointer;font-size:11px;font-weight:800;color:var(--text-dim)">▾ '+esc(lbl.o)+'</summary><div style="font-size:12.5px;color:var(--text-dim);white-space:pre-wrap;margin-top:6px;padding:8px 10px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px">'+esc(desc)+'</div></details>';
+}
 function calRec(j){ return { type:j.kind, id:j.id, recordId:j.recordId||"", plan:j.plan||null, bom:j.bom||null, team:j.crewLabel||"Unassigned", startDate:j.date, daysNeeded:j.days||1, hhmm:j.hhmm||"", startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", desc:j.desc||"", code:j.code||"", msp:!!j.msp, blocks:j.blocks||0, hours:j.hours||0, blockWindow:j.blockWindow||"", phone:j.phone||"", installNotes:j.installNotes||"", svcRec:j.svcRec||null, installRec:j.installRec||null, visit:j.visit||1, visitDateField:j.visitDateField||"Scheduled_Visit_1", cat:jobCat(j) }; }
 // Multi-day jobs: ISO dates a record occupies (start day + continuation days).
 function calSpan(r){ if(!r.startDate)return []; const n=Math.max(1,Math.min(21,parseInt(r.daysNeeded,10)||1)); const base=new Date(r.startDate+"T12:00:00"); const out=[]; for(let i=0;i<n;i++){const x=new Date(base);x.setDate(base.getDate()+i);out.push(calYMD(x));} return out; }
@@ -721,7 +794,10 @@ function calModal(inner,noClose){ return `<div data-action="${noClose?'noop':'ca
 function calDetailHTML(r){
   const col=teamColor(r.team), isS=r.type==="service";
   const f=(l,v)=>v?`<div><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px">${l}</div><div style="font-size:14px;font-weight:500">${esc(v)}</div></div>`:"";
-  const descBlock=(isS&&r.desc)?`<div style="grid-column:1/-1;margin-top:2px"><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">${S.lang==='es'?'Descripción del servicio':'Service Description'}</div><div style="font-size:13.5px;font-weight:500;line-height:1.55;white-space:pre-wrap;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 13px">${esc(r.desc)}</div></div>`:"";
+  // Service description rendered as the crew card (problem / house + access / numbered steps /
+  // ⚠ important / step diagram), with the original ticket text one tap away. Falls back to the
+  // raw text verbatim when the ticket does not match WindMar's numbered template.
+  const descBlock=(isS&&r.desc)?`<div style="grid-column:1/-1;margin-top:2px"><div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px">${S.lang==='es'?'Descripción del servicio':'Service Description'}</div>${crewCardHTML(r.desc)}</div>`:"";
   const body=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">${isS?(f(S.lang==='es'?'Programado':'Scheduled',(r.startDate||"")+(r.startTime?" · "+r.startTime:""))+f(S.lang==='es'?'Estado':'Status',r.status)+f(S.lang==='es'?'Prioridad':'Priority',r.priority)+f(S.lang==='es'?'Servicio':'Service',r.scope)):(f(S.lang==='es'?'Fecha':'Start Date',r.startDate)+f(S.lang==='es'?'Estado':'Status',r.status)+f(S.lang==='es'?'Alcance':'Scope',r.scope))}<div style="grid-column:1/-1">${f(S.lang==='es'?'Dirección':'Address',r.address)}</div>${descBlock}</div>`;
   // 📋 Plan-Analyzer BOM / estimator notes for this install (async-loaded into S.cal.bomNotes on open).
   const bomBlock=(function(){
