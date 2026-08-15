@@ -2097,7 +2097,7 @@ function itineraryHTML(){
         ${sel.status!=="done"?`<button class="btn3d green sm" data-action="advanceStatus" data-id="${sel.id}">${nextLabel}</button>`:""}
         <button class="btn3d blue sm" data-action="navigate" data-id="${sel.id}">🧭 ${t("navigate")}</button>
         <button class="btn3d grey sm" data-action="call" data-id="${sel.id}">📞 ${t("callCustomer")}</button>
-        <button class="btn3d sm" data-action="viewProject" data-id="${sel.id}">📁 ${t("viewProject")}</button></div></div>`;
+        ${tabAllowed("sitecapture")?`<button class="btn3d sm" data-action="viewProject" data-id="${sel.id}">📁 ${t("viewProject")}</button>`:""}</div></div>`;
   }
   return `<div class="fade">${viewToggle}${attentionHTML()}
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
@@ -2587,6 +2587,25 @@ const TABS=[
   {id:"instmap",key:"tab_instmap",fn:instMapHTML},
   {id:"zoho",key:"tab_zoho",fn:zohoHTML},
 ];
+/* ── Per-user tab access ───────────────────────────────────────────────────────────
+   Keyed by the Microsoft sign-in email the gate puts in window.wmUser (lowercased).
+   NOT app_access.tabs — that column belongs to the Field HUB and uses a different tab
+   vocabulary (weather/nec/crewtracker/…), so reusing it here would collide.
+   FAIL-OPEN BY DESIGN: anyone not listed sees all tabs, and if the user can't be
+   identified (staff-code login, Supabase unreachable) everyone sees all tabs. A lookup
+   failure must never lock someone out of the app. */
+const USER_TABS={
+  "maria.robles@windmarhome.com":["itinerary","coordinator","calendar","crews"],
+};
+function allowedTabs(){
+  const key=String(window.wmUser||"").trim().toLowerCase();
+  const ids=Object.prototype.hasOwnProperty.call(USER_TABS,key)?USER_TABS[key]:null; // own keys only, so "constructor"/"toString" can't match
+  if(!Array.isArray(ids)||!ids.length) return TABS;
+  const ok=Object.create(null); ids.forEach(x=>{ok[String(x).trim().toLowerCase()]=1;});
+  const out=TABS.filter(tb=>ok[tb.id]);
+  return out.length?out:TABS; // an all-unknown list would blank the nav → fall back to all
+}
+function tabAllowed(id){ return allowedTabs().some(tb=>tb.id===id); }
 function initCrewMap(){
   if(typeof L==="undefined") return;
   const el=document.getElementById("crewMap"); if(!el) return;
@@ -2696,7 +2715,15 @@ function _render(noAnim){
   document.documentElement.setAttribute("data-theme",S.theme);
   wmJtipInit();
   const ae=document.activeElement, aeId=ae&&ae.id, caret=ae&&ae.selectionStart;
-  const active=TABS.find(x=>x.id===S.tab);
+  const VTABS=allowedTabs();
+  // If S.tab isn't one this user may open (restricted set, or a stale/removed id in
+  // localStorage), fall back to their first tab. Without this, active.fn() below throws
+  // and wmCrash() shows a reload button that reloads straight back into the same crash.
+  // NOTE if you add another USER_TABS entry: this fallback sets the tab without running
+  // setTab's lazy loaders. Safe while the first allowed tab is "itinerary" (boot loads it);
+  // a set starting with crews/calendar/records/instmap would land on an empty tab.
+  let active=VTABS.find(x=>x.id===S.tab);
+  if(!active){ active=VTABS[0]; S.tab=active.id; try{localStorage.setItem("wm_itin_tab",S.tab);}catch(e){} }
   const rootEl=document.getElementById("root");
   rootEl.classList.toggle("noanim",!!noAnim); // background/silent refresh → skip entry animations (no blink)
   rootEl.innerHTML=`
@@ -2712,7 +2739,7 @@ function _render(noAnim){
       </div></header>
     <nav style="border-bottom:1px solid var(--line);background:var(--bg-2);position:sticky;top:0;z-index:5">
       <div class="scroll" style="max-width:1180px;margin:0 auto;padding:0 12px;display:flex;overflow-x:auto">
-        ${TABS.map(tb=>`<button class="tabbtn ${S.tab===tb.id?'active':''}" data-action="setTab" data-id="${tb.id}">${t(tb.key)}</button>`).join("")}
+        ${VTABS.map(tb=>`<button class="tabbtn ${S.tab===tb.id?'active':''}" data-action="setTab" data-id="${tb.id}">${t(tb.key)}</button>`).join("")}
       </div></nav>
     <main style="max-width:1180px;margin:0 auto;padding:22px 20px 70px">${active.fn()}</main>${notifPanelHTML()}`;
   if(aeId){const el=document.getElementById(aeId);if(el){el.focus();if(caret!=null&&el.setSelectionRange){try{el.setSelectionRange(caret,caret);}catch(e){}}}}
@@ -2794,13 +2821,13 @@ document.addEventListener("click",e=>{
     }
     case "notifToggle": S.notif.open=!S.notif.open; if(S.notif.open) S.notif.unread=0; render(); break;
     case "notifClose": S.notif.open=false; render(); break;
-    case "notifOpen": { S.notif.open=false; S.tab="projects"; S.proj.selected=id; S.proj.noteFrom=null; S.proj.stageFilter="all"; loadProjectNotes(id); loadProjectAttachments(id);
+    case "notifOpen": { S.notif.open=false; if(!tabAllowed("projects")){ render(); break; } /* Projects hidden for this user → just close the bell panel; must NOT fall through, the lines below discard open editors and unsaved note text */ S.tab="projects"; S.proj.selected=id; S.proj.noteFrom=null; S.proj.stageFilter="all"; loadProjectNotes(id); loadProjectAttachments(id);
       S.coord.edit=null; S.svc.edit=null; S.note={text:"",sending:false,err:"",okKey:"",prog:""};
       const _np=(S.proj.list||[]).find(x=>x.id===id); if(_np&&_np.num){ const f=findInstallRec(_np.num); if(f) setInstallRecSync(_np.num,f.rec,f.recordId); else loadCoordNotes(_np.num); loadCoordFields(); loadAttachScope(); }
       render(); break; }
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
-    case "setTab": S.tab=id; try{if(window.wmReportView)wmReportView();}catch(e){} try{localStorage.setItem("wm_itin_tab",id);}catch(e){} if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="coordinator"){ loadProjects(S.proj.status!=="idle",true); loadCoordReady(S.coord.ready.status!=="idle"&&S.coord.ready.status!=="error"); } if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); if(id==="instmap"&&S.instMap.status==="idle") loadInstallMap(); render(); break;
+    case "setTab": if(!tabAllowed(id)) break; S.tab=id; try{if(window.wmReportView)wmReportView();}catch(e){} try{localStorage.setItem("wm_itin_tab",id);}catch(e){} if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="coordinator"){ loadProjects(S.proj.status!=="idle",true); loadCoordReady(S.coord.ready.status!=="idle"&&S.coord.ready.status!=="error"); } if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); if(id==="instmap"&&S.instMap.status==="idle") loadInstallMap(); render(); break;
     case "jobsRefresh": loadJobs(); break;
     case "projRefresh": loadProjects(false,true); break;
     case "selectProject": { S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); loadProjectAttachments(id);
@@ -2955,7 +2982,7 @@ document.addEventListener("click",e=>{
     }
     case "projClearAlerts": S.proj.alerts=[]; render(); break;
     case "projEnableAlerts": enableAlerts(); break;
-    case "scFromProject": { const pp=(S.proj.list||[]).find(x=>x.id===id||x.num===id); const num=(pp&&pp.num)||""; const dl=num?(/^[A-Za-z]/.test(num)?num:((pp.code||"DL")+num)):(id||""); S.tab="sitecapture"; S.sc.showNew=true; S.sc.q=pp?pp.num:(id||""); S.sc.cnew={dl:dl,customer:pp?(pp.name||""):"",address:pp?(pp.address||""):""}; S.sc.createMsg=""; loadSiteCapture(S.sc.q); render(); break; }
+    case "scFromProject": { if(!tabAllowed("sitecapture")) break; const pp=(S.proj.list||[]).find(x=>x.id===id||x.num===id); const num=(pp&&pp.num)||""; const dl=num?(/^[A-Za-z]/.test(num)?num:((pp.code||"DL")+num)):(id||""); S.tab="sitecapture"; S.sc.showNew=true; S.sc.q=pp?pp.num:(id||""); S.sc.cnew={dl:dl,customer:pp?(pp.name||""):"",address:pp?(pp.address||""):""}; S.sc.createMsg=""; loadSiteCapture(S.sc.q); render(); break; }
     case "boardFilter": S.boardFilter=(S.boardFilter===id?"all":id); S.selectedJob=null; render(); break;
     case "dayPrev": S.dayOffset--; S.selectedJob=null; render(); break;
     case "dayToday": S.dayOffset=0; S.selectedJob=null; render(); break;
@@ -2992,7 +3019,7 @@ document.addEventListener("click",e=>{
     case "navigate": { const j=getJob(id); if(!j) break; const u=j.geo?("https://maps.google.com/?q="+j.geo.lat+","+j.geo.lon):("https://maps.google.com/?q="+encodeURIComponent(j.address||j.project||"")); window.open(u,"_blank"); break; }
     case "call": { const j=getJob(id); const ph=(j&&j.phone)||projPhone(id); if(ph) window.open("tel:"+String(ph).replace(/[^0-9+]/g,"")); else alert("No phone on file for this job."); break; }
     case "callCrew": { const c=CREWS.find(x=>x.id===id); if(c) window.open("tel:"+c.phone); break; }
-    case "viewProject": S.tab="sitecapture"; S.sc.q=id; render(); break;
+    case "viewProject": if(!tabAllowed("sitecapture")) break; S.tab="sitecapture"; S.sc.q=id; render(); break;
     case "crewToggleDist": S.crews.showDist=!S.crews.showDist; render(); break;
     case "crewFit": render(); break;
     case "crewRefresh": { if(S.crews.fleetState==="live"){ loadFleet(); } else { const now=new Date(); CREWS.forEach((c,i)=>{ c.ping=new Date(now.getTime()-i*15000).toLocaleTimeString(); if(c.mph>0){ c.gps={lat:c.gps.lat+(Math.random()-0.5)*0.02,lon:c.gps.lon+(Math.random()-0.5)*0.02}; c.mph=Math.max(15,Math.round(c.mph+(Math.random()-0.5)*10)); } }); render(); } break; }
