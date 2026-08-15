@@ -277,7 +277,9 @@ function mapReadyService(r, todayISO) {
 // fetch the two stages and filter it in code. Shown as its own Coordinator section.
 const COORD_CRITERIA = "((Stage:equals:Engineering)or(Stage:equals:Permitting))";
 const COORD_FIELDS = "Deal_Name,Stage,Engineering_Stage,Address,City,State,Zip,Client_Phone,Client_Mobile,System_Size_kW1,Authority_Having_Jurisdiction_AHJ,County1,Post_Install_QA_Stage,Project_Coordinator,Module_Count";
-const COORD_ENG_RX = /digital plans uploaded|printed and mailed|in[\s-]?process|in[\s-]?progress/i;
+// "Plans Done" means DONE. In-process engineering was previously included, which made the
+// section mean two different things at once; a coordinator can't act on plans still being drawn.
+const COORD_ENG_RX = /digital plans uploaded|printed and mailed/i;
 const cclean = (s) => String(s || "").replace(/[\s,]+$/, "").trim();
 function mapCoordinationDeal(d) {
   const p = parseDeal(d.Deal_Name);

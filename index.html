@@ -423,7 +423,7 @@ const S={
   instMap:{status:"idle",items:[],pinState:{status:"idle"}},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
   dispatch:{ open:false, updated:null, sig:null, geo:{status:"idle"}, filter:"all" }, // filter: all | service | insp
-  coord:{ q:"", selected:null, collapsed:{}, notes:{}, fields:{status:"idle",map:{},team:[]}, edit:null, savedMsg:null, addNote:{text:"",sending:false,err:"",okDl:""}, ready:{status:"idle",list:[],err:""}, view:"type", geo:{status:"idle"}, geoSig:"" }, // view: "type" (by job type) | "area" (by geographic proximity for route scheduling) // Coordinator tab: search, open detail key, per-section collapsed state, per-DL record cache, field metadata, active editor, /api/zoho-ready feed (Pending-Schedule installs + Need-Schedule services)
+  coord:{ q:"", tile:"", /* tile: "" = show everything, else a bucket id */ selected:null, collapsed:{}, notes:{}, fields:{status:"idle",map:{},team:[]}, edit:null, savedMsg:null, addNote:{text:"",sending:false,err:"",okDl:""}, ready:{status:"idle",list:[],err:""}, view:"type", geo:{status:"idle"}, geoSig:"" }, // view: "type" (by job type) | "area" (by geographic proximity for route scheduling) // Coordinator tab: search, open detail key, per-section collapsed state, per-DL record cache, field metadata, active editor, /api/zoho-ready feed (Pending-Schedule installs + Need-Schedule services)
   svc:{ rec:{}, fields:{status:"idle",map:{}}, edit:null, savedMsg:null, scope:{status:"idle",canUpdate:false} }, // Service_Ticket editor: per-recordId editable-record cache, field metadata (picklists), active editor, UPDATE-scope probe
   attachScope:{status:"idle",canAttach:false}, // Attachments CREATE scope probe (gates the photo picker so no broken button ever ships)
   note:{ text:"", sending:false, err:"", okKey:"", prog:"" }, // unified note+photo box (install AND service), keyed by module:recordId
@@ -1698,7 +1698,10 @@ function coordItems(){
     const cls={type:j.kind==="service"?"service":"", code:j.code, msp:j.msp, scope:j.scope, dlNumber:j.num};
     const bucket=isCoord?"coordination":jobType(cls); // install | msp | reinstall | removal | service | coordination
     const p=pByNum[String(j.num||"").toUpperCase().replace(/\s+/g,"")]||null;
-    out.push({ key:"r|"+(j.id||j.num), source:"ready", bucket, kind:j.kind,
+    // kind is part of the key: a DL can be BOTH coordination-ready and have a ready install,
+    // and the server deliberately doesn't dedupe those. Without kind they collide and
+    // coordSelectedItem()'s find() opens whichever row came first — the wrong modal.
+    out.push({ key:"r|"+j.kind+"|"+(j.id||j.num), source:"ready", bucket, kind:j.kind,
       num:j.num||"", name:j.project||(p&&p.name)||"", address:j.address||(p&&p.address)||"",
       ahj:j.ahj||(p&&p.ahj)||"", stage:j.stage||"", crewLabel:j.crewLabel||"", scope:j.scope||"",
       engStage:j.engStage||"", coordinator:j.coordinator||"", qaStage:j.qaStage||"", systemKw:j.systemKw||null, zohoUrl:j.zohoUrl||"",
@@ -1716,43 +1719,55 @@ function coordSelectedItem(){ const k=String(S.coord.selected||""); return coord
 function coordinatorHTML(){
   const es=S.lang==="es", P=S.proj, C=S.coord, R=C.ready;
   const q=(C.q||"").trim().toLowerCase();
-  const all=coordItems(); const total=all.length;
+  const all=coordItems();
   let items=all;
   if(q) items=items.filter(it=>(((it.name||"")+" "+(it.num||"")+" "+(it.address||"")).toLowerCase().indexOf(q)>=0));
-  const groups={}; items.forEach(it=>{ (groups[it.bucket]=groups[it.bucket]||[]).push(it); });
-  Object.keys(groups).forEach(b=>groups[b].sort((a,z)=>String(a.name||"").localeCompare(String(z.name||""))));
+  // Every number on this tab counts what is ACTUALLY on screen. The old header pill was
+  // pre-filter, so searching left it claiming 61 while two rows showed below it.
+  const total=items.length;
+  const counts={}; items.forEach(it=>{ counts[it.bucket]=(counts[it.bucket]||0)+1; });
+  const liveBuckets=COORD_BUCKETS.filter(b=>counts[b]>0);
+  if(C.tile&&!counts[C.tile]) C.tile=""; // the selected tile emptied out (search/refresh) → fall back to everything
+  const tileItems=C.tile?items.filter(it=>it.bucket===C.tile):items;
+  // Worklist order: urgent service, then the rest of service, then installs, then plans-done,
+  // then inspections. Within a band, by customer name so positions stay predictable.
+  const BAND={service:0,install:1,msp:1,reinstall:1,removal:1,coordination:2,inspection:3};
+  const hotRx=/urgent|very high|high|critical/i;
+  const shown=tileItems.slice().sort(function(a,z){
+    var ba=BAND[a.bucket]==null?9:BAND[a.bucket], bz=BAND[z.bucket]==null?9:BAND[z.bucket];
+    if(ba!==bz) return ba-bz;
+    var ha=(a.job&&hotRx.test(a.job.priority||""))?0:1, hz=(z.job&&hotRx.test(z.job.priority||""))?0:1;
+    if(ha!==hz) return ha-hz;
+    return String(a.name||"").localeCompare(String(z.name||""));
+  });
   const loading=(P.status==="loading"&&!P.list.length)||(R.status==="loading"&&!R.list.length)||R.status==="idle";
   const errored=P.status==="error"&&R.status==="error";
   const head=`<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:4px">
     <div><div style="font-weight:900;font-size:22px">🗒 ${es?"Coordinador":"Coordinator"}</div>
-      <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Todo lo que está listo para programar, agrupado por tipo de trabajo. Toca una tarjeta para ver todo + notas.":"Everything ready to schedule, grouped by job type. Tap a card for full details + notes."}</div></div>
+      <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Toca un número para ver solo ese trabajo. Toca un trabajo para ver todo + notas.":"Tap a number to see only that work. Tap a job for full details + notes."}</div></div>
     <div style="display:flex;align-items:center;gap:8px"><span class="pill" style="background:#F89B24">${total} ${es?"listos":"ready"}</span><button class="btn3d sm" data-action="coordRefresh">${(P.status==="loading"||R.status==="loading")?"…":"⟳"}</button></div></div>
   <div style="margin:12px 0"><div style="position:relative;max-width:460px"><span style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-dim);pointer-events:none">🔍</span>
     <input id="coordSearch" value="${esc(C.q||"")}" placeholder="${es?"Buscar DL#, cliente, dirección…":"Search DL#, customer, address…"}" autocomplete="off" style="width:100%;padding:11px 14px 11px 36px;border-radius:12px;border:1px solid var(--line);background:var(--bg-2);color:var(--text);font-size:14px"/></div></div>`;
   let body;
-  const shownBuckets=COORD_BUCKETS.filter(b=>groups[b]&&groups[b].length);
-  const searching=!!q; // when searching, every matching section auto-expands
+  // Big number tiles. Tap one to narrow the list to that kind of work, tap it again for
+  // everything. Deliberately the only navigation on this tab — no sections to expand, no
+  // second view mode to understand. ("By Area" was removed: 53 of 54 coordination records
+  // have an empty county, so it piled almost everything into one meaningless cluster.)
+  const tile=(b)=>{ const m=coordBucketMeta(b), on=C.tile===b;
+    return `<div class="tap" data-action="coordTile" data-id="${esc(b)}" style="background:${on?m.color:'var(--panel)'};color:${on?textOn(m.color):'var(--text)'};border:2px solid ${m.color};border-radius:16px;padding:16px 12px;text-align:center;cursor:pointer;min-width:0">
+      <div style="font-size:28px;line-height:1">${m.icon}</div>
+      <div style="font-size:34px;font-weight:900;line-height:1.08;margin:3px 0 1px">${counts[b]}</div>
+      <div style="font-size:11.5px;font-weight:800;opacity:.92;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(m.label)}</div></div>`; };
+  const tiles=liveBuckets.length?`<div style="display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));margin:2px 0 14px">${liveBuckets.map(tile).join("")}</div>`:"";
+  // One feed can die while the other is fine, and the tab would happily render a smaller,
+  // confident-looking list. Say so instead.
+  const feedWarn=(dispFeeds().svcOK&&dispFeeds().inspOK)?"":`<div class="card" style="padding:10px 14px;margin-bottom:10px;border-left:5px solid #F59E0B;background:rgba(245,158,11,.08);font-size:12.5px">⚠ ${es?"Una de las fuentes no cargó — esta lista está incompleta.":"One of the data feeds didn't load — this list is incomplete."}</div>`;
   if(loading&&!total) body=`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">⟳ ${es?"Cargando…":"Loading…"}</div>`;
   else if(errored&&!total) body=`<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudo cargar.":"Couldn't load."} ${esc(R.err||P.err||"")}</div>`;
-  else if(!items.length) body=`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">${q?(es?"Sin coincidencias":"No matches"):(es?"Nada listo para programar 🎉":"Nothing ready to schedule 🎉")}</div>`;
+  else if(!items.length) body=feedWarn+`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">${q?(es?"Sin coincidencias":"No matches"):(es?"Nada listo para programar 🎉":"Nothing ready to schedule 🎉")}</div>`;
   else {
-    const areaMode=C.view==="area";
-    const clusters=areaMode?coordAreaClusters(items):[];
-    const sectionKeys=areaMode?clusters.map((_,ix)=>"area:"+ix):shownBuckets;
-    const anyCollapsed=sectionKeys.some(k=>C.collapsed&&C.collapsed[k]);
-    const viewBtns=[["type","🗂",es?"Por tipo":"By Type"],["area","📍",es?"Por zona":"By Area"]].map(v=>{const on=(C.view||"type")===v[0];return `<button data-action="coordView" data-id="${v[0]}" style="padding:6px 12px;border-radius:7px;border:none;cursor:pointer;font-size:12px;font-weight:${on?800:500};background:${on?'linear-gradient(135deg,var(--wh-blue),var(--wh-orange))':'transparent'};color:${on?'#fff':'var(--text-dim)'}">${v[1]} ${v[2]}</button>`;}).join("");
-    const controls=`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:-4px 0 4px">
-      <div style="display:inline-flex;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:2px;gap:2px">${viewBtns}</div>
-      <button class="btn3d sm" data-action="coordToggleAll" style="font-size:11px">${anyCollapsed?(es?"▾ Expandir todo":"▾ Expand all"):(es?"▸ Colapsar todo":"▸ Collapse all")}</button></div>`;
-    if(areaMode){
-      const G=C.geo||{status:"idle"};
-      const geocoding=G.status==="geocoding";
-      const note=geocoding?`<div style="font-size:12px;color:var(--text-dim);margin:2px 0 6px">📍 ${es?"Ubicando trabajos":"Locating jobs"}… ${(G.done||0)}/${G.total||items.length}</div>`
-        :`<div style="font-size:12px;color:var(--text-dim);margin:2px 0 6px">${es?"Trabajos agrupados por cercanía — toca 🧭 Ruta para abrir todas las paradas de una zona en Google Maps.":"Jobs grouped by how close they are — tap 🧭 Route to open a whole area's stops in Google Maps."}</div>`;
-      body=controls+note+`<div class="coord-report">${clusters.map((cl,ix)=>coordAreaSectionHTML(cl,ix,searching)).join("")}</div>`;
-    } else {
-      body=controls+`<div class="coord-report">${shownBuckets.map(b=>coordSectionHTML(b,groups[b],searching)).join("")}</div>`;
-    }
+    const clearBtn=C.tile?`<div style="margin:-6px 0 10px"><button class="btn3d sm" data-action="coordTile" data-id="${esc(C.tile)}" style="font-size:11.5px">✕ ${es?"Ver todo":"Show everything"} (${items.length})</button></div>`:"";
+    body=feedWarn+tiles+clearBtn+`<div class="coord-report">${shown.map(coordItemRow).join("")}</div>`;
   }
   // 🗺 Schedule Nearest Crew — pending inspections ranked against live crew GPS.
   // Moved here from Projects → Inspections so the whole team finds it in one place.
@@ -3048,6 +3063,8 @@ document.addEventListener("click",e=>{
         if(ir) setInstallRecSync(item.num,ir,item.recordId); else loadCoordNotes(item.num); // sync from feed; ?dl= fallback (inspections have no installRec)
         loadCoordFields(); }
       render(); break; }
+    // Tap a tile to narrow to that bucket; tap the same tile (or "Show everything") to clear.
+    case "coordTile": { const b=el.getAttribute("data-id")||""; S.coord.tile=(S.coord.tile===b?"":b); render(); break; }
     case "coordView": { const v=el.getAttribute("data-id"); if(v==="type"||v==="area"){ S.coord.view=v; } render(); break; }
     case "coordToggle": { const b=el.getAttribute("data-bucket"); if(b){ S.coord.collapsed=S.coord.collapsed||{}; S.coord.collapsed[b]=!S.coord.collapsed[b]; } render(); break; }
     case "coordToggleAll": { let keys; if(S.coord.view==="area"){ const q=(S.coord.q||"").trim().toLowerCase(); let its=coordItems(); if(q) its=its.filter(it=>(((it.name||"")+" "+(it.num||"")+" "+(it.address||"")).toLowerCase().indexOf(q)>=0)); keys=coordAreaClusters(its).map((_,ix)=>"area:"+ix); } else { const grp={}; coordItems().forEach(it=>{grp[it.bucket]=1;}); keys=COORD_BUCKETS.filter(x=>grp[x]); } const anyCollapsed=keys.some(x=>S.coord.collapsed&&S.coord.collapsed[x]); S.coord.collapsed={}; if(!anyCollapsed) keys.forEach(x=>{S.coord.collapsed[x]=true;}); render(); break; }
