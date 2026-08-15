@@ -607,7 +607,11 @@ const JOB_TYPES={
 };
 function jobType(r){
   if(!r) return "install";
-  if(r.type==="service") return "service";
+  // A service ticket whose Zoho category is MSP ("Area_of_Service = (5) MSP" or
+  // "Service_Type1 = (5) MSP/Electrical Work") is MSP work — colour it as MSP, not generic
+  // service. r.msp is set from those explicit fields server-side; scope keywords are NOT used,
+  // so this cannot resurrect the 2026-07-27 "installs mislabeled as MSP" bug.
+  if(r.type==="service") return r.msp?"msp":"service";
   const code=String(r.code||"").toUpperCase();
   const s=((r.scope||"")+" "+(r.dlNumber||"")).toLowerCase();
   if(code==="RM"||code==="RMV"||/\bremov|decommission|uninstall/.test(s)) return "removal";

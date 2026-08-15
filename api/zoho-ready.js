@@ -178,7 +178,7 @@ function buildInstallRec(row) {
   return rec;
 }
 const INSTALL_FIELDS = ["Name", "Deal", "MSP_Upgrade_Required", "Battery_Type"].concat(INSTALL_EDIT_FIELDS).filter((v, i, a) => a.indexOf(v) === i).join(",");
-const SERVICE_FIELDS = "Name,Scheduled_Visit_1,Assigned_Technician,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description,Priority";
+const SERVICE_FIELDS = "Service_Type1,Area_of_Service,Name,Scheduled_Visit_1,Assigned_Technician,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description,Priority";
 
 // Editable Service_Ticket fields for the Coordinator/Calendar service editor (mirrors zoho-jobs.js).
 const SERVICE_EDIT_FIELDS = ["Ticket_Status", "Priority", "Type_of_Service", "Service_Description", "Scheduled_Visit_1", "Assigned_Technician"];
@@ -242,6 +242,14 @@ function mapReadyService(r, todayISO) {
   else if (v.date && v.date < todayISO) cat = "pastdue";
   else cat = "scheduled";
   const svc = Array.isArray(r.Type_of_Service) ? r.Type_of_Service.join(", ") : (r.Type_of_Service || "");
+  // MSP service work is flagged by Service_Type1 ("(5) MSP/Electrical Work"), not by the
+  // install-side MSP_Upgrade_Required. Mirrors zoho-jobs.js and zoho-bonuses.js.
+  // Area_of_Service (UI label "Service Category") = "(5) MSP"; Service_Type1 (UI label
+  // "System Type") = "(5) MSP/Electrical Work". Either marks MSP work done on a service visit.
+  // Explicit category fields only — scope-keyword matching caused a past mislabeling bug.
+  const svcType1 = (r.Service_Type1 && typeof r.Service_Type1 === "object" ? r.Service_Type1.name : r.Service_Type1) || "";
+  const svcArea = (r.Area_of_Service && typeof r.Area_of_Service === "object" ? r.Area_of_Service.name : r.Area_of_Service) || "";
+  const isMsp = /\bmsp\b/i.test(String(svcType1)) || /\bmsp\b/i.test(String(svcArea));
   return {
     id: deal.num ? `${deal.num} · ${r.Name}` : r.Name,
     recordId: r.id,
@@ -260,7 +268,7 @@ function mapReadyService(r, todayISO) {
     cat,
     stage: st,
     rawStatus: st,
-    msp: false,
+    msp: isMsp, // MSP service work, from Service_Type1
     phone: "",
     geo: null,
     scope: (svc || "Service").replace(/\(\d+\)\s*/g, "").trim(),

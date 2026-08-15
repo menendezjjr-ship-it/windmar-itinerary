@@ -154,7 +154,7 @@ function latestFile(field) {
 }
 // A service ticket can have up to 3 scheduled visits (Scheduled_Visit_1/2/3), each with its own
 // technician (Assigned_Technician / Assigned_Technician_Visit_2 / Assigned_Technician_Visit_3).
-const SERVICE_FIELDS = "Name,Scheduled_Visit_1,Assigned_Technician,Scheduled_Visit_2,Assigned_Technician_Visit_2,Scheduled_Visit_3,Assigned_Technician_Visit_3,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description,Priority";
+const SERVICE_FIELDS = "Service_Type1,Area_of_Service,Name,Scheduled_Visit_1,Assigned_Technician,Scheduled_Visit_2,Assigned_Technician_Visit_2,Scheduled_Visit_3,Assigned_Technician_Visit_3,Associated_Deal,Ticket_Status,Type_of_Service,Service_Description,Priority";
 
 // Editable Service_Ticket fields surfaced to the Coordinator/Calendar editor. Ticket_Status is
 // the "Stage". Type_of_Service (multiselect) + Assigned_Technician* (lookups) are read-only display;
@@ -238,6 +238,19 @@ function mapServiceVisit(r, todayISO, visitN, dt, tech) {
   else if (v.date && v.date < todayISO) cat = "pastdue";
   else cat = "scheduled";
   const svc = Array.isArray(r.Type_of_Service) ? r.Type_of_Service.join(", ") : (r.Type_of_Service || "");
+  // A SERVICE ticket is MSP work when Service_Type1 says so (e.g. "(5) MSP/Electrical Work").
+  // This is a different signal from an INSTALL's MSP_Upgrade_Required / MSP-coded deal name —
+  // same precedent as the MSP filter in windmar-operations/api/zoho-bonuses.js.
+  // TWO Zoho fields can say MSP, and the CRM labels are confusingly swapped:
+  //   Area_of_Service  → labelled "Service Category" in the UI → value "(5) MSP"
+  //   Service_Type1    → labelled "System Type"                → value "(5) MSP/Electrical Work"
+  // Both mean MSP work dispatched as a service visit (service crews #1S/#2S/#3S), which is
+  // what zoho-bonuses.js already pays on. NOT the same as an install's MSP_Upgrade_Required.
+  // Only these explicit category fields count — deliberately NOT scope keywords, which is what
+  // caused the 2026-07-27 "installs mislabeled as MSP" bug (see windmar-operations bugLog).
+  const svcType1 = (r.Service_Type1 && typeof r.Service_Type1 === "object" ? r.Service_Type1.name : r.Service_Type1) || "";
+  const svcArea = (r.Area_of_Service && typeof r.Area_of_Service === "object" ? r.Area_of_Service.name : r.Area_of_Service) || "";
+  const isMsp = /\bmsp\b/i.test(String(svcType1)) || /\bmsp\b/i.test(String(svcArea));
   return {
     id: (deal.num ? `${deal.num} · ${r.Name}` : r.Name) + (visitN > 1 ? ` #${visitN}` : ""),
     recordId: r.id,           // real Zoho Service_Ticket record id (for editing/attachments)
@@ -259,7 +272,7 @@ function mapServiceVisit(r, todayISO, visitN, dt, tech) {
     status,
     cat,
     rawStatus: st,
-    msp: false,
+    msp: isMsp, // MSP service work, from Service_Type1
     phone: "",
     geo: null,
     scope: ((svc || "Service").replace(/\(\d+\)\s*/g, "").trim()) + (visitN > 1 ? ` · Visit ${visitN}` : ""),
