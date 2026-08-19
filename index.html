@@ -2757,8 +2757,16 @@ async function loadCrewRecords(silent){
   render(!!silent); // silent on auto-refresh so the log does not flash or replay animations
 }
 function photoStrip(e){
-  var ph=e&&e.photos; if(!Array.isArray(ph)||!ph.length) return "";
-  return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'+ph.map(function(u){u=String(u||"");if(!u)return"";return '<a href="'+esc(u)+'" target="_blank" rel="noopener" style="display:block;width:54px;height:54px;border-radius:8px;overflow:hidden;border:1px solid var(--line)"><img src="'+esc(u)+'" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover"/></a>';}).join("")+'</div>';
+  var ph=e&&e.photos;
+  // Some rows arrive with photos as a JSON string instead of a parsed array — normalize both.
+  if(typeof ph==="string"){ try{ ph=JSON.parse(ph); }catch(_){ ph=ph?[ph]:[]; } }
+  if(!Array.isArray(ph)) return "";
+  ph=ph.filter(function(u){return u&&String(u).trim();});
+  if(!ph.length) return "";
+  var es=S.lang==="es";
+  var label='<div style="display:flex;align-items:center;gap:6px;margin-top:9px;margin-bottom:5px;font-size:11px;font-weight:800;color:#67e8f9"><span>📷</span><span>'+(es?"Fotos de la cuadrilla":"Crew photos")+' ('+ph.length+')</span></div>';
+  var thumbs=ph.map(function(u){u=String(u).trim();return '<a href="'+esc(u)+'" target="_blank" rel="noopener" title="'+(es?"Ver foto":"View photo")+'" style="display:block;width:88px;height:88px;border-radius:10px;overflow:hidden;border:2px solid #06b6d4;box-shadow:0 2px 8px -2px rgba(0,0,0,.5)"><img src="'+esc(u)+'" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block"/></a>';}).join("");
+  return '<div>'+label+'<div style="display:flex;gap:7px;flex-wrap:wrap">'+thumbs+'</div></div>';
 }
 function crewRecColor(s){ s=(s||"").toLowerCase(); if(/insp/.test(s))return /complet|conclu/.test(s)?"#06b6d4":"#F89B24"; if(/complet|conclu/.test(s))return "#22c55e"; if(/resched|reprogram|reagend/.test(s))return "#ef4444"; return "#1D429B"; }
 // Plan-Analyzer BOM/estimator notes for one install DL (shown in the calendar job detail). Cached per DL in S.cal.bomNotes.
