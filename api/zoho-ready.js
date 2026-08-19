@@ -287,11 +287,13 @@ function mapReadyService(r, todayISO) {
 // Complete (digital plans uploaded / printed & mailed) or In Process. These are the jobs a
 // coordinator should act on next (push permit → schedule). Engineering_Stage is free-text, so we
 // fetch the two stages and filter it in code. Shown as its own Coordinator section.
-const COORD_CRITERIA = "((Stage:equals:Engineering)or(Stage:equals:Permitting))";
-const COORD_FIELDS = "Deal_Name,Stage,Engineering_Stage,Address,City,State,Zip,Client_Phone,Client_Mobile,System_Size_kW1,Authority_Having_Jurisdiction_AHJ,County1,Post_Install_QA_Stage,Project_Coordinator,Module_Count";
-// "Plans Done" means DONE. In-process engineering was previously included, which made the
-// section mean two different things at once; a coordinator can't act on plans still being drawn.
-const COORD_ENG_RX = /digital plans uploaded|printed and mailed/i;
+const COORD_CRITERIA = "((Stage:equals:NTP)or(Stage:equals:Engineering)or(Stage:equals:Permitting)or(Stage:equals:Install))";
+const COORD_FIELDS = "Deal_Name,Stage,Engineering_Stage,FDA_Status,Address,City,State,Zip,Client_Phone,Client_Mobile,System_Size_kW1,Authority_Having_Jurisdiction_AHJ,County1,Post_Install_QA_Stage,Project_Coordinator,Module_Count";
+// EXACT report filter (Zoho "Coordination Trigger" report): the Final Design is APPROVED —
+// FDA_Status = "Signed and Approved - Complete" OR "No response in 24 hrs, approved" — and the job
+// has an engineering stage. This is what narrows the section to the report's jobs (not every
+// Engineering/Permitting deal). FDA_Status is free-text, so we fetch by Stage and filter in code.
+const COORD_FDA_RX = /signed and approved|no response in 24/i;
 const cclean = (s) => String(s || "").replace(/[\s,]+$/, "").trim();
 function mapCoordinationDeal(d) {
   const p = parseDeal(d.Deal_Name);
@@ -304,7 +306,7 @@ function mapCoordinationDeal(d) {
     crew: "z-coordination", crewLabel: coord || "Coordination",
     date: null, status: "ready", cat: "coordination",
     stage: d.Stage || "", dealStage: d.Stage || "",
-    engStage: cclean(d.Engineering_Stage), qaStage: cclean(d.Post_Install_QA_Stage), coordinator: coord,
+    engStage: cclean(d.Engineering_Stage), fdaStatus: cclean(d.FDA_Status), qaStage: cclean(d.Post_Install_QA_Stage), coordinator: coord,
     systemKw: (d.System_Size_kW1 != null && d.System_Size_kW1 !== 0) ? d.System_Size_kW1 : null,
     ahj: lookup(d.Authority_Having_Jurisdiction_AHJ) || "", county: d.County1 || "",
     msp: false, phone: cclean(d.Client_Phone) || cclean(d.Client_Mobile) || "", geo: null,
@@ -362,7 +364,7 @@ export default async function handler(req, res) {
 
     // Coordination-ready Deals → their own section (kept separate from the schedule list; a DL can be
     // in coordination AND have a ready install, so we don't dedupe these against the above).
-    const coordJobs = coordDeals.map(mapCoordinationDeal).filter((j) => COORD_ENG_RX.test(j.engStage));
+    const coordJobs = coordDeals.map(mapCoordinationDeal).filter((j) => COORD_FDA_RX.test(j.fdaStatus) && j.engStage);
     jobs.push(...coordJobs);
 
     return res.status(200).json({
