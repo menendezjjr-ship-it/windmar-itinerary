@@ -1883,7 +1883,9 @@ function coordItems(){
   inspEntries().filter(e=>e.it.status==="ready"&&!DEAD.test(e.p.stage||"")).forEach(e=>{
     out.push({ key:"i|"+e.p.id+"|"+e.it.type, source:"insp", bucket:"inspection", kind:"inspection",
       num:e.p.num||"", name:e.p.name||"", address:e.p.address||"", ahj:e.p.ahj||"",
-      stage:e.p.stage||"", crewLabel:"", scope:"", recordId:"", msp:false, code:"", job:null, p:e.p, it:e.it });
+      // crew that DID the install (from the Installation record via zoho-projects) so the coordinator
+      // knows who to send back for the inspection instead of a blank "Unassigned".
+      stage:e.p.stage||"", crewLabel:e.p.installCrew||"", scope:"", recordId:"", msp:false, code:"", job:null, p:e.p, it:e.it });
   });
   return out;
 }
@@ -1993,7 +1995,8 @@ function coordItemRow(it,i){ const es=S.lang==="es", m=coordBucketMeta(it.bucket
   const statusPill=statusTxt?`<span class="pill" style="background:${statusCol};font-size:9.5px;flex-shrink:0">${esc(statusTxt)}</span>`:"";
   const mspBadge=(it.source==="ready"&&it.msp&&it.bucket!=="msp")?`<span class="pill" style="background:var(--jc-MSP);font-size:9px;flex-shrink:0">+MSP</span>`:"";
   const vip=(isInsp&&it.it.vip&&it.it.type!=="vip")?`<span class="pill" style="background:var(--jc-MSP);font-size:9px;flex-shrink:0">VIP</span>`:"";
-  const crew=it.crewLabel?`👷 ${esc(it.crewLabel)}`:(es?"Sin asignar":"Unassigned");
+  // For inspections the crew shown is who DID the install (send them back), so label it as such.
+  const crew=it.crewLabel?(isInsp?`🔧 ${es?"Instaló":"Installed by"} ${esc(it.crewLabel)}`:`👷 ${esc(it.crewLabel)}`):(es?"Sin asignar":"Unassigned");
   const crewDim=it.crewLabel?"var(--text-dim)":"var(--warn)";
   const bg=i%2?"var(--panel)":"var(--bg-2)";
   return `<div class="jobchip" data-action="coordSelect" data-id="${esc(it.key)}" data-ctip="${esc(it.num||"")}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 12px;cursor:pointer;background:${bg};border-bottom:1px solid var(--line);border-left:3px solid ${m.color};font-size:13px">

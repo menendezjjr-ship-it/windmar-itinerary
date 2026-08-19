@@ -70,6 +70,44 @@ async function resolveFinalInspections(dealIds, token) {
 const lookup = (v) => (v && typeof v === "object" ? v.name : v) || "";
 const clean = (s) => String(s || "").replace(/[\s,]+$/, "").trim();
 
+// Canonicalize a Zoho crew/team label (mirrors api/zoho-ready.js + zoho-jobs.js). Keeps one label
+// per crew so an inspection shows the SAME crew name the calendar uses for that DL's install.
+function canonTeam(raw) {
+  const s = (raw || "Unassigned").trim();
+  const n = s.toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
+  if (/elite crew #?3|in ?house #?3|william sierra|luis vargas/.test(n)) return "Elite Crew #3";
+  if (/elite crew #?2|in ?house #?2|tailor herrera|maykel pimentel/.test(n)) return "Elite Crew #2";
+  if (/crew #?1s|leonardo torres/.test(n)) return "Crew #1S";
+  if (/crew #?2s|david radke/.test(n)) return "Crew #2S";
+  if (/crew #?3s|luis morales/.test(n)) return "Crew #3S";
+  if (/crew h|holi/.test(n)) return "Crew H";
+  if (/roofing/.test(n)) return "Windmar Roofing";
+  return s.replace(/^t\d+\s*[-–]\s*/i, "").trim() || "Unassigned";
+}
+
+// For inspection-relevant deals, look up the crew that DID THE INSTALL from the Installation module
+// (each Installation has a `Deal` lookup + `Installation_Team`). Batched ≤10 (Deal:equals:) per
+// search on the shared token — never per-deal. Returns { dealId: "Elite Crew #2" }. Never throws.
+async function resolveInstallCrews(dealIds, token) {
+  const byDeal = {};
+  for (let i = 0; i < dealIds.length; i += 10) {
+    const chunk = dealIds.slice(i, i + 10);
+    const criteria = "(" + chunk.map((id) => `(Deal:equals:${id})`).join("or") + ")";
+    const path = `Installation/search?criteria=${encodeURIComponent(criteria)}&fields=${encodeURIComponent("Deal,Installation_Team")}&per_page=200`;
+    try {
+      const res = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+      if (res.status === 204 || !res.ok) continue;
+      const data = await res.json();
+      (data.data || []).forEach((r) => {
+        const did = r.Deal && r.Deal.id;
+        const team = lookup(r.Installation_Team);
+        if (did && team && !byDeal[did]) byDeal[did] = canonTeam(team);
+      });
+    } catch (e) { /* skip this chunk; those deals just show no install crew */ }
+  }
+  return byDeal;
+}
+
 function fmtPhone(s) {
   const d = String(s || "").replace(/\D/g, "");
   if (d.length === 10) return `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
@@ -172,6 +210,7 @@ export function mapDeal(r) {
     stageModified: r.Stage_Modified_Time || null,
     modifiedBy: lookup(r.Modified_By) || "",
     insp: inspStatus(r),
+    installCrew: "",     // crew that DID the install (from Installation_Team) — filled for inspection-relevant deals
     postInstallId: "",   // Final_Inspectin (CustomModule11) record id — filled for inspection-relevant deals
     postInstallName: "", // e.g. "FI8496"
     timeline,
@@ -206,8 +245,16 @@ export default async function handler(req, res) {
     try {
       const inspDealIds = projects.filter((p) => p.stage === "Install" || p.stage === "Post-Installation").map((p) => p.id);
       if (inspDealIds.length) {
-        const fiByDeal = await resolveFinalInspections(inspDealIds, token);
-        projects.forEach((p) => { const fi = fiByDeal[p.id]; if (fi) { p.postInstallId = fi.id; p.postInstallName = fi.name; } });
+        // Resolve the Post-Installation record link AND the install crew for the same deal set, in
+        // parallel on the shared token, so an inspection row shows who did the install.
+        const [fiByDeal, crewByDeal] = await Promise.all([
+          resolveFinalInspections(inspDealIds, token),
+          resolveInstallCrews(inspDealIds, token),
+        ]);
+        projects.forEach((p) => {
+          const fi = fiByDeal[p.id]; if (fi) { p.postInstallId = fi.id; p.postInstallName = fi.name; }
+          const cr = crewByDeal[p.id]; if (cr) p.installCrew = cr;
+        });
       }
     } catch (e) { /* leave postInstallId empty — inspection links fall back to their current target */ }
     const byStage = {};
