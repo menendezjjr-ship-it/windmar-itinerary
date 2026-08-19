@@ -1476,6 +1476,7 @@ function attentionHTML(){
         ${who?`<div style="font-size:12.5px;margin-top:3px"><b>${esc(latest.dl_number||'')}</b> ${esc(latest.customer||'')}</div>`:""}
         ${proj?`<span class="pill" style="background:${(STAGE_META[proj.stage]||{c:'var(--wh-grey)'}).c};font-size:9px;margin-top:6px;display:inline-block">${esc(stageLabel(proj.stage))}</span>`:""}${stageMoverLine(proj)}
         ${note?`<div style="font-size:11.5px;color:var(--text-dim);margin-top:5px;padding-top:5px;border-top:1px dashed var(--line);white-space:pre-wrap;word-break:break-word">📝 ${esc(note)}</div>`:""}
+        ${photoStrip(latest)}
         <div style="margin-top:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           <span class="btn3d blue sm" data-action="crewToZoho" data-zurl="${esc(zohoForDL(latest.dl_number||who))}" data-dl="${esc(latest.dl_number||who)}" style="font-size:10.5px;cursor:pointer">🔗 ${es?'Zoho':'Zoho'} ↗</span>${zohoOpenedBadge(latest.dl_number||who)}
           ${lpend?`<button class="btn3d green sm" data-action="crewAck" data-id="${esc(lpid)}" style="font-size:10.5px">✓ ${es?'Etapa actualizada':'Stage updated'}</button>`:`<span class="pill" data-action="crewUnack" data-id="${esc(lpid)}" title="${es?'Marcar pendiente':'Mark pending again'}" style="background:#22c55e;font-size:9px;cursor:pointer">✓ ${es?'Etapa actualizada':'Stage updated'}</span>`}
@@ -1488,7 +1489,7 @@ function attentionHTML(){
       var erev=e.id!=null&&(e.source||'')==='field-hub'&&canRevert();
       return `<div style="display:flex;gap:8px;padding:6px 0;border-bottom:1px solid rgba(42,63,122,.5)">
         <span style="color:var(--text-dim);font-size:10px;min-width:58px;flex:0 0 auto;padding-top:2px">${esc(evTime(e))}</span>
-        <span style="min-width:0;flex:1"><span style="font-weight:700;font-size:12px;color:${ec}">${esc(e.status)}</span>${l?`<div style="color:var(--text-dim);font-size:10.5px">${esc(l)}</div>`:""}${en?`<div style="color:var(--text-dim);font-size:10.5px;margin-top:3px;white-space:pre-wrap;word-break:break-word">📝 ${esc(en)}</div>`:""}</span>
+        <span style="min-width:0;flex:1"><span style="font-weight:700;font-size:12px;color:${ec}">${esc(e.status)}</span>${l?`<div style="color:var(--text-dim);font-size:10.5px">${esc(l)}</div>`:""}${en?`<div style="color:var(--text-dim);font-size:10.5px;margin-top:3px;white-space:pre-wrap;word-break:break-word">📝 ${esc(en)}</div>`:""}${photoStrip(e)}</span>
         <span style="display:flex;gap:4px;flex:0 0 auto;align-items:flex-start">
         ${ep?`<button class="btn3d green sm" data-action="crewAck" data-id="${esc(eid)}" title="${es?'Etapa actualizada':'Stage updated'}" style="font-size:9px;padding:2px 6px">✓</button>`
             :`<span class="pill" data-action="crewUnack" data-id="${esc(eid)}" title="${es?'Marcar pendiente':'Mark pending again'}" style="background:#22c55e;font-size:8.5px;cursor:pointer">✓</span>`}
@@ -2755,6 +2756,10 @@ async function loadCrewRecords(silent){
   }catch(e){ S.crewRec.status="error"; S.crewRec.list=[]; S.crewRec.voided=[]; }
   render(!!silent); // silent on auto-refresh so the log does not flash or replay animations
 }
+function photoStrip(e){
+  var ph=e&&e.photos; if(!Array.isArray(ph)||!ph.length) return "";
+  return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'+ph.map(function(u){u=String(u||"");if(!u)return"";return '<a href="'+esc(u)+'" target="_blank" rel="noopener" style="display:block;width:54px;height:54px;border-radius:8px;overflow:hidden;border:1px solid var(--line)"><img src="'+esc(u)+'" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover"/></a>';}).join("")+'</div>';
+}
 function crewRecColor(s){ s=(s||"").toLowerCase(); if(/insp/.test(s))return /complet|conclu/.test(s)?"#06b6d4":"#F89B24"; if(/complet|conclu/.test(s))return "#22c55e"; if(/resched|reprogram|reagend/.test(s))return "#ef4444"; return "#1D429B"; }
 // Plan-Analyzer BOM/estimator notes for one install DL (shown in the calendar job detail). Cached per DL in S.cal.bomNotes.
 async function loadBomNotes(dl){
@@ -2850,6 +2855,7 @@ function crewRecordsHTML(){
         <div style="font-weight:700;font-size:13.5px;margin-top:2px">${esc(who)}</div>
         <div style="font-size:11.5px;color:var(--text-dim);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center"><span style="display:inline-flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:50%;background:${col};display:inline-block"></span>${esc(crew)}</span>${person?`<span>· 👤 ${esc(person)}</span>`:""}</div>
         ${note?`<div style="font-size:12.5px;color:var(--text);margin-top:7px;background:var(--bg-2);border:1px solid var(--line);border-left:3px solid ${c};border-radius:8px;padding:7px 10px;white-space:pre-wrap;word-break:break-word;line-height:1.45">📝 ${esc(note)}</div>`:""}
+        ${photoStrip(e)}
         <div style="margin-top:8px"><a class="btn3d blue sm" href="${zohoFor(e)}" target="_blank" rel="noopener">🔗 ${es?"Abrir en Zoho":"Open in Zoho"}</a></div></div>`; };
     body=groups.map(k=>`<div style="margin:16px 0 8px;display:flex;align-items:center;gap:10px"><span style="font-weight:900;font-size:14px">${esc(dayLabel(k))}</span><span class="pill" style="background:var(--bg-2);border:1px solid var(--line);color:var(--text-dim);font-size:10px">${gmap[k].length}</span><div style="flex:1;height:1px;background:var(--line)"></div></div><div style="display:flex;flex-direction:column;gap:8px">${gmap[k].map(card).join("")}</div>`).join("");
   }
