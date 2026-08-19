@@ -2763,11 +2763,85 @@ function photoStrip(e){
   if(!Array.isArray(ph)) return "";
   ph=ph.filter(function(u){return u&&String(u).trim();});
   if(!ph.length) return "";
+  ensurePhotoUX(); // install the in-app lightbox + hover-preview listeners once
   var es=S.lang==="es";
+  var note=(e&&e.note)?String(e.note).trim():""; // the crew's message — shown in the hover preview + lightbox
+  var nAttr=esc(note);
   var label='<div style="display:flex;align-items:center;gap:6px;margin-top:9px;margin-bottom:5px;font-size:11px;font-weight:800;color:#67e8f9"><span>📷</span><span>'+(es?"Fotos de la cuadrilla":"Crew photos")+' ('+ph.length+')</span></div>';
-  var thumbs=ph.map(function(u){u=String(u).trim();return '<a href="'+esc(u)+'" target="_blank" rel="noopener" title="'+(es?"Ver foto":"View photo")+'" style="display:block;width:88px;height:88px;border-radius:10px;overflow:hidden;border:2px solid #06b6d4;box-shadow:0 2px 8px -2px rgba(0,0,0,.5)"><img src="'+esc(u)+'" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block"/></a>';}).join("");
+  // Each thumb is a button (not a link → no new tab). Click opens the in-app lightbox; hover shows an
+  // enlarged preview + the crew note. pointer-events:none on the img so events land on the button.
+  var thumbs=ph.map(function(u){u=String(u).trim();return '<button type="button" class="crewPhoto" data-url="'+esc(u)+'" data-note="'+nAttr+'" title="'+(es?"Ampliar":"Enlarge")+'" style="padding:0;margin:0;width:88px;height:88px;border-radius:10px;overflow:hidden;border:2px solid #06b6d4;background:#0c1628;cursor:zoom-in;box-shadow:0 2px 8px -2px rgba(0,0,0,.5);transition:transform .12s ease" onmouseenter="this.style.transform=\'scale(1.06)\'" onmouseleave="this.style.transform=\'\'"><img src="'+esc(u)+'" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;pointer-events:none"/></button>';}).join("");
   return '<div>'+label+'<div style="display:flex;gap:7px;flex-wrap:wrap">'+thumbs+'</div></div>';
 }
+// ── In-app crew-photo viewer: hover to enlarge (photo + note), click for a full lightbox with
+// Back + Copy. All overlays live on document.body (NOT #root), so render() never wipes them. ──
+function ensurePhotoUX(){
+  if(window.__wmPhotoUX) return; window.__wmPhotoUX=true;
+  var prev=null;
+  function killPrev(){ if(prev){ prev.remove(); prev=null; } }
+  function place(ev){ if(!prev)return; var pad=18, w=prev.offsetWidth||360, h=prev.offsetHeight||360;
+    var x=ev.clientX+pad, y=ev.clientY+pad;
+    if(x+w>window.innerWidth-8) x=ev.clientX-w-pad; if(x<8)x=8;
+    if(y+h>window.innerHeight-8) y=window.innerHeight-h-8; if(y<8)y=8;
+    prev.style.left=x+"px"; prev.style.top=y+"px"; }
+  document.addEventListener("mouseover", function(ev){
+    var t=ev.target.closest?ev.target.closest(".crewPhoto"):null; if(!t) return;
+    killPrev(); var es=S.lang==="es", url=t.getAttribute("data-url")||"", note=t.getAttribute("data-note")||"";
+    prev=document.createElement("div");
+    prev.style.cssText="position:fixed;z-index:100000;pointer-events:none;background:#0c1628;border:1px solid #1D429B;border-radius:12px;box-shadow:0 22px 55px -12px rgba(0,0,0,.75);padding:8px";
+    prev.innerHTML='<img src="'+esc(url)+'" style="display:block;max-width:340px;max-height:340px;border-radius:8px"/>'+(note?'<div style="margin-top:8px;font-size:12px;line-height:1.45;color:#dbe4f0;white-space:pre-wrap;word-break:break-word;max-width:340px">📝 '+esc(note)+'</div>':'');
+    document.body.appendChild(prev); place(ev);
+  });
+  document.addEventListener("mousemove", function(ev){ if(prev) place(ev); });
+  document.addEventListener("mouseout", function(ev){ var t=ev.target.closest?ev.target.closest(".crewPhoto"):null; if(t) killPrev(); });
+  window.addEventListener("scroll", killPrev, true);
+  // Capture-phase click so the thumb opens the lightbox and never triggers the card's own action.
+  document.addEventListener("click", function(ev){
+    var t=ev.target.closest?ev.target.closest(".crewPhoto"):null; if(!t) return;
+    ev.preventDefault(); ev.stopPropagation(); killPrev();
+    openPhotoLightbox(t.getAttribute("data-url")||"", t.getAttribute("data-note")||"");
+  }, true);
+}
+function closePhotoLightbox(){
+  var ov=document.getElementById("wmPhotoLightbox"); if(ov) ov.remove();
+  document.body.style.overflow="";
+  if(window.__wmPhotoEsc){ document.removeEventListener("keydown", window.__wmPhotoEsc); window.__wmPhotoEsc=null; }
+}
+function openPhotoLightbox(url, note){
+  if(!url) return; var es=S.lang==="es"; closePhotoLightbox();
+  var ov=document.createElement("div"); ov.id="wmPhotoLightbox";
+  ov.style.cssText="position:fixed;inset:0;z-index:100001;background:rgba(3,8,20,.88);backdrop-filter:blur(3px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px";
+  var btn="border:none;border-radius:9px;padding:9px 16px;font-size:13px;font-weight:800;cursor:pointer;color:#fff";
+  ov.innerHTML=
+    '<div style="display:flex;gap:10px;align-items:center">'
+    +'<button type="button" id="wmPhotoBack" style="'+btn+';background:#334155">← '+(es?"Volver":"Back")+'</button>'
+    +'<button type="button" id="wmPhotoCopy" style="'+btn+';background:linear-gradient(135deg,#1D429B,#06b6d4)">⧉ '+(es?"Copiar":"Copy")+'</button>'
+    +'</div>'
+    +'<img src="'+esc(url)+'" style="max-width:92vw;max-height:68vh;border-radius:12px;border:2px solid #06b6d4;box-shadow:0 24px 64px -12px rgba(0,0,0,.85)"/>'
+    +(note?'<div style="max-width:92vw;background:#0c1628;border:1px solid #1D429B;border-radius:10px;padding:10px 14px;color:#e2e8f0;font-size:13px;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:18vh;overflow:auto">📝 '+esc(note)+'</div>':'');
+  document.body.appendChild(ov); document.body.style.overflow="hidden";
+  ov.addEventListener("click", function(ev){ if(ev.target===ov) closePhotoLightbox(); });
+  ov.querySelector("#wmPhotoBack").addEventListener("click", closePhotoLightbox);
+  var cb=ov.querySelector("#wmPhotoCopy"); cb.addEventListener("click", function(){ copyPhoto(url, cb); });
+  window.__wmPhotoEsc=function(ev){ if(ev.key==="Escape") closePhotoLightbox(); };
+  document.addEventListener("keydown", window.__wmPhotoEsc);
+}
+// Copy the actual image to the clipboard; if the browser/CORS won't allow an image write, fall back
+// to copying the photo's link so the button always does something useful.
+function copyPhoto(url, btn){
+  var es=S.lang==="es", orig=btn?btn.innerHTML:"";
+  var flash=function(msg){ if(!btn)return; btn.innerHTML="✓ "+msg; setTimeout(function(){ btn.innerHTML=orig; },1600); };
+  var copyLink=function(){ var done=function(){ flash(es?"Enlace copiado":"Link copied"); };
+    if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(url).then(done).catch(function(){fallbackCopyText(url,done);}); }
+    else fallbackCopyText(url,done); };
+  if(window.ClipboardItem&&navigator.clipboard&&navigator.clipboard.write){
+    fetch(url,{mode:"cors"}).then(function(r){return r.blob();}).then(function(b){
+      var item={}; item[b.type||"image/png"]=b;
+      return navigator.clipboard.write([new ClipboardItem(item)]);
+    }).then(function(){ flash(es?"Foto copiada":"Photo copied"); }).catch(copyLink);
+  } else copyLink();
+}
+function fallbackCopyText(t, cb){ try{ var ta=document.createElement("textarea"); ta.value=t; ta.style.cssText="position:fixed;opacity:0;top:0"; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); cb&&cb(); }catch(e){} }
 function crewRecColor(s){ s=(s||"").toLowerCase(); if(/insp/.test(s))return /complet|conclu/.test(s)?"#06b6d4":"#F89B24"; if(/complet|conclu/.test(s))return "#22c55e"; if(/resched|reprogram|reagend/.test(s))return "#ef4444"; return "#1D429B"; }
 // Plan-Analyzer BOM/estimator notes for one install DL (shown in the calendar job detail). Cached per DL in S.cal.bomNotes.
 async function loadBomNotes(dl){
