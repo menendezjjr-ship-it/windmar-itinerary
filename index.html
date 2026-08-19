@@ -1939,7 +1939,18 @@ function coordinatorHTML(){
   else if(!items.length) body=feedWarn+`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">${q?(es?"Sin coincidencias":"No matches"):(es?"Nada listo para programar 🎉":"Nothing ready to schedule 🎉")}</div>`;
   else {
     const clearBtn=C.tile?`<div style="margin:-6px 0 10px"><button class="btn3d sm" data-action="coordTile" data-id="${esc(C.tile)}" style="font-size:11.5px">✕ ${es?"Ver todo":"Show everything"} (${items.length})</button></div>`:"";
-    body=feedWarn+tiles+clearBtn+`<div class="coord-report">${shown.map(coordItemRow).join("")}</div>`;
+    if(C.tile){
+      // Inside a category → group by AREA (proximity) so a coordinator can schedule a whole route.
+      // Inspections are ordered OLDEST-first (oldest DL# = longest-waiting) within each area.
+      const byOldest=(a,z)=>(parseInt(String(a.num||"").replace(/\D/g,""),10)||1e9)-(parseInt(String(z.num||"").replace(/\D/g,""),10)||1e9);
+      const clusters=coordAreaClusters(shown, C.tile==="inspection"?byOldest:null);
+      const geocoding=(S.coord.geo&&S.coord.geo.status==="geocoding");
+      const note=geocoding?`<div style="font-size:12px;color:var(--text-dim);margin:2px 0 6px">📍 ${es?"Ubicando trabajos":"Locating jobs"}… ${(S.coord.geo.done||0)}/${S.coord.geo.total||shown.length}</div>`
+        :`<div style="font-size:12px;color:var(--text-dim);margin:2px 0 6px">${es?"Agrupados por cercanía — toca 🧭 Ruta para abrir la zona en Google Maps.":"Grouped by how close they are — tap 🧭 Route to open a whole area in Google Maps."}</div>`;
+      body=feedWarn+tiles+clearBtn+note+`<div class="coord-report">${clusters.map((cl,ix)=>coordAreaSectionHTML(cl,ix,!!q)).join("")}</div>`;
+    } else {
+      body=feedWarn+tiles+`<div class="coord-report">${shown.map(coordItemRow).join("")}</div>`;
+    }
   }
   // 🗺 Schedule Nearest Crew — pending inspections ranked against live crew GPS.
   // Moved here from Projects → Inspections so the whole team finds it in one place.
@@ -1995,7 +2006,7 @@ function coordItemRow(it,i){ const es=S.lang==="es", m=coordBucketMeta(it.bucket
 }
 // ── Coordinator "By Area" (proximity) view — cluster ready jobs geographically so a coordinator
 // can schedule a whole route in one trip. Reads coords from GEO_CACHE (populated by geocodeInto).
-function coordAreaClusters(items){
+function coordAreaClusters(items,sortFn){
   const es=S.lang==="es";
   const withGeo=[], noGeo=[];
   items.forEach(it=>{ const g=GEO_CACHE[geoKey(it.address)]; if(g&&g.lat!=null&&g.lon!=null){ withGeo.push(Object.assign({},it,{lat:g.lat,lon:g.lon})); } else { noGeo.push(it); } });
@@ -2010,7 +2021,7 @@ function coordAreaClusters(items){
     let cur=rem.splice(si,1)[0]; path.push(cur);
     while(rem.length){ let bi=0,bd=Infinity; rem.forEach((p,ix)=>{const d=haversineMi(cur.lat,cur.lon,p.lat,p.lon); if(d<bd){bd=d;bi=ix;}}); cur=rem.splice(bi,1)[0]; path.push(cur); } return path; };
   const out=clusters.map(cl=>{
-    const ordered=nnOrder(cl);
+    const ordered=sortFn?cl.slice().sort(sortFn):nnOrder(cl); // sortFn (e.g. oldest-first) overrides route order
     const clat=cl.reduce((s,p)=>s+p.lat,0)/cl.length, clon=cl.reduce((s,p)=>s+p.lon,0)/cl.length;
     let spread=0; for(let a=0;a<cl.length;a++)for(let b=a+1;b<cl.length;b++){const d=haversineMi(cl[a].lat,cl[a].lon,cl[b].lat,cl[b].lon); if(d>spread)spread=d;}
     const freq={}; cl.forEach(p=>{const c=cityFromAddr(p.address); if(c)freq[c]=(freq[c]||0)+1;});
@@ -3160,12 +3171,13 @@ function _render(noAnim){
       setTimeout(()=>initPinMap("calPinMap",pm.pins,"_calPinMap",{color:(p)=>p.type==="service"?"#06b6d4":teamColor(p.team),radius:7,onClick:(p)=>{S.cal.selected=p.id;render();},popup:(p)=>`<b>${esc(p.dlNumber||"")}</b> ${esc(p.customerName||"")}<br>${esc(p.address||"")}<br><span style="color:#888">${p.type==="service"?"🔧 ":""}${esc(p.team||"")}${p.startDate?" · "+esc(p.startDate):""}</span>${dirLink(p)}`}),0);
     }
   }
-  // Coordinator "By Area": geocode the ready jobs so they can be clustered by proximity.
-  if(S.tab==="coordinator" && S.coord.view==="area"){
+  // Coordinator: when a category tile is open the list groups BY AREA, so geocode the ready jobs
+  // (cached) to cluster them by proximity. Runs once per address-set; re-renders as pins fill in.
+  if(S.tab==="coordinator" && S.coord.tile){
     const citems=coordItems(), sig=citems.map(i=>geoKey(i.address)).join("|"), G=S.coord.geo||{status:"idle"};
     if(citems.length && G.status!=="geocoding" && S.coord.geoSig!==sig){
       S.coord.geoSig=sig; S.coord.geo={status:"geocoding",done:0,total:citems.length,pins:[]};
-      setTimeout(()=>geocodeInto(S.coord.geo, citems, ()=>{ if(S.tab==="coordinator"&&S.coord.view==="area") render(true); }),0);
+      setTimeout(()=>geocodeInto(S.coord.geo, citems, ()=>{ if(S.tab==="coordinator"&&S.coord.tile) render(true); }),0);
     }
   }
   // Schedule Nearest Crew dispatch (Projects → Inspections)
