@@ -1941,9 +1941,9 @@ function coordinatorHTML(){
     const clearBtn=C.tile?`<div style="margin:-6px 0 10px"><button class="btn3d sm" data-action="coordTile" data-id="${esc(C.tile)}" style="font-size:11.5px">✕ ${es?"Ver todo":"Show everything"} (${items.length})</button></div>`:"";
     if(C.tile){
       // Inside a category → group by AREA (proximity) so a coordinator can schedule a whole route.
-      // Inspections are ordered OLDEST-first (oldest DL# = longest-waiting) within each area.
-      const byOldest=(a,z)=>(parseInt(String(a.num||"").replace(/\D/g,""),10)||1e9)-(parseInt(String(z.num||"").replace(/\D/g,""),10)||1e9);
-      const clusters=coordAreaClusters(shown, C.tile==="inspection"?byOldest:null);
+      // Each area is ordered furthest→closest from HQ so the crew ends the loop back at base, with
+      // the driving distance shown between every stop.
+      const clusters=coordAreaClusters(shown);
       const geocoding=(S.coord.geo&&S.coord.geo.status==="geocoding");
       const note=geocoding?`<div style="font-size:12px;color:var(--text-dim);margin:2px 0 6px">📍 ${es?"Ubicando trabajos":"Locating jobs"}… ${(S.coord.geo.done||0)}/${S.coord.geo.total||shown.length}</div>`
         :`<div style="font-size:12px;color:var(--text-dim);margin:2px 0 6px">${es?"Agrupados por cercanía — toca 🧭 Ruta para abrir la zona en Google Maps.":"Grouped by how close they are — tap 🧭 Route to open a whole area in Google Maps."}</div>`;
@@ -2015,36 +2015,45 @@ function coordAreaClusters(items,sortFn){
   for(let i=0;i<withGeo.length;i++){ if(used[i])continue; const cl=[withGeo[i]]; used[i]=true; let grew=true;
     while(grew){ grew=false; for(let j=0;j<withGeo.length;j++){ if(used[j])continue;
       if(cl.some(m=>haversineMi(m.lat,m.lon,withGeo[j].lat,withGeo[j].lon)<=TH)){ cl.push(withGeo[j]); used[j]=true; grew=true; } } } clusters.push(cl); }
-  // Nearest-neighbour order within a cluster, starting from the job closest to HQ.
-  const nnOrder=(cl)=>{ if(cl.length<=1) return cl.slice(); const rem=cl.slice(), path=[];
-    let si=0,sd=Infinity; rem.forEach((p,ix)=>{const d=haversineMi(HQ.lat,HQ.lon,p.lat,p.lon); if(d<sd){sd=d;si=ix;}});
-    let cur=rem.splice(si,1)[0]; path.push(cur);
-    while(rem.length){ let bi=0,bd=Infinity; rem.forEach((p,ix)=>{const d=haversineMi(cur.lat,cur.lon,p.lat,p.lon); if(d<bd){bd=d;bi=ix;}}); cur=rem.splice(bi,1)[0]; path.push(cur); } return path; };
+  // Route order within a cluster: FURTHEST-from-HQ first → CLOSEST last, so the crew works its way
+  // back toward base and ends the loop at HQ. Each stop is annotated with the driving leg from the
+  // previous stop (_legMi) and its own distance to HQ (_hqMi) so the UI can show the gaps.
+  const routeOrder=(cl)=>{
+    const ordered=cl.slice().sort((a,b)=>haversineMi(HQ.lat,HQ.lon,b.lat,b.lon)-haversineMi(HQ.lat,HQ.lon,a.lat,a.lon));
+    let prev={lat:HQ.lat,lon:HQ.lon};
+    ordered.forEach(p=>{ p._hqMi=haversineMi(HQ.lat,HQ.lon,p.lat,p.lon); p._legMi=haversineMi(prev.lat,prev.lon,p.lat,p.lon); prev=p; });
+    return ordered;
+  };
   const out=clusters.map(cl=>{
-    const ordered=sortFn?cl.slice().sort(sortFn):nnOrder(cl); // sortFn (e.g. oldest-first) overrides route order
+    const ordered=routeOrder(cl); // furthest→closest; sortFn kept for callers that need a manual order
+    if(sortFn){ ordered.sort(sortFn); let prev={lat:HQ.lat,lon:HQ.lon}; ordered.forEach(p=>{ p._legMi=haversineMi(prev.lat,prev.lon,p.lat,p.lon); prev=p; }); }
+    const last=ordered[ordered.length-1]||{lat:HQ.lat,lon:HQ.lon};
+    const returnMi=haversineMi(last.lat,last.lon,HQ.lat,HQ.lon);          // final leg back to base
+    const roundTrip=ordered.reduce((s,p)=>s+(p._legMi||0),0)+returnMi;    // HQ → all stops → HQ
     const clat=cl.reduce((s,p)=>s+p.lat,0)/cl.length, clon=cl.reduce((s,p)=>s+p.lon,0)/cl.length;
     let spread=0; for(let a=0;a<cl.length;a++)for(let b=a+1;b<cl.length;b++){const d=haversineMi(cl[a].lat,cl[a].lon,cl[b].lat,cl[b].lon); if(d>spread)spread=d;}
     const freq={}; cl.forEach(p=>{const c=cityFromAddr(p.address); if(c)freq[c]=(freq[c]||0)+1;});
     const top=Object.keys(freq).sort((a,b)=>freq[b]-freq[a])[0]||(es?"Zona":"Area");
     const label=Object.keys(freq).length>1?(top+" "+(es?"y alrededores":"area")):top;
-    return { items:ordered, label, count:cl.length, spread, clat, clon, unmapped:false };
+    return { items:ordered, label, count:cl.length, spread, roundTrip, returnMi, clat, clon, unmapped:false };
   });
   out.sort((a,z)=>haversineMi(HQ.lat,HQ.lon,a.clat,a.clon)-haversineMi(HQ.lat,HQ.lon,z.clat,z.clon)); // nearest-to-base first
   if(noGeo.length) out.push({ items:noGeo, label:(es?"Ubicación desconocida":"Location unknown"), count:noGeo.length, spread:0, unmapped:true });
   return out;
 }
-// Google Maps multi-stop route: HQ → each job in order (≤9 waypoints + destination).
+// Google Maps loop route: HQ → each job (furthest→closest) → back to HQ. All stops are waypoints
+// (≤10 supported by the dir API) and the destination is HQ so the crew ends the day at base.
 function coordRouteLink(ordered){
   const pts=(ordered||[]).filter(p=>p.lat!=null&&p.lon!=null).map(p=>p.lat+","+p.lon); if(!pts.length) return "";
-  const dest=pts[pts.length-1], wp=pts.slice(0,-1).slice(0,9);
-  let url="https://www.google.com/maps/dir/?api=1&origin="+HQ.lat+","+HQ.lon+"&destination="+encodeURIComponent(dest);
+  const wp=pts.slice(0,10);
+  let url="https://www.google.com/maps/dir/?api=1&origin="+HQ.lat+","+HQ.lon+"&destination="+HQ.lat+","+HQ.lon;
   if(wp.length) url+="&waypoints="+wp.map(encodeURIComponent).join("|"); return url;
 }
 function coordAreaSectionHTML(cl, idx, searching){
   const es=S.lang==="es", key="area:"+idx;
   const collapsed=!searching&&!!(S.coord.collapsed&&S.coord.collapsed[key]);
   const col=cl.unmapped?"var(--wh-grey)":"#F59E0B";
-  const spreadTxt=(!cl.unmapped&&cl.count>1&&cl.spread>=1)?`~${Math.round(cl.spread)} ${es?"mi":"mi"}`:(!cl.unmapped&&cl.count>1?(es?"muy cerca":"very close"):"");
+  const spreadTxt=(!cl.unmapped&&cl.roundTrip>=1)?`↺ ~${Math.round(cl.roundTrip)} mi ${es?"ida y vuelta":"round trip"}`:"";
   const route=(!cl.unmapped&&cl.count>1)?`<a href="${coordRouteLink(cl.items)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="padding:4px 9px;border-radius:7px;background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff;font-weight:800;font-size:11px;text-decoration:none;white-space:nowrap">🧭 ${es?"Ruta":"Route"}</a>`:"";
   const hdr=`<div data-action="coordToggle" data-bucket="${esc(key)}" style="display:flex;align-items:center;gap:9px;margin-top:14px;padding:9px 12px;cursor:pointer;border-radius:10px;background:var(--panel);border:1px solid var(--line);border-left:4px solid ${col};user-select:none">
     <span style="font-size:13px;color:var(--text-dim);width:12px;flex-shrink:0">${collapsed?"▸":"▾"}</span>
@@ -2053,7 +2062,16 @@ function coordAreaSectionHTML(cl, idx, searching){
     ${spreadTxt?`<span style="color:var(--text-dim);font-size:11.5px;flex-shrink:0">${spreadTxt}</span>`:""}
     <span style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-shrink:0">${route}<span class="pill" style="background:${col};color:${textOn(col)};font-size:11px">${cl.count}</span></span></div>`;
   if(collapsed) return hdr;
-  const rows=cl.items.map((it,i)=>coordItemRow(it,i)).join("");
+  // Driving legs between consecutive stops (real Haversine miles), plus HQ→first and last→HQ.
+  const mi=(m)=> m==null?"":(m<1?"<1":Math.round(m))+" mi";
+  const leg=(m,label)=>`<div style="display:flex;align-items:center;gap:7px;padding:3px 12px;font-size:10.5px;font-weight:700;color:var(--text-dim);background:var(--panel);border-top:1px dashed var(--line)"><span style="opacity:.55">↓</span><span>${label} · ${mi(m)}</span></div>`;
+  let rows="";
+  if(cl.unmapped){ rows=cl.items.map((it,i)=>coordItemRow(it,i)).join(""); }
+  else {
+    if(cl.items[0]&&cl.items[0]._legMi!=null) rows+=leg(cl.items[0]._legMi, es?"desde HQ":"from HQ");
+    cl.items.forEach((it,i)=>{ rows+=coordItemRow(it,i); const nx=cl.items[i+1]; if(nx&&nx._legMi!=null) rows+=leg(nx._legMi, es?"maneja":"drive"); });
+    if(cl.returnMi!=null&&cl.items.length) rows+=leg(cl.returnMi, es?"regreso a HQ":"back to HQ");
+  }
   return hdr+`<div style="border:1px solid var(--line);border-top:none;border-radius:0 0 10px 10px;overflow:hidden;margin-bottom:4px">${rows}</div>`;
 }
 // ── Shared editable-Installation editor (Schedule + Stage fields, Save, Add-note) ──────────
