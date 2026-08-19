@@ -881,7 +881,7 @@ function opsCalHTML(){
   const gByTeam={}; visible.forEach(r=>{(gByTeam[r.team]=gByTeam[r.team]||[]).push(r);});
   const gTeams=Object.keys(gByTeam).sort((a,b)=>a.localeCompare(b));
   const gDays=[]; for(let i=0;i<7;i++) gDays.push(calAddDays(ws,i));
-  const gCols="160px repeat(7,minmax(132px,1fr))";
+  const gCols="150px repeat(7,minmax(170px,1fr))";
   const gHead=`<div style="display:grid;grid-template-columns:${gCols};position:sticky;top:0;z-index:3">
     <div style="padding:10px 12px;border-bottom:2px solid var(--line);border-right:1px solid var(--line);font-weight:800;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--text-dim);position:sticky;left:0;background:var(--panel);z-index:4">${es?'Cuadrilla':'Crew'}</div>
     ${gDays.map(d=>{const td=calYMD(d)===calYMD(today);return `<div style="padding:8px 6px;text-align:center;border-bottom:2px solid var(--line);border-right:1px solid var(--line);background:${td?'rgba(248,155,36,.12)':'var(--panel)'}"><div style="font-weight:800;font-size:12px;color:${td?'var(--wh-orange)':'var(--text)'}">${D[d.getDay()]}</div><div style="font-size:11px;color:var(--text-dim)">${M[d.getMonth()].slice(0,3)} ${d.getDate()}</div></div>`;}).join("")}</div>`;
@@ -891,7 +891,7 @@ function opsCalHTML(){
     }).join("");
     return `<div style="display:grid;grid-template-columns:${gCols}"><div style="padding:8px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);border-left:4px solid ${col};position:sticky;left:0;background:var(--bg-2);z-index:2"><div style="font-weight:800;font-size:12.5px;line-height:1.2">${esc(team)}</div><div style="font-size:10px;color:var(--text-dim)">${gByTeam[team].length} ${es?'trab.':'jobs'}</div></div>${cells}</div>`;
   }).join("");
-  const gridView=`<div class="card" style="border-radius:12px;overflow:auto;max-height:74vh"><div style="min-width:1020px">${gHead}${gTeams.length?gBody:`<div style="padding:44px;text-align:center;color:var(--text-dim)">${es?'Sin trabajos esta semana':'No jobs scheduled this week'}</div>`}</div></div>`;
+  const gridView=`<div class="card" style="border-radius:12px;overflow:auto;max-height:74vh"><div style="min-width:1340px">${gHead}${gTeams.length?gBody:`<div style="padding:44px;text-align:center;color:var(--text-dim)">${es?'Sin trabajos esta semana':'No jobs scheduled this week'}</div>`}</div></div>`;
   // month view = simplified crew×month horizontal-scroll grid (same cell styling as the weekly Crew Grid, spanning every day of the selected month)
   const mDaysInMonth=new Date(c.y,c.m,0).getDate();
   const mDays=[]; for(let dd=1;dd<=mDaysInMonth;dd++) mDays.push(new Date(c.y,c.m-1,dd));
