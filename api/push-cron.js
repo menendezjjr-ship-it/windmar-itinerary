@@ -5,6 +5,7 @@
 // The cursor read + event fetch + BOM sync run REGARDLESS of VAPID; only the push send is gated.
 // The cursor advances ONCE at the end covering every processed event (prevents re-processing / dup notes).
 import webpush from "web-push";
+import { syncCrewToZoho } from "./_crew-photos.js";
 
 const SB_URL = "https://lmlixmzmzpzgeggvywwb.supabase.co";
 const SB_KEY = process.env.SUPABASE_ANON_KEY || "sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
@@ -138,6 +139,15 @@ export default async function handler(req, res) {
     // 3) BOM sync (runs regardless of VAPID; never breaks push or the cursor advance)
     const bom = await syncBomNotes(events);
 
+    // 3b) Crew → Zoho mirror: the crew's note AND the photos they attached, onto the assigned
+    //     job's record. The Field HUB already does this at submit time; this is the safety net
+    //     that catches a failed/partial submit, and it is idempotent so it never duplicates.
+    let crewSync = null;
+    if (zohoHasCreds()) {
+      try { crewSync = await syncCrewToZoho(events, await getAccessToken()); }
+      catch (e) { crewSync = { error: String(e && e.message || e) }; }
+    }
+
     // 4) Web Push — only if VAPID is configured
     let sent = 0, pruned = 0, pushEnabled = false, subsCount = 0;
     if (PRIV) {
@@ -175,7 +185,7 @@ export default async function handler(req, res) {
     const newest = events[events.length - 1].created_at;
     await sb("push_cursor?id=eq.1", { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ last_created_at: newest }) });
 
-    return res.status(200).json({ ok: true, events: events.length, pushEnabled, subscriptions: subsCount, sent, pruned, advancedTo: newest, ...bom, ...lunch });
+    return res.status(200).json({ ok: true, events: events.length, pushEnabled, subscriptions: subsCount, sent, pruned, advancedTo: newest, ...bom, ...lunch, crewSync });
   } catch (e) {
     return res.status(200).json({ ok: false, error: String(e && e.message || e) });
   }
