@@ -148,7 +148,15 @@ export async function syncCrewToZoho(events, token, opts) {
         } else {
           const marker = noteMarker(ev.id);
           const txt = String((ev && ev.note) || "").trim();
-          const already = blob.includes(marker) || (txt.length > 12 && blob.includes(txt));
+          // Three ways to recognize that this event's note is already on the record:
+          //   1. our own marker — notes written by this module
+          //   2. the crew's note text — notes the Field HUB wrote at submit time (no marker)
+          //   3. a photo URL — the ONLY signal when the crew sent photos and no text at all.
+          //      Without (3) a photos-only update would fail (1) and (2) and get a second note
+          //      posted a minute after the Field HUB already wrote one.
+          const already = blob.includes(marker)
+            || (txt.length > 12 && blob.includes(txt))
+            || (photos.length > 0 && blob.includes(photos[0]));
           if (already) { d.note = "present"; out.notesSkipped++; }
           else {
             const r = await postNote(token, module, recordId, `Field HUB — ${ev.status || "Update"}`, crewNoteContent(ev));
