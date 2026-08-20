@@ -11,7 +11,7 @@
 //
 // Safe to re-run: syncCrewToZoho() skips a photo whose attachment name is already on the record
 // and skips a note whose marker (or text) is already there. It never advances the cron cursor.
-import { syncCrewToZoho, normPhotos } from "./_crew-photos.js";
+import { syncCrewToZoho, normPhotos, MODULE_FOR } from "./_crew-photos.js";
 
 const SB_URL = "https://lmlixmzmzpzgeggvywwb.supabase.co";
 const SB_KEY = process.env.SUPABASE_ANON_KEY || "sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
@@ -51,8 +51,12 @@ export default async function handler(req, res) {
 
     if (dryRun) {
       const plan = events
-        .filter((e) => normPhotos(e.photos).length || e.note)
-        .map((e) => ({ id: e.id, at: e.created_at, dl: e.dl_number, job_type: e.job_type, job_id: e.job_id, photos: normPhotos(e.photos).length, hasNote: !!e.note }));
+        .filter((e) => MODULE_FOR[String(e.job_type || "").toLowerCase()]
+                    && String(e.job_id || "").replace(/[^0-9]/g, "")
+                    && (normPhotos(e.photos).length || e.note))
+        .map((e) => ({ id: e.id, at: e.created_at, dl: e.dl_number, job_type: e.job_type,
+                       module: MODULE_FOR[String(e.job_type).toLowerCase()], job_id: e.job_id,
+                       photos: normPhotos(e.photos).length, hasNote: !!e.note }));
       return res.status(200).json({ ok: true, dryRun: true, since, scanned: events.length, wouldProcess: plan.length, plan });
     }
 

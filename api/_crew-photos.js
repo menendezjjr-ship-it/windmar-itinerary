@@ -21,7 +21,7 @@ const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
 const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
 
 // job_type → the Zoho module holding the assigned job. hq/lunch have no Zoho record at all.
-const MODULE_FOR = { service: "Service_Ticket", install: "Installation" };
+export const MODULE_FOR = { service: "Service_Ticket", install: "Installation" };
 
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // per photo; crew phone shots run ~0.5MB
 const MAX_PHOTOS_PER_EVENT = 15;         // a runaway row can't stall the whole cron
