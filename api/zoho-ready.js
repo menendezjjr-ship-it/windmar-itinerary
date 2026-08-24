@@ -324,7 +324,9 @@ function mapCoordinationDeal(d) {
 const PREENG_CRITERIA = "(Stage:equals:Pre-Engineering)";
 function mapPreEngDeal(d) {
   const p = parseDeal(d.Deal_Name);
-  const address = [cclean(d.Address), cclean(d.City), [cclean(d.State), cclean(d.Zip)].filter(Boolean).join(", ")].filter(Boolean).join(", ") || p.address || "";
+  // State and Zip join with a SPACE ("FL 34743"), matching mapCoordinationDeal — a comma there
+  // is not a standard US address and geocodes worse.
+  const address = [cclean(d.Address), cclean(d.City), [cclean(d.State), cclean(d.Zip)].filter(Boolean).join(" ")].filter(Boolean).join(", ") || p.address || "";
   const coord = lookup(d.Project_Coordinator) || "";
   return {
     id: p.num || d.id, recordId: d.id, dealId: d.id, num: p.num || "",
