@@ -424,7 +424,7 @@ const S={
   instMap:{status:"idle",items:[],pinState:{status:"idle"}},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
   dispatch:{ open:false, updated:null, sig:null, geo:{status:"idle"}, filter:"all" }, // filter: all | service | insp
-  coord:{ q:"", tile:"", /* tile: "" = show everything, else a bucket id */ selected:null, collapsed:{}, notes:{}, fields:{status:"idle",map:{},team:[]}, edit:null, savedMsg:null, addNote:{text:"",sending:false,err:"",okDl:""}, ready:{status:"idle",list:[],err:""}, view:"type", geo:{status:"idle"}, geoSig:"" }, // view: "type" (by job type) | "area" (by geographic proximity for route scheduling) // Coordinator tab: search, open detail key, per-section collapsed state, per-DL record cache, field metadata, active editor, /api/zoho-ready feed (Pending-Schedule installs + Need-Schedule services)
+  coord:{ q:"", tile:"", route:(function(){try{var v=localStorage.getItem("wm_coord_route");return (v==="near"||v==="short")?v:"far";}catch(e){return "far";}})(), /* route: how each area is ordered — far (default, unchanged) | near | short */ selected:null, collapsed:{}, notes:{}, fields:{status:"idle",map:{},team:[]}, edit:null, savedMsg:null, addNote:{text:"",sending:false,err:"",okDl:""}, ready:{status:"idle",list:[],err:""}, view:"type", geo:{status:"idle"}, geoSig:"" }, // view: "type" (by job type) | "area" (by geographic proximity for route scheduling) // Coordinator tab: search, open detail key, per-section collapsed state, per-DL record cache, field metadata, active editor, /api/zoho-ready feed (Pending-Schedule installs + Need-Schedule services)
   svc:{ rec:{}, notes:{}, /* Zoho Notes ON the ticket, per recordId — read-back, previously write-only */ fields:{status:"idle",map:{}}, edit:null, savedMsg:null, scope:{status:"idle",canUpdate:false} }, // Service_Ticket editor: per-recordId editable-record cache, field metadata (picklists), active editor, UPDATE-scope probe
   attachScope:{status:"idle",canAttach:false}, // Attachments CREATE scope probe (gates the photo picker so no broken button ever ships)
   note:{ text:"", sending:false, err:"", okKey:"", prog:"" }, // unified note+photo box (install AND service), keyed by module:recordId
@@ -1972,7 +1972,14 @@ function coordinatorHTML(){
       const geocoding=(S.coord.geo&&S.coord.geo.status==="geocoding");
       const note=geocoding?`<div style="font-size:12px;color:var(--text-dim);margin:2px 0 6px">📍 ${es?"Ubicando trabajos":"Locating jobs"}… ${(S.coord.geo.done||0)}/${S.coord.geo.total||shown.length}</div>`
         :`<div style="font-size:12px;color:var(--text-dim);margin:2px 0 6px">${es?"Agrupados por cercanía — toca 🧭 Ruta para abrir la zona en Google Maps.":"Grouped by how close they are — tap 🧭 Route to open a whole area in Google Maps."}</div>`;
-      body=feedWarn+tiles+clearBtn+note+`<div class="coord-report">${clusters.map((cl,ix)=>coordAreaSectionHTML(cl,ix,!!q)).join("")}</div>`;
+      const rOpts=[["far",es?"Lejos → Cerca":"Farthest → Closest",es?"termina en la base":"ends at base"],
+                   ["near",es?"Cerca → Lejos":"Closest → Farthest",es?"empieza cerca de la base":"starts near base"],
+                   ["short",es?"Menos millas":"Least driving",es?"parada más cercana cada vez":"nearest stop each time"]];
+      const rPick=`<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 8px">
+        <span style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin-right:2px">🧭 ${es?"Orden de ruta":"Route order"}</span>
+        ${rOpts.map(o=>{const on=C.route===o[0];return `<button class="btn3d sm ${on?"":"ghost"}" data-action="coordRoute" data-id="${o[0]}" title="${esc(o[2])}" style="font-size:11.5px">${esc(o[1])}</button>`;}).join("")}
+        <span style="font-size:11px;color:var(--text-dim)">${esc((rOpts.find(o=>o[0]===C.route)||rOpts[0])[2])}</span></div>`;
+      body=feedWarn+tiles+clearBtn+note+rPick+`<div class="coord-report">${clusters.map((cl,ix)=>coordAreaSectionHTML(cl,ix,!!q)).join("")}</div>`;
     } else {
       body=feedWarn+tiles+`<div class="coord-report">${shown.map(coordItemRow).join("")}</div>`;
     }
@@ -2044,8 +2051,28 @@ function coordAreaClusters(items,sortFn){
   // Route order within a cluster: FURTHEST-from-HQ first → CLOSEST last, so the crew works its way
   // back toward base and ends the loop at HQ. Each stop is annotated with the driving leg from the
   // previous stop (_legMi) and its own distance to HQ (_hqMi) so the UI can show the gaps.
+  // The coordinator picks the order (S.coord.route). "far" is the original behaviour and the
+  // default, so an untouched account sees exactly what it saw before.
+  //   far   — furthest from HQ first, ending closest: the crew works back toward base.
+  //   near  — closest first: nearest jobs knocked out early, ending furthest out.
+  //   short — nearest-neighbour from HQ: each stop is the closest one not yet visited, which
+  //           is the least total driving. Greedy, not a true optimum, but it beats both
+  //           distance sorts in practice and is instant on these list sizes.
+  const ROUTE=String(S.coord.route||"far");
   const routeOrder=(cl)=>{
-    const ordered=cl.slice().sort((a,b)=>haversineMi(HQ.lat,HQ.lon,b.lat,b.lon)-haversineMi(HQ.lat,HQ.lon,a.lat,a.lon));
+    let ordered;
+    if(ROUTE==="short"){
+      const pool=cl.slice(); ordered=[]; let cur={lat:HQ.lat,lon:HQ.lon};
+      while(pool.length){
+        let bi=0,bd=Infinity;
+        for(let i=0;i<pool.length;i++){ const d=haversineMi(cur.lat,cur.lon,pool[i].lat,pool[i].lon); if(d<bd){ bd=d; bi=i; } }
+        cur=pool.splice(bi,1)[0]; ordered.push(cur);
+      }
+    } else if(ROUTE==="near"){
+      ordered=cl.slice().sort((a,b)=>haversineMi(HQ.lat,HQ.lon,a.lat,a.lon)-haversineMi(HQ.lat,HQ.lon,b.lat,b.lon));
+    } else {
+      ordered=cl.slice().sort((a,b)=>haversineMi(HQ.lat,HQ.lon,b.lat,b.lon)-haversineMi(HQ.lat,HQ.lon,a.lat,a.lon));
+    }
     let prev={lat:HQ.lat,lon:HQ.lon};
     ordered.forEach(p=>{ p._hqMi=haversineMi(HQ.lat,HQ.lon,p.lat,p.lon); p._legMi=haversineMi(prev.lat,prev.lon,p.lat,p.lon); prev=p; });
     return ordered;
@@ -3397,6 +3424,10 @@ document.addEventListener("click",e=>{
         loadCoordFields(); }
       render(); break; }
     // Tap a tile to narrow to that bucket; tap the same tile (or "Show everything") to clear.
+    case "coordRoute": { const v=el.getAttribute("data-id")||"far";
+      S.coord.route=(v==="near"||v==="short")?v:"far";
+      try{ localStorage.setItem("wm_coord_route",S.coord.route); }catch(e){}
+      render(); break; }
     case "coordTile": { const b=el.getAttribute("data-id")||""; S.coord.tile=(S.coord.tile===b?"":b); render(); break; }
     case "coordView": { const v=el.getAttribute("data-id"); if(v==="type"||v==="area"){ S.coord.view=v; } render(); break; }
     case "coordToggle": { const b=el.getAttribute("data-bucket"); if(b){ S.coord.collapsed=S.coord.collapsed||{}; S.coord.collapsed[b]=!S.coord.collapsed[b]; } render(); break; }
