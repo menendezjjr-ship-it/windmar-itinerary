@@ -316,6 +316,33 @@ function mapCoordinationDeal(d) {
   };
 }
 
+// ── Pre-Engineering ───────────────────────────────────────────────────────────────────────
+// Deals sitting at Stage "Pre-Engineering" — the step BEFORE the Coordination-Ready set (which
+// starts at NTP/Engineering). Mirrors the Zoho "Pre-Engineering" report so a coordinator can work
+// the queue by area from inside the Itinerary instead of in the CRM.
+// Same record shape as mapCoordinationDeal, so it inherits the area/route view for free.
+const PREENG_CRITERIA = "(Stage:equals:Pre-Engineering)";
+function mapPreEngDeal(d) {
+  const p = parseDeal(d.Deal_Name);
+  const address = [cclean(d.Address), cclean(d.City), [cclean(d.State), cclean(d.Zip)].filter(Boolean).join(", ")].filter(Boolean).join(", ") || p.address || "";
+  const coord = lookup(d.Project_Coordinator) || "";
+  return {
+    id: p.num || d.id, recordId: d.id, dealId: d.id, num: p.num || "",
+    kind: "preeng", code: p.code || "DL",
+    project: p.customer || d.Deal_Name || "", address,
+    crew: "z-preeng", crewLabel: coord || "Pre-Engineering",
+    date: null, status: "ready", cat: "preeng",
+    stage: d.Stage || "", dealStage: d.Stage || "",
+    engStage: cclean(d.Engineering_Stage), fdaStatus: cclean(d.FDA_Status), coordinator: coord,
+    systemKw: (d.System_Size_kW1 != null && d.System_Size_kW1 !== 0) ? d.System_Size_kW1 : null,
+    ahj: lookup(d.Authority_Having_Jurisdiction_AHJ) || "", county: d.County1 || "",
+    msp: false, phone: cclean(d.Client_Phone) || cclean(d.Client_Mobile) || "", geo: null,
+    scope: cclean(d.Engineering_Stage) || "Pre-Engineering",
+    zohoUrl: `https://crm.zoho.com/crm/org666151142/tab/Potentials/${d.id}`,
+    ready: true,
+  };
+}
+
 export const config = { maxDuration: 30 };
 
 export default async function handler(req, res) {
@@ -325,12 +352,15 @@ export default async function handler(req, res) {
   const todayISO = new Date().toISOString().slice(0, 10);
   try {
     const token = await getAccessToken();
-    const [installs, services, coordDeals] = await Promise.all([
+    const [installs, services, coordDeals, preEngDeals] = await Promise.all([
       searchAll("Installation", READY_INSTALL_CRITERIA, INSTALL_FIELDS, token),
       // starts_with:3 captures "3. Need Schedule" (+ any 3.x variant); mapper keeps only needs_schedule.
       searchAll("Service_Ticket", "(Ticket_Status:starts_with:3)", SERVICE_FIELDS, token),
       // Coordination-ready = Deals at Engineering/Permitting with plans complete / engineering in process.
       searchAll("Deals", COORD_CRITERIA, COORD_FIELDS, token),
+      // Pre-Engineering = the queue one step earlier. No FDA/engineering-stage filter: at this
+      // point the design has not been produced yet, so those fields are legitimately empty.
+      searchAll("Deals", PREENG_CRITERIA, COORD_FIELDS, token),
     ]);
 
     const instJobsRaw = installs.map(mapReadyInstall);
@@ -366,12 +396,14 @@ export default async function handler(req, res) {
     // in coordination AND have a ready install, so we don't dedupe these against the above).
     const coordJobs = coordDeals.map(mapCoordinationDeal).filter((j) => COORD_FDA_RX.test(j.fdaStatus) && j.engStage);
     jobs.push(...coordJobs);
+    const preEngJobs = preEngDeals.map(mapPreEngDeal);
+    jobs.push(...preEngJobs);
 
     return res.status(200).json({
       configured: true,
       ok: true,
       updated: new Date().toISOString(),
-      counts: { installs: instJobs.length, services: svcJobs.length, coordination: coordJobs.length, jobs: jobs.length, filteredStale },
+      counts: { installs: instJobs.length, services: svcJobs.length, coordination: coordJobs.length, preeng: preEngJobs.length, jobs: jobs.length, filteredStale },
       jobs,
     });
   } catch (e) {

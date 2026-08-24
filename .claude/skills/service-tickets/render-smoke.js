@@ -28,6 +28,12 @@ globalThis.matchMedia=function(){return {matches:false,addEventListener(){},addL
 globalThis.scrollTo=function(){}; globalThis.alert=function(){}; globalThis.confirm=function(){return true;};
 globalThis.L={map:()=>({setView:()=>({}),remove(){},on(){}}),tileLayer:()=>({addTo(){}}),marker:()=>({addTo(){return{bindPopup(){}}}})};
 
+// APP is a path to the extracted main <script> body. Extracting it with hardcoded line numbers
+// silently tests the wrong lines once the file grows — derive the boundaries instead:
+//   S=$(grep -n '^<script>$' index.html | head -1 | cut -d: -f1)
+//   E=$(awk -v st=$S 'NR>st && /^<\/script>$/{print NR; exit}' index.html)
+//   sed -n "$((S+1)),$((E-1))p" index.html > app.js
+var APP_FROM_HTML = true;
 var err=null;
 try { (0,eval)(readFile(APP)); } catch(e){ err=e; }
 if(err){ print("APP EXECUTE FAIL: "+err); print(err.stack||""); quit(1); }

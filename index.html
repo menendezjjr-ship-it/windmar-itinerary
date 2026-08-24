@@ -1852,9 +1852,23 @@ function coordGroupHTML(title,group,rec,editing){ const rows=COORD_EDIT_FIELDS.f
   return `<div style="grid-column:1/-1;margin-top:8px"><div style="font-size:11px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">${esc(title)}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px">${rows.map(fd=>coordFieldCell(fd,rec,editing)).join("")}</div></div>`;
 }
 // ── Coordinator classification buckets (rendered as report sections, in this order) ──
-const COORD_BUCKETS=["coordination","install","msp","reinstall","removal","service","inspection"];
+// Per-user Coordinator scoping. A user listed here sees ONLY these buckets on the Coordinator
+// tab — the tiles, the counts and the rows are all filtered to them. Anyone NOT listed sees
+// everything, exactly as before, so this can never quietly narrow an existing user's view.
+// Keys are lowercase sign-in emails (window.wmUser, set by the MSAL gate from app_access).
+const USER_COORD_BUCKETS={
+  "i.negroni@windmarhome.com":["preeng"], // Ivan A. Negroni Vazquez — Pre-Engineering only
+};
+function allowedCoordBuckets(){
+  const key=String(window.wmUser||"").trim().toLowerCase();
+  // own properties only, so "constructor"/"toString" can never match and grant a scope
+  const ids=Object.prototype.hasOwnProperty.call(USER_COORD_BUCKETS,key)?USER_COORD_BUCKETS[key]:null;
+  return (Array.isArray(ids)&&ids.length)?ids:null; // null = no restriction
+}
+const COORD_BUCKETS=["preeng","coordination","install","msp","reinstall","removal","service","inspection"];
 function coordBucketMeta(b){
   const es=S.lang==="es";
+  if(b==="preeng") return {label:es?"Pre-Ingeniería":"Pre-Engineering", color:"#0891B2", icon:"📋"};
   if(b==="coordination") return {label:es?"Coordinación — Planos Listos":"Coordination Ready — Plans Done", color:"#7C3AED", icon:"📐"};
   if(b==="inspection") return {label:es?"Inspecciones":"Inspections", color:"#0EA5E9", icon:"🔍"};
   const t=JOB_TYPES[b]||JOB_TYPES.install;
@@ -1867,9 +1881,11 @@ function coordItems(){
   const out=[];
   const pByNum={}; (S.proj.list||[]).forEach(p=>{ if(p.num) pByNum[String(p.num).toUpperCase().replace(/\s+/g,"")]=p; });
   (S.coord.ready.list||[]).forEach(j=>{
-    const isCoord=j.kind==="coordination";
+    const isCoord=j.kind==="coordination", isPre=j.kind==="preeng";
     const cls={type:j.kind==="service"?"service":"", code:j.code, msp:j.msp, scope:j.scope, dlNumber:j.num};
-    const bucket=isCoord?"coordination":jobType(cls); // install | msp | reinstall | removal | service | coordination
+    // preeng/coordination are pipeline-stage buckets, not job types — jobType() would read the
+    // DL code and file them under "install".
+    const bucket=isPre?"preeng":(isCoord?"coordination":jobType(cls));
     const p=pByNum[String(j.num||"").toUpperCase().replace(/\s+/g,"")]||null;
     // kind is part of the key: a DL can be BOTH coordination-ready and have a ready install,
     // and the server deliberately doesn't dedupe those. Without kind they collide and
@@ -1894,14 +1910,20 @@ function coordSelectedItem(){ const k=String(S.coord.selected||""); return coord
 function coordinatorHTML(){
   const es=S.lang==="es", P=S.proj, C=S.coord, R=C.ready;
   const q=(C.q||"").trim().toLowerCase();
-  const all=coordItems();
+  const scope=allowedCoordBuckets();
+  // Filter before the search and before the counts, so a scoped user never sees a tile, a
+  // total, or a row from a bucket they are not allowed to see.
+  const all=scope?coordItems().filter(it=>scope.indexOf(it.bucket)>=0):coordItems();
   let items=all;
   if(q) items=items.filter(it=>(((it.name||"")+" "+(it.num||"")+" "+(it.address||"")).toLowerCase().indexOf(q)>=0));
   // Every number on this tab counts what is ACTUALLY on screen. The old header pill was
   // pre-filter, so searching left it claiming 61 while two rows showed below it.
   const total=items.length;
   const counts={}; items.forEach(it=>{ counts[it.bucket]=(counts[it.bucket]||0)+1; });
-  const liveBuckets=COORD_BUCKETS.filter(b=>counts[b]>0);
+  const liveBuckets=COORD_BUCKETS.filter(b=>counts[b]>0&&(!scope||scope.indexOf(b)>=0));
+  // With exactly one bucket available there is nothing to choose, so open it directly — that is
+  // also what puts the user in the area/route view instead of a flat list.
+  if(scope&&scope.length===1&&C.tile!==scope[0]&&counts[scope[0]]>0) C.tile=scope[0];
   if(C.tile&&!counts[C.tile]) C.tile=""; // the selected tile emptied out (search/refresh) → fall back to everything
   const tileItems=C.tile?items.filter(it=>it.bucket===C.tile):items;
   // Worklist order: urgent service, then the rest of service, then installs, then plans-done,
@@ -3111,6 +3133,7 @@ const TABS=[
    failure must never lock someone out of the app. */
 const USER_TABS={
   "maria.robles@windmarhome.com":["itinerary","coordinator","calendar","crews","records"],
+  "i.negroni@windmarhome.com":["coordinator"], // Pre-Engineering queue only — see USER_COORD_BUCKETS
 };
 function allowedTabs(){
   const key=String(window.wmUser||"").trim().toLowerCase();
