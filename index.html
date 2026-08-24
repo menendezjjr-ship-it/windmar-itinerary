@@ -1857,7 +1857,7 @@ function coordGroupHTML(title,group,rec,editing){ const rows=COORD_EDIT_FIELDS.f
 // everything, exactly as before, so this can never quietly narrow an existing user's view.
 // Keys are lowercase sign-in emails (window.wmUser, set by the MSAL gate from app_access).
 const USER_COORD_BUCKETS={
-  "i.negroni@windmarhome.com":["preeng"], // Ivan A. Negroni Vazquez — Pre-Engineering only
+  // (nobody scoped right now — add "email":["bucket",…] to limit someone)
 };
 function allowedCoordBuckets(){
   const key=String(window.wmUser||"").trim().toLowerCase();
@@ -3133,7 +3133,6 @@ const TABS=[
    failure must never lock someone out of the app. */
 const USER_TABS={
   "maria.robles@windmarhome.com":["itinerary","coordinator","calendar","crews","records"],
-  "i.negroni@windmarhome.com":["coordinator"], // Pre-Engineering queue only — see USER_COORD_BUCKETS
 };
 function allowedTabs(){
   const key=String(window.wmUser||"").trim().toLowerCase();
