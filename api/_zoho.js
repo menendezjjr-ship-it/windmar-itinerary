@@ -54,6 +54,9 @@ const SB_URL = process.env.SUPABASE_URL || "https://lmlixmzmzpzgeggvywwb.supabas
 const SB_SERVICE = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || "").trim();
 let sharedOff = 0;        // epoch ms until which we stop trying (table missing / not permitted)
 let sharedLastErr = "";   // last failure from the shared store, surfaced by /api/zoho-health
+let sharedOK = false;     // a read or write has actually SUCCEEDED. "not backing off" is not the
+                          // same as "working" — an instance that has never tried looks identical,
+                          // which is exactly how this was misread once already.
 const sharedUsable = () => !!SB_SERVICE && Date.now() > sharedOff;
 const sbHeaders = () => ({ apikey: SB_SERVICE, Authorization: "Bearer " + SB_SERVICE, "Content-Type": "application/json" });
 
@@ -67,6 +70,7 @@ async function sharedRead(lax) {
       return null;
     }
     const rows = await r.json();
+    sharedOK = true; // the table is reachable, even if the row is empty
     const row = Array.isArray(rows) && rows[0];
     if (!row || !row.access_token) return null;
     const exp = Date.parse(row.expires_at);
@@ -85,7 +89,7 @@ async function sharedWrite(token, exp) {
       body: JSON.stringify({ id: 1, access_token: token, expires_at: new Date(exp).toISOString(), updated_at: new Date().toISOString() }),
     });
     if (!w.ok) sharedLastErr = `write ${w.status}: ${(await w.text().catch(() => "")).slice(0, 120)}`;
-    else sharedLastErr = "";
+    else { sharedLastErr = ""; sharedOK = true; }
   } catch (e) { /* the shared store is an optimisation; never fail a request over it */ }
 }
 // A 401 storm (several routes waking at once) must not turn into a refresh storm. One forced
@@ -200,7 +204,9 @@ export function zohoTokenState() {
     cached: !!cachedToken,
     validForSec: cachedToken ? Math.max(0, Math.round((tokenExpiry - Date.now()) / 1000)) : 0,
     secSinceMint: lastMint ? Math.round((Date.now() - lastMint) / 1000) : null,
-    sharedStore: !SB_SERVICE ? "no-service-key" : (Date.now() > sharedOff ? "enabled" : "backing off"),
+    sharedStore: !SB_SERVICE ? "no-service-key"
+      : sharedOK ? "working"
+      : (Date.now() < sharedOff ? "failing (backing off)" : "not tried yet"),
     sharedError: sharedLastErr || null,
     sharedRetryInSec: Date.now() < sharedOff ? Math.round((sharedOff - Date.now()) / 1000) : 0,
     mintBlockedForSec: Date.now() < mintBlockedUntil ? Math.round((mintBlockedUntil - Date.now()) / 1000) : 0,
