@@ -46,7 +46,8 @@ let cachedToken = null, tokenExpiry = 0, inflight = null, lastMint = 0;
    Only the service_role key (server-side only) bypasses RLS. */
 const SB_URL = process.env.SUPABASE_URL || "https://lmlixmzmzpzgeggvywwb.supabase.co";
 const SB_SERVICE = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || "").trim();
-let sharedOff = 0; // epoch ms until which we stop trying (table missing / not permitted)
+let sharedOff = 0;        // epoch ms until which we stop trying (table missing / not permitted)
+let sharedLastErr = "";   // last failure from the shared store, surfaced by /api/zoho-health
 const sharedUsable = () => !!SB_SERVICE && Date.now() > sharedOff;
 const sbHeaders = () => ({ apikey: SB_SERVICE, Authorization: "Bearer " + SB_SERVICE, "Content-Type": "application/json" });
 
@@ -54,23 +55,29 @@ async function sharedRead() {
   if (!sharedUsable()) return null;
   try {
     const r = await fetch(`${SB_URL}/rest/v1/zoho_token?id=eq.1&select=access_token,expires_at`, { headers: sbHeaders() });
-    if (!r.ok) { sharedOff = Date.now() + 10 * 60 * 1000; return null; } // e.g. table not created yet
+    if (!r.ok) {
+      sharedLastErr = `read ${r.status}: ${(await r.text().catch(() => "")).slice(0, 120)}`;
+      sharedOff = Date.now() + 10 * 60 * 1000; // e.g. table not created yet
+      return null;
+    }
     const rows = await r.json();
     const row = Array.isArray(rows) && rows[0];
     if (!row || !row.access_token) return null;
     const exp = Date.parse(row.expires_at);
     // 120s of headroom so we never hand out a token about to die mid-request.
     return (isFinite(exp) && exp > Date.now() + 120000) ? { token: row.access_token, exp } : null;
-  } catch (e) { return null; }
+  } catch (e) { sharedLastErr = "read threw: " + String(e && e.message || e); return null; }
 }
 async function sharedWrite(token, exp) {
   if (!sharedUsable()) return;
   try {
-    await fetch(`${SB_URL}/rest/v1/zoho_token?on_conflict=id`, {
+    const w = await fetch(`${SB_URL}/rest/v1/zoho_token?on_conflict=id`, {
       method: "POST",
       headers: { ...sbHeaders(), Prefer: "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify({ id: 1, access_token: token, expires_at: new Date(exp).toISOString(), updated_at: new Date().toISOString() }),
     });
+    if (!w.ok) sharedLastErr = `write ${w.status}: ${(await w.text().catch(() => "")).slice(0, 120)}`;
+    else sharedLastErr = "";
   } catch (e) { /* the shared store is an optimisation; never fail a request over it */ }
 }
 // A 401 storm (several routes waking at once) must not turn into a refresh storm. One forced
@@ -152,6 +159,9 @@ export async function zohoFetch(url, init) {
   if (isTokenError(res.status)) {
     const fresh = await getZohoToken(true, token); // pass the failed token so it is not handed back
     if (fresh !== token) res = await run(fresh);
+    // Could not get a different one (refresh throttled). Drop the dead token from the cache so
+    // the NEXT request mints instead of this instance serving 401s until its hour is up.
+    else { cachedToken = null; tokenExpiry = 0; }
   }
   return res;
 }
@@ -172,6 +182,8 @@ export function zohoTokenState() {
     cached: !!cachedToken,
     validForSec: cachedToken ? Math.max(0, Math.round((tokenExpiry - Date.now()) / 1000)) : 0,
     secSinceMint: lastMint ? Math.round((Date.now() - lastMint) / 1000) : null,
-    sharedStore: !SB_SERVICE ? "no-service-key" : (Date.now() > sharedOff ? "enabled" : "unavailable (table missing?)"),
+    sharedStore: !SB_SERVICE ? "no-service-key" : (Date.now() > sharedOff ? "enabled" : "backing off"),
+    sharedError: sharedLastErr || null,
+    sharedRetryInSec: Date.now() < sharedOff ? Math.round((sharedOff - Date.now()) / 1000) : 0,
   };
 }
