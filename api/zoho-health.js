@@ -17,6 +17,11 @@ export default async function handler(req, res) {
     ZOHO_REFRESH_TOKEN: !!process.env.ZOHO_REFRESH_TOKEN,
     SUPABASE_SERVICE_ROLE_KEY: !!(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY),
   }, token: zohoTokenState() };
+  // Which Supabase project the shared store actually talks to. If the table was created in a
+  // DIFFERENT project than this host, the read 404s and everything above looks identical to
+  // "table missing" — so show it rather than guess.
+  out.supabaseHost = (process.env.SUPABASE_URL || "https://lmlixmzmzpzgeggvywwb.supabase.co").replace(/^https?:\/\//, "");
+  out.supabaseUrlFromEnv = !!process.env.SUPABASE_URL;
 
   if (!hasZohoCreds()) { out.error = "Zoho creds not set"; return res.status(200).json(out); }
   try {
