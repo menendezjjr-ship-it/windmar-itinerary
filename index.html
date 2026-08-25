@@ -2158,7 +2158,7 @@ function coordPickPanel(){
       <span style="flex-shrink:0;width:20px;height:20px;border-radius:50%;background:#F59E0B;color:#1a1a1a;font-size:11px;font-weight:900;display:inline-flex;align-items:center;justify-content:center">${i+1}</span>
       <span style="font-weight:800;font-size:12.5px;flex-shrink:0">${esc(p.num||"")}</span>
       <span style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name||"")}</span>
-      ${p._legMi!=null?`<span style="font-size:11px;color:var(--text-dim);margin-left:auto;flex-shrink:0">${p._legMi.toFixed(1)} mi</span>`:`<span style="font-size:11px;color:var(--warn);margin-left:auto;flex-shrink:0">${es?"sin ubicar":"no location"}</span>`}
+      ${p._legMi!=null?`<span style="font-size:12px;font-weight:800;color:var(--wh-orange);margin-left:auto;flex-shrink:0">${p._legMi.toFixed(1)} mi</span>`:`<span style="font-size:11px;color:var(--warn);margin-left:auto;flex-shrink:0">${es?"sin ubicar":"no location"}</span>`}
       <span data-action="coordPick" data-id="${esc(p.key)}" title="${es?"Quitar":"Remove"}" style="cursor:pointer;color:var(--text-dim);font-weight:900;flex-shrink:0;padding:0 2px">✕</span>
     </div>`).join("");
   return `<div class="card" style="padding:12px 14px;margin:0 0 12px;border-left:5px solid #F59E0B">
@@ -3338,10 +3338,42 @@ function tabAllowed(id){ return allowedTabs().some(tb=>tb.id===id); }
 // Basemap for every Leaflet map here. Vector (MapLibre + CARTO Voyager) when it is available,
 // otherwise the raster tiles we shipped before — a map that renders is worth more than a map
 // that looks nicer, so the fallback is never removed.
+// Voyager draws place names in pale grey — fine on a poster, too faint over job markers on a
+// phone in daylight. Darken every text layer, give it a solid white halo so it separates from
+// roads and marker glow, and size it up a quarter. Purely cosmetic: wrapped in try/catch per
+// layer so a style change upstream can never break the map.
+function wmBoostMapLabels(lyr){
+  try{
+    lyr.once("add",function(){
+      let gl=null; try{ gl=lyr.getMaplibreMap&&lyr.getMaplibreMap(); }catch(e){}
+      if(!gl) return;
+      const apply=function(){
+        let layers=[]; try{ layers=(gl.getStyle()||{}).layers||[]; }catch(e){ return; }
+        layers.forEach(function(L2){
+          if(!L2||L2.type!=="symbol") return;
+          try{ gl.setPaintProperty(L2.id,"text-color","#0f172a"); }catch(e){}
+          try{ gl.setPaintProperty(L2.id,"text-halo-color","#ffffff"); }catch(e){}
+          try{ gl.setPaintProperty(L2.id,"text-halo-width",2); }catch(e){}
+          try{ gl.setPaintProperty(L2.id,"text-halo-blur",0); }catch(e){}
+          try{
+            const sz=gl.getLayoutProperty(L2.id,"text-size");
+            // works whether the style gave a plain number or a zoom expression
+            if(sz!=null) gl.setLayoutProperty(L2.id,"text-size",["*",sz,1.25]);
+          }catch(e){}
+        });
+      };
+      try{ if(gl.isStyleLoaded&&gl.isStyleLoaded()) apply(); else gl.once("styledata",apply); }catch(e){}
+    });
+  }catch(e){}
+}
 function wmBaseLayer(){
   const ATTR='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &middot; &copy; <a href="https://carto.com/attributions">CARTO</a>';
   if(window.maplibregl && window.L && L.maplibreGL){
-    try{ return L.maplibreGL({ style:"https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json", attribution:ATTR }); }
+    try{
+      const lyr=L.maplibreGL({ style:"https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json", attribution:ATTR });
+      wmBoostMapLabels(lyr);
+      return lyr;
+    }
     catch(e){ /* WebGL unavailable / style refused → raster below */ }
   }
   return L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19,attribution:ATTR});
