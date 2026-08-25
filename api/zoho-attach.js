@@ -5,6 +5,7 @@
 //   POST /crm/{ver}/{module}/{recordId}/Attachments so it appears in the record's Attachments.
 // GET  ?diag=1[&module=Service_Ticket] → probe whether the login can CREATE attachments (writes nothing real).
 // Guards: image/* only, ≤4MB per file (Vercel body ~4.5MB). Returns { ok, id } or a clear error.
+import { zohoFetch } from "./_zoho.js";
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
 const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
@@ -43,9 +44,7 @@ export default async function handler(req, res) {
       const dmod = ALLOWED_MODULES.has(String(req.query.module || "")) ? String(req.query.module) : "Installation";
       const fd = new FormData();
       fd.append("file", new Blob([new Uint8Array(0)], { type: "image/png" }), "probe.png");
-      const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${dmod}/1/Attachments`, {
-        method: "POST", headers: { Authorization: `Zoho-oauthtoken ${token}` }, body: fd,
-      });
+      const r = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${dmod}/1/Attachments`, { method: "POST", body: fd });
       const txt = await r.text();
       return res.status(200).json({ diag: true, module: dmod, canAttach: !/OAUTH_SCOPE_MISMATCH/i.test(txt), httpStatus: r.status, sample: txt.slice(0, 220) });
     }
@@ -72,9 +71,7 @@ export default async function handler(req, res) {
 
     const fd = new FormData();
     fd.append("file", new Blob([buf], { type: contentType }), filename);
-    const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${module}/${encodeURIComponent(recordId)}/Attachments`, {
-      method: "POST", headers: { Authorization: `Zoho-oauthtoken ${token}` }, body: fd,
-    });
+    const r = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${module}/${encodeURIComponent(recordId)}/Attachments`, { method: "POST", body: fd });
     const txt = await r.text(); let d; try { d = JSON.parse(txt); } catch (e) { d = { raw: txt }; }
     const rec = d && d.data && d.data[0];
     if (rec && rec.code === "SUCCESS") return res.status(200).json({ ok: true, id: rec.details && rec.details.id, filename });

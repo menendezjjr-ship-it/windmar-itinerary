@@ -4,6 +4,7 @@
 //   2) BOM sync  — mirror every NEW plan-analyzer note into its Zoho Installation record as a Note.
 // The cursor read + event fetch + BOM sync run REGARDLESS of VAPID; only the push send is gated.
 // The cursor advances ONCE at the end covering every processed event (prevents re-processing / dup notes).
+import { zohoFetch } from "./_zoho.js";
 import webpush from "web-push";
 import { syncCrewToZoho } from "./_crew-photos.js";
 
@@ -38,9 +39,9 @@ async function getAccessToken() {
 }
 async function addNote(token, module, recordId, title, content) {
   const url = `${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(module)}/${encodeURIComponent(recordId)}/Notes`;
-  const r = await fetch(url, {
+  const r = await zohoFetch(url, {
     method: "POST",
-    headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ data: [{ Note_Title: (title || "BOM Note").slice(0, 120), Note_Content: content || "" }] }),
   });
   const txt = await r.text(); let d; try { d = JSON.parse(txt); } catch (e) { d = { raw: txt }; }

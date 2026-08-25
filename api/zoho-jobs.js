@@ -8,6 +8,7 @@
 //   (optional) ZOHO_ACCOUNTS_HOST   default https://accounts.zoho.com
 //   (optional) ZOHO_API_DOMAIN      default https://www.zohoapis.com
 //   (optional) ZOHO_API_VERSION     default v8   (v2 rejects between: on dates)
+import { zohoFetch } from "./_zoho.js";
 
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
@@ -47,9 +48,7 @@ async function searchAll(module, criteria, fields, token) {
     const path =
       `${encodeURIComponent(module)}/search?criteria=${encodeURIComponent(criteria)}` +
       `&fields=${encodeURIComponent(fields)}&per_page=200&page=${page}`;
-    const res = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, {
-      headers: { Authorization: `Zoho-oauthtoken ${token}` },
-    });
+    const res = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`);
     if (res.status === 204) break; // no records
     if (!res.ok) throw new Error(`Zoho ${module} ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const data = await res.json();
@@ -317,7 +316,7 @@ async function lookupDL(dl, token) {
   const flds = ["Deal"].concat(INSTALL_EDIT_FIELDS).filter((v, i, a) => a.indexOf(v) === i);
   const path = `Installation/search?word=${encodeURIComponent(dl)}` +
     `&fields=${encodeURIComponent(flds.join(","))}&per_page=20`;
-  const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+  const r = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`);
   if (r.status === 204) return { installNotes: "", recordId: "", count: 0, rec: null };
   if (!r.ok) throw new Error(`Zoho Installation ${r.status}: ${(await r.text()).slice(0, 200)}`);
   const rows = (await r.json()).data || [];
@@ -341,7 +340,7 @@ async function lookupDL(dl, token) {
 // svcRec embedded in the feed (no per-open token refresh). Returns { recordId, module, rec }.
 async function lookupService(recordId, token) {
   const path = `Service_Ticket/${encodeURIComponent(recordId)}?fields=${encodeURIComponent(SERVICE_EDIT_FIELDS.join(","))}`;
-  const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+  const r = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`);
   if (r.status === 204) return { recordId: "", module: "Service_Ticket", rec: null, count: 0 };
   if (!r.ok) throw new Error(`Zoho Service_Ticket ${r.status}: ${(await r.text()).slice(0, 200)}`);
   const row = ((await r.json()).data || [])[0] || null;

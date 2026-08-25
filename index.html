@@ -652,6 +652,28 @@ function crewCardHTML(desc){
     +(svg?'<div style="background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px 8px;margin-top:10px">'+svg+'</div>':"")
     +'<details style="margin-top:9px"><summary style="cursor:pointer;font-size:11px;font-weight:800;color:var(--text-dim)">▾ '+esc(lbl.o)+'</summary><div style="font-size:12.5px;color:var(--text-dim);white-space:pre-wrap;margin-top:6px;padding:8px 10px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px">'+esc(desc)+'</div></details>';
 }
+/* Auto-recovery for a stale Zoho token.
+   The server now force-refreshes and retries a 401 itself (api/_zoho.js), so this is the second
+   line of defence: if a token error still surfaces, retry the SAME request quietly a moment
+   later instead of painting "API error" and making someone hit refresh.
+   Deliberately silent — no spinner, no tab change, no scroll jump. The caller's own render()
+   runs only once, at the end, so the view never flickers or moves off what you were reading. */
+const WM_TOKEN_ERR=/INVALID_TOKEN|invalid[_ ]oauth[_ ]token|AUTHENTICATION_FAILURE|401/i;
+function wmIsTokenErr(j){ return !!(j && j.ok===false && WM_TOKEN_ERR.test(String(j.error||""))); }
+async function wmApiJson(url, tries){
+  tries=(tries==null)?2:tries;
+  let last=null;
+  for(let i=0;i<=tries;i++){
+    try{
+      const r=await fetch(url,{cache:"no-store"});
+      const j=await r.json();
+      last=j;
+      if(!wmIsTokenErr(j)) return j;           // success, or a real error worth showing
+    }catch(e){ last={ok:false,configured:true,error:String(e)}; }
+    if(i<tries) await new Promise(res=>setTimeout(res, 700*(i+1))); // let the token settle
+  }
+  return last;
+}
 function calRec(j){ return { type:j.kind, id:j.id, recordId:j.recordId||"", plan:j.plan||null, bom:j.bom||null, team:j.crewLabel||"Unassigned", startDate:j.date, daysNeeded:j.days||1, hhmm:j.hhmm||"", startTime:(j.kind==="service"&&j.window&&j.window!=="Time TBD"&&j.window!=="All day")?j.window:"", dlNumber:j.num||String(j.id||"").split(" ")[0], customerName:j.project||"", address:j.address||"", status:j.rawStatus||"", priority:j.priority||"", scope:j.scope||"", desc:j.desc||"", code:j.code||"", msp:!!j.msp, blocks:j.blocks||0, hours:j.hours||0, blockWindow:j.blockWindow||"", phone:j.phone||"", installNotes:j.installNotes||"", svcRec:j.svcRec||null, installRec:j.installRec||null, visit:j.visit||1, visitDateField:j.visitDateField||"Scheduled_Visit_1", cat:jobCat(j) }; }
 // Multi-day jobs: ISO dates a record occupies (start day + continuation days).
 function calSpan(r){ if(!r.startDate)return []; const n=Math.max(1,Math.min(21,parseInt(r.daysNeeded,10)||1)); const base=new Date(r.startDate+"T12:00:00"); const out=[]; for(let i=0;i<n;i++){const x=new Date(base);x.setDate(base.getDate()+i);out.push(calYMD(x));} return out; }
@@ -663,8 +685,7 @@ async function loadOpsCal(silent){
   if(S.cal.view==="week"||S.cal.view==="grid"||S.cal.view==="map"){ const ws=S.cal.weekStartISO?new Date(S.cal.weekStartISO+"T00:00:00"):calStartOfWeek(new Date()); from=calYMD(calAddDays(ws,-20)); to=calYMD(calAddDays(ws,6)); }
   else { from=calYMD(new Date(S.cal.y,S.cal.m-1,1-20)); const last=new Date(S.cal.y,S.cal.m,0).getDate(); to=S.cal.y+"-"+String(S.cal.m).padStart(2,"0")+"-"+String(last).padStart(2,"0"); }
   try{
-    const r=await fetch("/api/zoho-jobs?from="+from+"&to="+to,{cache:"no-store"});
-    const j=await r.json();
+    const j=await wmApiJson("/api/zoho-jobs?from="+from+"&to="+to);
     // Roofing-only jobs (RL) are hidden from THIS app — the coordinator board tracks
     // DL / RDL / S. Filtered client-side on purpose: the Zoho feed is shared with the Field
     // HUB, and stripping RL server-side would empty the Windmar Roofing crew's own calendar.
@@ -981,8 +1002,7 @@ setInterval(function(){ if(!document.hidden && calIsActive() && S.cal.status==="
 async function loadJobs(silent){
   if(!silent){ S.live.status="loading"; render(); }
   try{
-    const r=await fetch("/api/zoho-jobs",{cache:"no-store"});
-    const j=await r.json();
+    const j=await wmApiJson("/api/zoho-jobs");
     if(j&&j.configured&&j.ok&&Array.isArray(j.jobs)){
       S.live={status:"live",ok:true,jobs:j.jobs,updated:j.updated,err:"",counts:j.counts||null};
       notifyVisits(j.jobs);
@@ -1072,8 +1092,7 @@ function fmtDate(d){ if(!d)return null; const x=new Date(d+(String(d).length<=10
 async function loadProjects(silent,fresh){
   if(!silent){ S.proj.status="loading"; render(); }
   try{
-    const r=await fetch("/api/zoho-projects"+(fresh?("?t="+Date.now()):""),{cache:"no-store"});
-    const j=await r.json();
+    const j=await wmApiJson("/api/zoho-projects"+(fresh?("?t="+Date.now()):""));
     if(j&&j.configured&&j.ok&&Array.isArray(j.projects)){
       S.proj.status="live"; S.proj.ok=true; S.proj.list=(j.projects||[]).filter(p=>!/^RL\d/i.test(String(p.num||""))); S.proj.updated=j.updated; // exclude roofing-only (RL); RDL keeps solar
       notifyProjects(j.projects);
@@ -1701,7 +1720,7 @@ const ZOHO_ORG="org666151142";
 function loadCoordReady(silent){
   const R=S.coord.ready;
   if(!silent && (R.status==="idle"||R.status==="error")) { S.coord.ready={status:"loading",list:R.list||[],err:""}; if(S.tab==="coordinator") render(); }
-  fetch("/api/zoho-ready",{cache:"no-store"}).then(r=>r.json()).then(j=>{
+  wmApiJson("/api/zoho-ready").then(j=>{
     S.coord.ready=(j&&j.ok&&Array.isArray(j.jobs))?{status:"live",list:j.jobs,err:""}:{status:"error",list:[],err:(j&&j.error)||"error"};
     if(S.tab==="coordinator") render(true);
   }).catch(e=>{ S.coord.ready={status:"error",list:[],err:String(e)}; if(S.tab==="coordinator") render(true); });

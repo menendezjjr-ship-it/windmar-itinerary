@@ -2,6 +2,7 @@
 // Pulls Zoho CRM Deals across the operational lifecycle (NTP → Post-Installation)
 // with full status, homeowner contact, system specs and a dated stage timeline.
 // Secrets live ONLY in env vars (ZOHO_CLIENT_ID/SECRET/REFRESH_TOKEN).
+import { zohoFetch } from "./_zoho.js";
 
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
@@ -33,7 +34,7 @@ async function searchAll(module, criteria, fields, token) {
   const all = [];
   for (let page = 1; page <= 30; page++) {
     const path = `${encodeURIComponent(module)}/search?criteria=${encodeURIComponent(criteria)}&fields=${encodeURIComponent(fields)}&per_page=200&page=${page}`;
-    const res = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+    const res = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`);
     if (res.status === 204) break;
     if (!res.ok) throw new Error(`Zoho ${module} ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const data = await res.json();
@@ -55,7 +56,7 @@ async function resolveFinalInspections(dealIds, token) {
     const criteria = "(" + chunk.map((id) => `(Deal:equals:${id})`).join("or") + ")";
     const path = `Final_Inspectin/search?criteria=${encodeURIComponent(criteria)}&fields=${encodeURIComponent("Deal,Name")}&per_page=200`;
     try {
-      const res = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+      const res = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`);
       if (res.status === 204 || !res.ok) continue;
       const data = await res.json();
       (data.data || []).forEach((r) => {
@@ -95,7 +96,7 @@ async function resolveInstallCrews(dealIds, token) {
     const criteria = "(" + chunk.map((id) => `(Deal:equals:${id})`).join("or") + ")";
     const path = `Installation/search?criteria=${encodeURIComponent(criteria)}&fields=${encodeURIComponent("Deal,Installation_Team")}&per_page=200`;
     try {
-      const res = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+      const res = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`);
       if (res.status === 204 || !res.ok) continue;
       const data = await res.json();
       (data.data || []).forEach((r) => {

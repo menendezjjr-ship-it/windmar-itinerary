@@ -2,6 +2,7 @@
 // onto the Installation record so they show as "installation info" per job).
 // POST { recordId, module?, title?, content }  (module defaults to "Installation")
 // GET  ?diag=1  → reports whether the Zoho login can CREATE notes (scope check, writes nothing real).
+import { zohoFetch } from "./_zoho.js";
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
 const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
@@ -22,9 +23,9 @@ async function getAccessToken() {
 
 async function addNote(token, module, recordId, title, content) {
   const url = `${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(module)}/${encodeURIComponent(recordId)}/Notes`;
-  const r = await fetch(url, {
+  const r = await zohoFetch(url, {
     method: "POST",
-    headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ data: [{ Note_Title: title || "BOM Note", Note_Content: content || "" }] }),
   });
   const txt = await r.text(); let d; try { d = JSON.parse(txt); } catch (e) { d = { raw: txt }; }
@@ -42,7 +43,7 @@ export default async function handler(req, res) {
     // style error means the scope IS present (write allowed).
     if (req.method === "GET" && req.query.diag) {
       const url = `${API_DOMAIN}/crm/${API_VERSION}/Installation/1/Notes`;
-      const r = await fetch(url, { method: "POST", headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ data: [{}] }) });
+      const r = await zohoFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data: [{}] }) });
       const txt = await r.text();
       const scopeMismatch = /OAUTH_SCOPE_MISMATCH/i.test(txt);
       return res.status(200).json({ diag: true, canWriteNotes: !scopeMismatch, httpStatus: r.status, sample: txt.slice(0, 200) });

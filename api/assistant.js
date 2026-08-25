@@ -19,6 +19,7 @@
 //   ZOHO_API_DOMAIN    (optional, default https://www.zohoapis.com)
 //   ZOHO_API_VERSION   (optional, default v8)
 //   SITECAPTURE_USER/PASS or Site_Capture_Key, SITECAPTURE_PROXY (optional) — SiteCapture search
+import { getZohoToken } from "./_zoho.js";
 
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
@@ -45,6 +46,18 @@ async function fetchT(url, opts, ms) {
   finally { clearTimeout(t); }
 }
 
+// fetchT against Zoho, retrying once with a freshly minted token when the cached one has been
+// invalidated. Same recovery as zohoFetch, but preserving this file's request timeout.
+async function zFetchT(url, ms) {
+  let tok = await getZohoToken(false);
+  let r = await fetchT(url, { headers: { Authorization: `Zoho-oauthtoken ${tok}` } }, ms);
+  if (r && r.status === 401) {
+    tok = await getZohoToken(true);
+    r = await fetchT(url, { headers: { Authorization: `Zoho-oauthtoken ${tok}` } }, ms);
+  }
+  return r;
+}
+
 async function getAccessToken() {
   if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
   const res = await fetchT(`${ACCOUNTS_HOST}/oauth/v2/token`, {
@@ -64,7 +77,7 @@ async function getAccessToken() {
 // One Zoho CRM search page (criteria OR word). Returns [] on 204/error rather than throwing.
 async function zohoSearch(module, params, token) {
   const path = `${encodeURIComponent(module)}/search?${params}`;
-  const r = await fetchT(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } }, 12000);
+  const r = await zFetchT(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, 12000);
   if (!r) throw new Error(`Zoho ${module} timed out`);
   if (r.status === 204) return [];
   if (!r.ok) throw new Error(`Zoho ${module} ${r.status}: ${(await r.text()).slice(0, 160)}`);
@@ -122,8 +135,7 @@ function stripHtml(s) {
 // All CRM Notes attached to a record (module/id) → [{title,content,author,time}], newest first.
 async function fetchNotes(module, id, token) {
   if (!id) return [];
-  const r = await fetchT(`${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(module)}/${encodeURIComponent(id)}/Notes?fields=Note_Title,Note_Content,Created_Time,Owner&per_page=50&sort_by=Created_Time&sort_order=desc`,
-    { headers: { Authorization: `Zoho-oauthtoken ${token}` } }, 12000).catch(() => null);
+  const r = await zFetchT(`${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(module)}/${encodeURIComponent(id)}/Notes?fields=Note_Title,Note_Content,Created_Time,Owner&per_page=50&sort_by=Created_Time&sort_order=desc`, 12000).catch(() => null);
   if (!r || r.status === 204 || !r.ok) return [];
   const d = await r.json().catch(() => ({}));
   return (d.data || []).map((n) => ({ title: n.Note_Title || "", content: stripHtml(n.Note_Content), author: (n.Owner && n.Owner.name) || "", time: n.Created_Time || "" }))
@@ -272,8 +284,7 @@ async function toolGetJobDetails(input) {
   // name only loses this detail rather than breaking the whole lookup.
   let dealInsp = {};
   try {
-    const ir = await fetchT(`${API_DOMAIN}/crm/${API_VERSION}/Deals/${encodeURIComponent(dealId)}?fields=${encodeURIComponent("Inspection_Stage,Final_Inspection_Approved")}`,
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` } }, 10000);
+    const ir = await zFetchT(`${API_DOMAIN}/crm/${API_VERSION}/Deals/${encodeURIComponent(dealId)}?fields=${encodeURIComponent("Inspection_Stage,Final_Inspection_Approved")}`, 10000);
     if (ir && ir.ok) { const dj = await ir.json().catch(() => ({})); const row = (dj.data && dj.data[0]) || {}; dealInsp = { dealInspectionStage: row.Inspection_Stage || "", finalInspectionApproved: row.Final_Inspection_Approved || "" }; }
   } catch (e) {}
   const insArr = Array.isArray(inspections) ? inspections : [];

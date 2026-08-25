@@ -16,6 +16,7 @@
 //     existed) if some note already contains the crew's note text.
 //
 // The underscore prefix keeps Vercel from routing this file as an endpoint.
+import { zohoFetch } from "./_zoho.js";
 
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
 const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
@@ -40,14 +41,15 @@ export function noteMarker(eventId) {
   return `[fh:${String(eventId || "").replace(/[^a-zA-Z0-9]/g, "").slice(0, 8)}]`;
 }
 
-const zh = (token) => ({ Authorization: `Zoho-oauthtoken ${token}` });
+// Requests go through zohoFetch so a token invalidated mid-run (this loop can take a while,
+// uploading several photos) force-refreshes and retries instead of failing the sync.
 
 // Attachment File_Names already on the record. Returns null when the lookup itself fails, so the
 // caller can skip rather than risk duplicating (an empty Set would look like "nothing attached").
 async function existingAttachmentNames(token, module, recordId) {
   try {
     const url = `${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(module)}/${encodeURIComponent(recordId)}/Attachments?fields=id,File_Name&per_page=200`;
-    const r = await fetch(url, { headers: zh(token) });
+    const r = await zohoFetch(url);
     if (r.status === 204) return new Set();
     if (!r.ok) return null;
     const d = await r.json();
@@ -59,7 +61,7 @@ async function existingAttachmentNames(token, module, recordId) {
 async function existingNoteBlob(token, module, recordId) {
   try {
     const url = `${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(module)}/${encodeURIComponent(recordId)}/Notes?fields=Note_Title,Note_Content&per_page=200`;
-    const r = await fetch(url, { headers: zh(token) });
+    const r = await zohoFetch(url);
     if (r.status === 204) return "";
     if (!r.ok) return null;
     const d = await r.json();
@@ -70,9 +72,7 @@ async function existingNoteBlob(token, module, recordId) {
 async function postAttachment(token, module, recordId, bytes, filename, contentType) {
   const fd = new FormData();
   fd.append("file", new Blob([bytes], { type: contentType || "image/jpeg" }), filename);
-  const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(module)}/${encodeURIComponent(recordId)}/Attachments`, {
-    method: "POST", headers: zh(token), body: fd,
-  });
+  const r = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(module)}/${encodeURIComponent(recordId)}/Attachments`, { method: "POST", body: fd });
   const txt = await r.text();
   let d; try { d = JSON.parse(txt); } catch (e) { d = { raw: txt }; }
   const rec = d && d.data && d.data[0];
@@ -81,9 +81,9 @@ async function postAttachment(token, module, recordId, bytes, filename, contentT
 }
 
 async function postNote(token, module, recordId, title, content) {
-  const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(module)}/${encodeURIComponent(recordId)}/Notes`, {
+  const r = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(module)}/${encodeURIComponent(recordId)}/Notes`, {
     method: "POST",
-    headers: { ...zh(token), "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ data: [{ Note_Title: String(title || "").slice(0, 120), Note_Content: content }] }),
   });
   const txt = await r.text();

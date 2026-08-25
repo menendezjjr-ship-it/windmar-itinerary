@@ -2,6 +2,7 @@
 // POST { recordId, module?, fields:{ ApiName: value, ... } }  (module defaults "Installation")
 // GET  ?diag=1[&module=Service_Ticket]  → probe whether the Zoho login can UPDATE that module (writes nothing real).
 // Only a per-module allowlist of coordinator-safe fields is ever written.
+import { zohoFetch } from "./_zoho.js";
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
 const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
@@ -52,8 +53,8 @@ export default async function handler(req, res) {
     // so a scope-mismatch surfaces here without changing anything. ?module= selects which module.
     if (req.method === "GET" && req.query.diag) {
       const dmod = String(req.query.module || "Installation").replace(/[^A-Za-z0-9_]/g, "") || "Installation";
-      const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(dmod)}/1`, {
-        method: "PUT", headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+      const r = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(dmod)}/1`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ data: [{}] }),
       });
       const txt = await r.text();
@@ -85,8 +86,8 @@ export default async function handler(req, res) {
     }
     if (!Object.keys(fields).length) return res.status(200).json({ ok: false, error: "no editable fields in payload" });
 
-    const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(module)}/${encodeURIComponent(recordId)}`, {
-      method: "PUT", headers: { Authorization: `Zoho-oauthtoken ${token}`, "Content-Type": "application/json" },
+    const r = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(module)}/${encodeURIComponent(recordId)}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ data: [fields] }),
     });
     const txt = await r.text(); let d; try { d = JSON.parse(txt); } catch (e) { d = { raw: txt }; }

@@ -12,6 +12,7 @@
 // metadata) and only *upgrade* it from /settings/fields when that call succeeds
 // (source:"live"). The Installation_Team options are fetched via the records
 // search API, which the module READ scope allows. Cached (defs rarely change).
+import { zohoFetch } from "./_zoho.js";
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
 const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
@@ -81,7 +82,7 @@ const BASELINE = {
 async function fetchLookup(module, token) {
   try {
     const path = `${encodeURIComponent(module)}/search?criteria=${encodeURIComponent("(id:not_equal:0)")}&fields=Name&per_page=200&page=1`;
-    const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+    const r = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`);
     if (r.status === 204 || !r.ok) return [];
     const rows = (await r.json()).data || [];
     return rows.map((x) => ({ id: String(x.id), name: (x.Name || "").trim() })).filter((x) => x.id && x.name);
@@ -95,8 +96,7 @@ async function fetchLookup(module, token) {
 async function discoverServicePicklists(fields, token) {
   try {
     const flds = "Ticket_Status,Priority,Type_of_Service";
-    const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/Service_Ticket?fields=${encodeURIComponent(flds)}&per_page=200&page=1`,
-      { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+    const r = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/Service_Ticket?fields=${encodeURIComponent(flds)}&per_page=200&page=1`);
     if (r.status === 204 || !r.ok) return false;
     const rows = (await r.json()).data || [];
     const st = new Set(), pr = new Set(), tos = new Set();
@@ -117,9 +117,7 @@ async function discoverServicePicklists(fields, token) {
 // Silently returns false (keep baseline) if the scope isn't granted.
 async function tryLiveOverride(module, fields, token) {
   try {
-    const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/settings/fields?module=${encodeURIComponent(module)}`, {
-      headers: { Authorization: `Zoho-oauthtoken ${token}` },
-    });
+    const r = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/settings/fields?module=${encodeURIComponent(module)}`);
     if (!r.ok) return false;
     const raw = (await r.json()).fields || [];
     for (const f of raw) {

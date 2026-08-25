@@ -1,5 +1,6 @@
 // /api/zoho-notes.js — all Notes for a Zoho Deal (project), cleaned for display.
 // GET /api/zoho-notes?id=<dealId>
+import { zohoFetch } from "./_zoho.js";
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
 const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
@@ -47,7 +48,7 @@ export default async function handler(req, res) {
   try {
     const token = await getAccessToken();
     const url = `${API_DOMAIN}/crm/${API_VERSION}/${encodeURIComponent(moduleName)}/${id}/Notes?fields=Note_Title,Note_Content,Created_Time,Owner&per_page=100&sort_by=Created_Time&sort_order=desc`;
-    const r = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+    const r = await zohoFetch(url);
     if (r.status === 204) return res.status(200).json({ ok: true, count: 0, notes: [] });
     if (!r.ok) return res.status(200).json({ ok: false, error: `Zoho ${r.status}: ${(await r.text()).slice(0, 160)}`, notes: [] });
     const d = await r.json();

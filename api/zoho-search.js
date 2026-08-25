@@ -3,6 +3,7 @@
 // Calendar search bars: the loaded lists only cover the operational pipeline / calendar
 // window, so this reaches ANY deal (any stage, all-time) by keyword.
 // Self-contained lambda; secrets live ONLY in env vars (ZOHO_CLIENT_ID/SECRET/REFRESH_TOKEN).
+import { zohoFetch } from "./_zoho.js";
 
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
@@ -59,7 +60,7 @@ export default async function handler(req, res) {
   try {
     const token = await getAccessToken();
     const path = `Deals/search?word=${encodeURIComponent(q)}&fields=${encodeURIComponent(FIELDS)}&per_page=25&page=1`;
-    const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+    const r = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`);
     if (r.status === 204) { res.setHeader("Cache-Control", "s-maxage=30"); return res.status(200).json({ ok: true, q, results: [] }); }
     if (!r.ok) throw new Error(`Zoho Deals ${r.status}: ${(await r.text()).slice(0, 200)}`);
     const rows = (await r.json()).data || [];

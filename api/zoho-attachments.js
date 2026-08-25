@@ -2,6 +2,7 @@
 // WindMar stores files on the pipeline's stage sub-modules (linked to the Deal):
 //   NTP, Site_Survey (Site Visit), System_Info_Engineering (Engineering incl. FDA),
 //   Installation (Permitting + Install). GET /api/zoho-attachments?id=<dealId>
+import { zohoFetch } from "./_zoho.js";
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
 const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
@@ -65,7 +66,7 @@ export default async function handler(req, res) {
         if (!relCache[src.rel]) {
           const allFields = [...new Set(SOURCES.filter((s) => s.rel === src.rel).flatMap((s) => s.fields.map((f) => f.api)))].concat("Name").join(",");
           const path = `Deals/${id}/${src.rel}?fields=${encodeURIComponent(allFields)}&per_page=20`;
-          const r = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+          const r = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`);
           relCache[src.rel] = (r.status === 204 || !r.ok) ? [] : ((await r.json()).data || []);
         }
         relCache[src.rel].forEach((rec) => {

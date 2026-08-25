@@ -1,5 +1,6 @@
 // /api/zoho-file.js — securely stream a file from an Installation file-upload field.
 // GET /api/zoho-file?id=<installId>&aid=<attachmentId>&name=<filename>
+import { zohoFetch } from "./_zoho.js";
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
 const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
@@ -27,7 +28,7 @@ export default async function handler(req, res) {
   try {
     const token = await getAccessToken();
     const url = `${API_DOMAIN}/crm/${API_VERSION}/${mod}/${id}/actions/download_fields_attachment?fields_attachment_id=${encodeURIComponent(aid)}`;
-    const r = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
+    const r = await zohoFetch(url);
     if (!r.ok) return res.status(200).json({ ok: false, status: r.status, error: (await r.text()).slice(0, 200) });
     const ct = r.headers.get("content-type") || "application/octet-stream";
     const buf = Buffer.from(await r.arrayBuffer());
