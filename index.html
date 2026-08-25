@@ -9,6 +9,13 @@
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- CARTO Voyager as a VECTOR basemap: crisper labels, smooth zoom, same tiles we already used.
+     Rendered by MapLibre INSIDE Leaflet, so every marker, popup and fitBounds keeps working.
+     defer + a raster fallback in wmBaseLayer() means a slow or blocked CDN, or a device without
+     WebGL, still gets a working map. -->
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script defer src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script defer src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.22/leaflet-maplibre-gl.js"></script>
 <style>
   /* ============================================================
      WINDMAR SOLAR + ROOFING — official brand (windmar-branding skill)
@@ -3328,6 +3335,17 @@ function allowedTabs(){
   return out.length?out:TABS; // an all-unknown list would blank the nav → fall back to all
 }
 function tabAllowed(id){ return allowedTabs().some(tb=>tb.id===id); }
+// Basemap for every Leaflet map here. Vector (MapLibre + CARTO Voyager) when it is available,
+// otherwise the raster tiles we shipped before — a map that renders is worth more than a map
+// that looks nicer, so the fallback is never removed.
+function wmBaseLayer(){
+  const ATTR='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &middot; &copy; <a href="https://carto.com/attributions">CARTO</a>';
+  if(window.maplibregl && window.L && L.maplibreGL){
+    try{ return L.maplibreGL({ style:"https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json", attribution:ATTR }); }
+    catch(e){ /* WebGL unavailable / style refused → raster below */ }
+  }
+  return L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19,attribution:ATTR});
+}
 function initCrewMap(){
   if(typeof L==="undefined") return;
   const el=document.getElementById("crewMap"); if(!el) return;
@@ -3339,7 +3357,7 @@ function initCrewMap(){
   if(window._cm){ try{ _keep={c:window._cm.getCenter(),z:window._cm.getZoom()}; }catch(e){} try{window._cm.remove();}catch(e){} window._cm=null; }
   const src=activeSource();
   const m=L.map(el).setView(_keep?[_keep.c.lat,_keep.c.lng]:[28.45,-81.4],_keep?_keep.z:8); window._cm=m;
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19,attribution:"© CARTO"}).addTo(m);
+  wmBaseLayer().addTo(m);
   const pts=[];
   L.marker([HQ.lat,HQ.lon],{icon:L.divIcon({className:"",html:'<div style="font-size:26px;line-height:1;filter:drop-shadow(0 2px 3px rgba(0,0,0,.5));transform:translate(-50%,-90%)">🏢</div>',iconSize:[0,0]})}).addTo(m).bindTooltip("🏢 "+HQ.name,{direction:"top",permanent:true,className:"distlbl",offset:[0,-22]});
   pts.push([HQ.lat,HQ.lon]);
@@ -3388,7 +3406,7 @@ function initPinMap(elId, pins, mapVar, opts){
   opts=opts||{}; if(typeof L==="undefined") return; const el=document.getElementById(elId); if(!el) return;
   if(window[mapVar]){ try{window[mapVar].remove();}catch(e){} window[mapVar]=null; }
   const m=L.map(el).setView([28.45,-81.4],7); window[mapVar]=m;
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",{maxZoom:19,attribution:"© CARTO"}).addTo(m);
+  wmBaseLayer().addTo(m);
   const pts=[];
   if(opts.showHQ){ L.marker([HQ.lat,HQ.lon],{icon:L.divIcon({className:"",html:'<div style="font-size:22px;transform:translate(-50%,-90%)">🏢</div>',iconSize:[0,0]})}).addTo(m).bindTooltip("🏢 Home Base",{direction:"top"}); pts.push([HQ.lat,HQ.lon]); }
   (pins||[]).forEach(p=>{ const col=opts.color?opts.color(p):"#1D429B";
