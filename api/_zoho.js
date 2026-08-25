@@ -21,11 +21,17 @@ export function hasZohoCreds() {
   return !!(process.env.ZOHO_CLIENT_ID && process.env.ZOHO_CLIENT_SECRET && process.env.ZOHO_REFRESH_TOKEN);
 }
 
-let cachedToken = null, tokenExpiry = 0, inflight = null;
+let cachedToken = null, tokenExpiry = 0, inflight = null, lastMint = 0;
+// A 401 storm (several routes waking at once) must not turn into a refresh storm. One forced
+// mint per instance per MIN_MINT_MS; inside that window a caller reuses the token we just got,
+// which is almost certainly the fresh one anyway.
+const MIN_MINT_MS = 10000;
 
 /** @param force  true = ignore the cache and mint a fresh token (use after a 401). */
 export async function getZohoToken(force) {
   if (!force && cachedToken && Date.now() < tokenExpiry) return cachedToken;
+  // Throttle forced mints: if we minted moments ago, that token IS the fresh one.
+  if (force && cachedToken && (Date.now() - lastMint) < MIN_MINT_MS) return cachedToken;
   // Single-flight: a burst of parallel calls must not each mint a token — every extra token
   // invalidates an older one and makes the very problem this file exists to fix more likely.
   if (inflight) return inflight;
@@ -41,12 +47,19 @@ export async function getZohoToken(force) {
         }),
       });
       const data = await res.json();
-      if (!data.access_token) throw new Error(`token refresh failed: ${data.error || JSON.stringify(data)}`);
+      if (!data.access_token) {
+        // Zoho rate-limits the refresh endpoint ("Access Denied" under a burst). Minting LESS
+        // often is the fix, not more — but if we are already holding a token that has not
+        // expired, keep using it rather than failing the request outright.
+        if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
+        throw new Error(`token refresh failed: ${data.error || JSON.stringify(data)}`);
+      }
       cachedToken = data.access_token;
-      // Deliberately short next to Zoho's 3600s: re-minting early is cheap, and a token we keep
-      // too long is exactly what goes stale underneath us.
+      // Hold it nearly the full hour. Refreshing early was making things WORSE: every extra
+      // mint both invalidates an older token and counts against Zoho's refresh rate limit.
       const ttl = Math.min(Number(data.expires_in) || 3600, 3600);
-      tokenExpiry = Date.now() + Math.max(60, ttl - 300) * 1000;
+      tokenExpiry = Date.now() + Math.max(60, ttl - 60) * 1000;
+      lastMint = Date.now();
       return cachedToken;
     } finally { inflight = null; }
   })();
