@@ -424,7 +424,7 @@ const S={
   instMap:{status:"idle",items:[],pinState:{status:"idle"}},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
   dispatch:{ open:false, updated:null, sig:null, geo:{status:"idle"}, filter:"all" }, // filter: all | service | insp
-  coord:{ q:"", tile:"", route:(function(){try{var v=localStorage.getItem("wm_coord_route");return (v==="near"||v==="short")?v:"far";}catch(e){return "far";}})(), /* route: how each area is ordered — far (default, unchanged) | near | short */ pick:(function(){try{var v=JSON.parse(localStorage.getItem("wm_coord_pick")||"[]");return Array.isArray(v)?v.filter(x=>typeof x==="string").slice(0,60):[];}catch(e){return [];}})(), /* pick: hand-built route — item keys IN CLICK ORDER */ selected:null, collapsed:{}, notes:{}, fields:{status:"idle",map:{},team:[]}, edit:null, savedMsg:null, addNote:{text:"",sending:false,err:"",okDl:""}, ready:{status:"idle",list:[],err:""}, view:"type", geo:{status:"idle"}, geoSig:"" }, // view: "type" (by job type) | "area" (by geographic proximity for route scheduling) // Coordinator tab: search, open detail key, per-section collapsed state, per-DL record cache, field metadata, active editor, /api/zoho-ready feed (Pending-Schedule installs + Need-Schedule services)
+  coord:{ q:"", tile:"", route:(function(){try{var v=localStorage.getItem("wm_coord_route");return (v==="near"||v==="short")?v:"far";}catch(e){return "far";}})(), /* route: how each area is ordered — far (default, unchanged) | near | short */ pick:(function(){try{var v=JSON.parse(localStorage.getItem("wm_coord_pick")||"[]");return Array.isArray(v)?v.filter(x=>typeof x==="string").slice(0,60):[];}catch(e){return [];}})(), /* pick: hand-built route — item keys IN CLICK ORDER */ origin:(function(){try{var v=JSON.parse(localStorage.getItem("wm_coord_origin")||"null");return (v&&v.lat!=null&&v.lon!=null&&v.addr)?{mode:"custom",addr:String(v.addr),lat:+v.lat,lon:+v.lon,status:"ok",err:""}:{mode:"hq",addr:"",lat:null,lon:null,status:"idle",err:""};}catch(e){return {mode:"hq",addr:"",lat:null,lon:null,status:"idle",err:""};}})(), /* origin: where the route STARTS — HQ by default, or a typed address */ selected:null, collapsed:{}, notes:{}, fields:{status:"idle",map:{},team:[]}, edit:null, savedMsg:null, addNote:{text:"",sending:false,err:"",okDl:""}, ready:{status:"idle",list:[],err:""}, view:"type", geo:{status:"idle"}, geoSig:"" }, // view: "type" (by job type) | "area" (by geographic proximity for route scheduling) // Coordinator tab: search, open detail key, per-section collapsed state, per-DL record cache, field metadata, active editor, /api/zoho-ready feed (Pending-Schedule installs + Need-Schedule services)
   svc:{ rec:{}, notes:{}, /* Zoho Notes ON the ticket, per recordId — read-back, previously write-only */ fields:{status:"idle",map:{}}, edit:null, savedMsg:null, scope:{status:"idle",canUpdate:false} }, // Service_Ticket editor: per-recordId editable-record cache, field metadata (picklists), active editor, UPDATE-scope probe
   attachScope:{status:"idle",canAttach:false}, // Attachments CREATE scope probe (gates the photo picker so no broken button ever ships)
   note:{ text:"", sending:false, err:"", okKey:"", prog:"" }, // unified note+photo box (install AND service), keyed by module:recordId
@@ -1979,9 +1979,9 @@ function coordinatorHTML(){
         <span style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin-right:2px">🧭 ${es?"Orden de ruta":"Route order"}</span>
         ${rOpts.map(o=>{const on=C.route===o[0];return `<button class="btn3d sm ${on?"":"ghost"}" data-action="coordRoute" data-id="${o[0]}" title="${esc(o[2])}" style="font-size:11.5px">${esc(o[1])}</button>`;}).join("")}
         <span style="font-size:11px;color:var(--text-dim)">${esc((rOpts.find(o=>o[0]===C.route)||rOpts[0])[2])}</span></div>`;
-      body=feedWarn+tiles+clearBtn+note+coordPickPanel()+rPick+`<div class="coord-report">${clusters.map((cl,ix)=>coordAreaSectionHTML(cl,ix,!!q)).join("")}</div>`;
+      body=feedWarn+tiles+clearBtn+note+coordOriginPicker()+coordPickPanel()+rPick+`<div class="coord-report">${clusters.map((cl,ix)=>coordAreaSectionHTML(cl,ix,!!q)).join("")}</div>`;
     } else {
-      body=feedWarn+tiles+coordPickPanel()+`<div class="coord-report">${shown.map(coordItemRow).join("")}</div>`;
+      body=feedWarn+tiles+coordOriginPicker()+coordPickPanel()+`<div class="coord-report">${shown.map(coordItemRow).join("")}</div>`;
     }
   }
   // 🗺 Schedule Nearest Crew — pending inspections ranked against live crew GPS.
@@ -2020,6 +2020,42 @@ function coordSectionHTML(bucket,items,searching){ const m=coordBucketMeta(bucke
 // The automatic orders answer "what is the best route through THIS area". This answers
 // "these specific jobs, in this order" — the coordinator taps jobs and the route is the order
 // they tapped. Stored as item keys so it survives the tab's 30s auto-refresh and a reload.
+// Where a Coordinator route starts and ends. HQ unless the coordinator has set their own
+// address — a crew starting from a yard, a hotel, or their own house should not be routed as if
+// they left Orlando. Falls back to HQ whenever the custom point is not usable, so the route math
+// can never receive a null coordinate.
+function routeOrigin(){
+  const o=S.coord.origin;
+  if(o&&o.mode==="custom"&&o.lat!=null&&o.lon!=null&&isFinite(o.lat)&&isFinite(o.lon))
+    return {lat:+o.lat,lon:+o.lon,name:o.addr||"Custom start",custom:true};
+  return {lat:HQ.lat,lon:HQ.lon,name:HQ.name,custom:false};
+}
+// Short label for the start point — the full HQ name is a whole address line.
+function routeOriginLabel(){
+  const o=routeOrigin(), es=S.lang==="es";
+  if(!o.custom) return es?"la base":"base";
+  return String(o.name).split(",").slice(0,2).join(",").trim()||(es?"inicio":"start");
+}
+function coordOriginSave(){
+  try{
+    const o=S.coord.origin;
+    if(o&&o.mode==="custom"&&o.lat!=null) localStorage.setItem("wm_coord_origin",JSON.stringify({addr:o.addr,lat:o.lat,lon:o.lon}));
+    else localStorage.removeItem("wm_coord_origin");
+  }catch(e){}
+}
+// Geocode the typed start address with the same geocoder the job pins use.
+function coordSetOrigin(addr){
+  const a=String(addr||"").trim();
+  if(!a){ S.coord.origin={mode:"hq",addr:"",lat:null,lon:null,status:"idle",err:""}; coordOriginSave(); render(); return; }
+  S.coord.origin=Object.assign({},S.coord.origin,{mode:"custom",addr:a,status:"geocoding",err:""});
+  render();
+  Promise.resolve(geocodeOne(a)).then(g=>{
+    if(g&&g.lat!=null&&g.lon!=null) S.coord.origin={mode:"custom",addr:a,lat:g.lat,lon:g.lon,status:"ok",err:""};
+    // Not found → stay on HQ rather than silently routing from a wrong guess.
+    else S.coord.origin={mode:"hq",addr:a,lat:null,lon:null,status:"error",err:"notfound"};
+    coordOriginSave(); render();
+  }).catch(()=>{ S.coord.origin={mode:"hq",addr:a,lat:null,lon:null,status:"error",err:"failed"}; coordOriginSave(); render(); });
+}
 function coordPickSave(){ try{ localStorage.setItem("wm_coord_pick",JSON.stringify(S.coord.pick||[])); }catch(e){} }
 function coordPickIndex(key){ return (S.coord.pick||[]).indexOf(String(key)); }
 // Picked items in pick order, annotated with coords + legs. Keys whose job is no longer in the
@@ -2031,22 +2067,25 @@ function coordPickedItems(){
     const g=GEO_CACHE[geoKey(it.address)];
     out.push(Object.assign({},it,{lat:g&&g.lat!=null?g.lat:null,lon:g&&g.lon!=null?g.lon:null}));
   });
-  let prev={lat:HQ.lat,lon:HQ.lon};
+  const RO=routeOrigin();
+  let prev={lat:RO.lat,lon:RO.lon};
   out.forEach(p=>{ if(p.lat==null||p.lon==null){ p._legMi=null; return; }
-    p._hqMi=haversineMi(HQ.lat,HQ.lon,p.lat,p.lon); p._legMi=haversineMi(prev.lat,prev.lon,p.lat,p.lon); prev=p; });
+    p._hqMi=haversineMi(RO.lat,RO.lon,p.lat,p.lon); p._legMi=haversineMi(prev.lat,prev.lon,p.lat,p.lon); prev=p; });
   return out;
 }
 function coordPickMiles(list){
   const geo=list.filter(p=>p.lat!=null&&p.lon!=null); if(!geo.length) return 0;
   const last=geo[geo.length-1];
-  return geo.reduce((s,p)=>s+(p._legMi||0),0)+haversineMi(last.lat,last.lon,HQ.lat,HQ.lon);
+  const RO=routeOrigin();
+  return geo.reduce((s,p)=>s+(p._legMi||0),0)+haversineMi(last.lat,last.lon,RO.lat,RO.lon);
 }
 // The picked stops re-ordered by least driving (same greedy nearest-neighbour as the "short"
 // mode). Returns KEYS so the caller just replaces S.coord.pick.
 function coordPickOptimized(){
   const list=coordPickedItems();
   const geo=list.filter(p=>p.lat!=null&&p.lon!=null), noGeo=list.filter(p=>p.lat==null||p.lon==null);
-  const pool=geo.slice(), ordered=[]; let cur={lat:HQ.lat,lon:HQ.lon};
+  const RO=routeOrigin();
+  const pool=geo.slice(), ordered=[]; let cur={lat:RO.lat,lon:RO.lon};
   while(pool.length){ let bi=0,bd=Infinity;
     for(let i=0;i<pool.length;i++){ const d=haversineMi(cur.lat,cur.lon,pool[i].lat,pool[i].lon); if(d<bd){ bd=d; bi=i; } }
     cur=pool.splice(bi,1)[0]; ordered.push(cur); }
@@ -2056,11 +2095,34 @@ function coordPickOptimized(){
 function coordPickMapsUrl(list){
   const pts=(list||[]).filter(p=>p.lat!=null&&p.lon!=null).map(p=>p.lat+","+p.lon);
   if(!pts.length) return "";
-  let url="https://www.google.com/maps/dir/?api=1&origin="+HQ.lat+","+HQ.lon+"&destination="+HQ.lat+","+HQ.lon;
+  const RO=routeOrigin();
+  let url="https://www.google.com/maps/dir/?api=1&origin="+RO.lat+","+RO.lon+"&destination="+RO.lat+","+RO.lon;
   return url+"&waypoints="+pts.slice(0,10).map(encodeURIComponent).join("|"); // Maps caps waypoints at 10
 }
 // The hand-built route, shown above the list as soon as one job is picked. Ordered exactly as
 // tapped; ⚡ re-orders by least driving; ✕ on a stop or "Clear" removes.
+// Start-point picker. HQ stays the default and the first option; the alternative is any typed
+// address, geocoded with the same geocoder the job pins use.
+function coordOriginPicker(){
+  const es=S.lang==="es", o=S.coord.origin||{}, ro=routeOrigin();
+  const busy=o.status==="geocoding";
+  const hqOn=!ro.custom;
+  const msg=busy?`<span style="font-size:11px;color:var(--text-dim)">⟳ ${es?"Buscando dirección…":"Finding address…"}</span>`
+    :(o.status==="error"?`<span style="font-size:11px;color:var(--warn)">${es?"No se encontró esa dirección — usando la base.":"Couldn't find that address — using base."}</span>`
+    :(ro.custom?`<span style="font-size:11px;color:var(--text-dim)">${es?"Las rutas empiezan y terminan aquí.":"Routes start and end here."}</span>`
+    :`<span style="font-size:11px;color:var(--text-dim)">${es?"Las rutas empiezan y terminan en la base.":"Routes start and end at base."}</span>`));
+  return `<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 8px">
+    <span style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim);margin-right:2px">🚩 ${es?"Salir desde":"Start from"}</span>
+    <button class="btn3d sm ${hqOn?"":"ghost"}" data-action="coordOriginHQ" style="font-size:11.5px">🏠 ${es?"Base (HQ)":"Base (HQ)"}</button>
+    <input id="wmCoordOrigin" type="text" value="${esc(o.addr||"")}" placeholder="${es?"o escribe una dirección…":"or type an address…"}" ${busy?"disabled":""}
+      onkeydown="if(event.key==='Enter'){event.preventDefault();window.wmSetOrigin();}"
+      style="flex:1;min-width:190px;max-width:340px;font-size:12.5px;padding:5px 9px;border-radius:8px;border:2px solid ${ro.custom?"#F59E0B":"var(--line)"};background:var(--bg-2);color:var(--text)"/>
+    <button class="btn3d sm ${ro.custom?"":"ghost"}" data-action="coordOriginSet" ${busy?"disabled":""} style="font-size:11.5px">${es?"Usar":"Use"}</button>
+    ${msg}</div>`;
+}
+// Read the input at click time — the value lives in the DOM, not in state, so typing never
+// triggers a re-render that would fight the caret.
+window.wmSetOrigin=function(){ const i=document.getElementById("wmCoordOrigin"); coordSetOrigin(i?i.value:""); };
 function coordPickPanel(){
   const es=S.lang==="es", list=coordPickedItems();
   if(!list.length) return "";
@@ -2077,7 +2139,7 @@ function coordPickPanel(){
     <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
       <b style="font-size:13.5px">🧭 ${es?"Mi ruta":"My route"}</b>
       <span class="pill" style="background:#F59E0B;color:#1a1a1a;font-size:11px">${list.length} ${es?(list.length===1?"parada":"paradas"):(list.length===1?"stop":"stops")}</span>
-      ${mi>0?`<span style="font-size:12px;color:var(--text-dim)">${mi.toFixed(1)} ${es?"mi ida y vuelta desde la base":"mi round trip from base"}</span>`:""}
+      ${mi>0?`<span style="font-size:12px;color:var(--text-dim)">${mi.toFixed(1)} ${es?("mi ida y vuelta desde "+esc(routeOriginLabel())):("mi round trip from "+esc(routeOriginLabel()))}</span>`:""}
       <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
         ${list.length>1?`<button class="btn3d sm ghost" data-action="coordPickOpt" title="${es?"Reordenar por menos millas":"Re-order for least driving"}" style="font-size:11.5px">⚡ ${es?"Optimizar":"Optimize"}</button>`:""}
         ${url?`<a class="btn3d sm" href="${url}" target="_blank" rel="noopener" style="font-size:11.5px;text-decoration:none">🗺 ${es?"Abrir en Maps":"Open in Maps"}</a>`:""}
@@ -2134,30 +2196,30 @@ function coordAreaClusters(items,sortFn){
   //   short — nearest-neighbour from HQ: each stop is the closest one not yet visited, which
   //           is the least total driving. Greedy, not a true optimum, but it beats both
   //           distance sorts in practice and is instant on these list sizes.
-  const ROUTE=String(S.coord.route||"far");
+  const ROUTE=String(S.coord.route||"far"), RO=routeOrigin();
   const routeOrder=(cl)=>{
     let ordered;
     if(ROUTE==="short"){
-      const pool=cl.slice(); ordered=[]; let cur={lat:HQ.lat,lon:HQ.lon};
+      const pool=cl.slice(); ordered=[]; let cur={lat:RO.lat,lon:RO.lon};
       while(pool.length){
         let bi=0,bd=Infinity;
         for(let i=0;i<pool.length;i++){ const d=haversineMi(cur.lat,cur.lon,pool[i].lat,pool[i].lon); if(d<bd){ bd=d; bi=i; } }
         cur=pool.splice(bi,1)[0]; ordered.push(cur);
       }
     } else if(ROUTE==="near"){
-      ordered=cl.slice().sort((a,b)=>haversineMi(HQ.lat,HQ.lon,a.lat,a.lon)-haversineMi(HQ.lat,HQ.lon,b.lat,b.lon));
+      ordered=cl.slice().sort((a,b)=>haversineMi(RO.lat,RO.lon,a.lat,a.lon)-haversineMi(RO.lat,RO.lon,b.lat,b.lon));
     } else {
-      ordered=cl.slice().sort((a,b)=>haversineMi(HQ.lat,HQ.lon,b.lat,b.lon)-haversineMi(HQ.lat,HQ.lon,a.lat,a.lon));
+      ordered=cl.slice().sort((a,b)=>haversineMi(RO.lat,RO.lon,b.lat,b.lon)-haversineMi(RO.lat,RO.lon,a.lat,a.lon));
     }
-    let prev={lat:HQ.lat,lon:HQ.lon};
-    ordered.forEach(p=>{ p._hqMi=haversineMi(HQ.lat,HQ.lon,p.lat,p.lon); p._legMi=haversineMi(prev.lat,prev.lon,p.lat,p.lon); prev=p; });
+    let prev={lat:RO.lat,lon:RO.lon};
+    ordered.forEach(p=>{ p._hqMi=haversineMi(RO.lat,RO.lon,p.lat,p.lon); p._legMi=haversineMi(prev.lat,prev.lon,p.lat,p.lon); prev=p; });
     return ordered;
   };
   const out=clusters.map(cl=>{
     const ordered=routeOrder(cl); // furthest→closest; sortFn kept for callers that need a manual order
-    if(sortFn){ ordered.sort(sortFn); let prev={lat:HQ.lat,lon:HQ.lon}; ordered.forEach(p=>{ p._legMi=haversineMi(prev.lat,prev.lon,p.lat,p.lon); prev=p; }); }
-    const last=ordered[ordered.length-1]||{lat:HQ.lat,lon:HQ.lon};
-    const returnMi=haversineMi(last.lat,last.lon,HQ.lat,HQ.lon);          // final leg back to base
+    if(sortFn){ ordered.sort(sortFn); let prev={lat:RO.lat,lon:RO.lon}; ordered.forEach(p=>{ p._legMi=haversineMi(prev.lat,prev.lon,p.lat,p.lon); prev=p; }); }
+    const last=ordered[ordered.length-1]||{lat:RO.lat,lon:RO.lon};
+    const returnMi=haversineMi(last.lat,last.lon,RO.lat,RO.lon);          // final leg back to base
     const roundTrip=ordered.reduce((s,p)=>s+(p._legMi||0),0)+returnMi;    // HQ → all stops → HQ
     const clat=cl.reduce((s,p)=>s+p.lat,0)/cl.length, clon=cl.reduce((s,p)=>s+p.lon,0)/cl.length;
     let spread=0; for(let a=0;a<cl.length;a++)for(let b=a+1;b<cl.length;b++){const d=haversineMi(cl[a].lat,cl[a].lon,cl[b].lat,cl[b].lon); if(d>spread)spread=d;}
@@ -2166,7 +2228,7 @@ function coordAreaClusters(items,sortFn){
     const label=Object.keys(freq).length>1?(top+" "+(es?"y alrededores":"area")):top;
     return { items:ordered, label, count:cl.length, spread, roundTrip, returnMi, clat, clon, unmapped:false };
   });
-  out.sort((a,z)=>haversineMi(HQ.lat,HQ.lon,a.clat,a.clon)-haversineMi(HQ.lat,HQ.lon,z.clat,z.clon)); // nearest-to-base first
+  out.sort((a,z)=>haversineMi(RO.lat,RO.lon,a.clat,a.clon)-haversineMi(RO.lat,RO.lon,z.clat,z.clon)); // nearest-to-base first
   if(noGeo.length) out.push({ items:noGeo, label:(es?"Ubicación desconocida":"Location unknown"), count:noGeo.length, spread:0, unmapped:true });
   return out;
 }
@@ -2175,7 +2237,8 @@ function coordAreaClusters(items,sortFn){
 function coordRouteLink(ordered){
   const pts=(ordered||[]).filter(p=>p.lat!=null&&p.lon!=null).map(p=>p.lat+","+p.lon); if(!pts.length) return "";
   const wp=pts.slice(0,10);
-  let url="https://www.google.com/maps/dir/?api=1&origin="+HQ.lat+","+HQ.lon+"&destination="+HQ.lat+","+HQ.lon;
+  const RO=routeOrigin();
+  let url="https://www.google.com/maps/dir/?api=1&origin="+RO.lat+","+RO.lon+"&destination="+RO.lat+","+RO.lon;
   if(wp.length) url+="&waypoints="+wp.map(encodeURIComponent).join("|"); return url;
 }
 function coordAreaSectionHTML(cl, idx, searching){
@@ -3500,6 +3563,8 @@ document.addEventListener("click",e=>{
         loadCoordFields(); }
       render(); break; }
     // Tap a tile to narrow to that bucket; tap the same tile (or "Show everything") to clear.
+    case "coordOriginHQ": { S.coord.origin={mode:"hq",addr:"",lat:null,lon:null,status:"idle",err:""}; coordOriginSave(); render(); break; }
+    case "coordOriginSet": { window.wmSetOrigin(); break; }
     case "coordPick": { const k=el.getAttribute("data-id")||""; if(!k) break;
       const ix=coordPickIndex(k);
       if(ix>=0) S.coord.pick.splice(ix,1);
