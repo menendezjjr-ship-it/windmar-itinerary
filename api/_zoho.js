@@ -100,3 +100,13 @@ export async function zohoJson(url, init) {
   let data; try { data = JSON.parse(text); } catch (e) { data = null; }
   return { res, ok: res.ok, status: res.status, data: data || {}, text };
 }
+
+/** Non-secret snapshot of this lambda's token state, for /api/zoho-health. */
+export function zohoTokenState() {
+  return {
+    hasCreds: hasZohoCreds(),
+    cached: !!cachedToken,
+    validForSec: cachedToken ? Math.max(0, Math.round((tokenExpiry - Date.now()) / 1000)) : 0,
+    secSinceMint: lastMint ? Math.round((Date.now() - lastMint) / 1000) : null,
+  };
+}
