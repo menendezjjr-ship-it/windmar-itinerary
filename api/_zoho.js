@@ -22,6 +22,12 @@ export function hasZohoCreds() {
 }
 
 let cachedToken = null, tokenExpiry = 0, inflight = null, lastMint = 0;
+// Circuit breaker. When Zoho throttles the refresh endpoint, every further attempt keeps the
+// window tripped — so a rate-limited instance must STOP asking for a while. Without this the
+// fleet can deadlock: the shared row is empty, so everyone mints, so nobody is ever allowed to
+// mint and write the one token that would end it.
+let mintBlockedUntil = 0;
+const MINT_BLOCK_MS = 60000;
 
 /* ── Shared token store (optional) ─────────────────────────────────────────────────────────
    Each Vercel API route is its OWN lambda with its own memory, so every cold start used to
@@ -51,7 +57,7 @@ let sharedLastErr = "";   // last failure from the shared store, surfaced by /ap
 const sharedUsable = () => !!SB_SERVICE && Date.now() > sharedOff;
 const sbHeaders = () => ({ apikey: SB_SERVICE, Authorization: "Bearer " + SB_SERVICE, "Content-Type": "application/json" });
 
-async function sharedRead() {
+async function sharedRead(lax) {
   if (!sharedUsable()) return null;
   try {
     const r = await fetch(`${SB_URL}/rest/v1/zoho_token?id=eq.1&select=access_token,expires_at`, { headers: sbHeaders() });
@@ -64,8 +70,10 @@ async function sharedRead() {
     const row = Array.isArray(rows) && rows[0];
     if (!row || !row.access_token) return null;
     const exp = Date.parse(row.expires_at);
-    // 120s of headroom so we never hand out a token about to die mid-request.
-    return (isFinite(exp) && exp > Date.now() + 120000) ? { token: row.access_token, exp } : null;
+    // 120s of headroom so we never hand out a token about to die mid-request. `lax` drops that
+    // to 5s: when minting is blocked, a nearly-expired token still beats no token at all.
+    const need = lax ? 5000 : 120000;
+    return (isFinite(exp) && exp > Date.now() + need) ? { token: row.access_token, exp } : null;
   } catch (e) { sharedLastErr = "read threw: " + String(e && e.message || e); return null; }
 }
 async function sharedWrite(token, exp) {
@@ -102,6 +110,14 @@ export async function getZohoToken(force, stale) {
     cachedToken = shared.token; tokenExpiry = shared.exp - 60000;
     return cachedToken;
   }
+
+  // Throttled by Zoho: do not add to the pressure. Serve whatever is still usable instead.
+  if (Date.now() < mintBlockedUntil) {
+    if (cachedToken && cachedToken !== stale) return cachedToken;
+    const s2 = await sharedRead(true);           // accept a token close to expiry — better than none
+    if (s2 && s2.token !== stale) { cachedToken = s2.token; tokenExpiry = s2.exp - 60000; return cachedToken; }
+    throw new Error("token refresh rate-limited by Zoho; retrying shortly");
+  }
   // Single-flight: a burst of parallel calls must not each mint a token — every extra token
   // invalidates an older one and makes the very problem this file exists to fix more likely.
   if (inflight) return inflight;
@@ -119,9 +135,11 @@ export async function getZohoToken(force, stale) {
       const data = await res.json();
       if (!data.access_token) {
         // Zoho rate-limits the refresh endpoint ("Access Denied" under a burst). Minting LESS
-        // often is the fix, not more — but if we are already holding a token that has not
-        // expired, keep using it rather than failing the request outright.
+        // often is the fix, not more — so stop asking for a minute.
+        mintBlockedUntil = Date.now() + MINT_BLOCK_MS;
         if (cachedToken && Date.now() < tokenExpiry) return cachedToken;
+        const s3 = await sharedRead(true);
+        if (s3) { cachedToken = s3.token; tokenExpiry = s3.exp - 60000; return cachedToken; }
         throw new Error(`token refresh failed: ${data.error || JSON.stringify(data)}`);
       }
       cachedToken = data.access_token;
@@ -185,5 +203,6 @@ export function zohoTokenState() {
     sharedStore: !SB_SERVICE ? "no-service-key" : (Date.now() > sharedOff ? "enabled" : "backing off"),
     sharedError: sharedLastErr || null,
     sharedRetryInSec: Date.now() < sharedOff ? Math.round((sharedOff - Date.now()) / 1000) : 0,
+    mintBlockedForSec: Date.now() < mintBlockedUntil ? Math.round((mintBlockedUntil - Date.now()) / 1000) : 0,
   };
 }

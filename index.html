@@ -665,7 +665,7 @@ function crewCardHTML(desc){
    later instead of painting "API error" and making someone hit refresh.
    Deliberately silent — no spinner, no tab change, no scroll jump. The caller's own render()
    runs only once, at the end, so the view never flickers or moves off what you were reading. */
-const WM_TOKEN_ERR=/INVALID_TOKEN|invalid[_ ]oauth[_ ]token|AUTHENTICATION_FAILURE|401/i;
+const WM_TOKEN_ERR=/INVALID_TOKEN|invalid[_ ]oauth[_ ]token|AUTHENTICATION_FAILURE|401|Access Denied|rate-limited/i;
 function wmIsTokenErr(j){ return !!(j && j.ok===false && WM_TOKEN_ERR.test(String(j.error||""))); }
 async function wmApiJson(url, tries){
   tries=(tries==null)?2:tries;
@@ -1052,6 +1052,25 @@ const STAGE_CATS=[
   {key:"needs_schedule",color:"#06B6D4", icon:"+", en:"Needs Scheduling", es:"Por Programar"},
   {key:"pastdue",       color:"#DC2626", icon:"!", en:"Past Due",         es:"Atrasado"},
 ];
+// A Zoho token blip (invalidated token, or Zoho throttling refreshes) clears itself in under a
+// minute and the previously-loaded jobs are still on screen. Shouting "API error" in red at
+// someone reading a perfectly good board is wrong; saying nothing would be too. This tells them
+// which one it is.
+const WM_TRANSIENT_RX=/INVALID_TOKEN|invalid[_ ]oauth[_ ]token|Access Denied|rate-limited|401|AUTHENTICATION_FAILURE/i;
+function wmFeedPill(status,err,hasData,action){
+  const es=S.lang==="es";
+  if(status!=="error") return "";
+  const transient=WM_TRANSIENT_RX.test(String(err||""));
+  const label=transient
+    ? (hasData?(es?"Reconectando…":"Reconnecting…"):(es?"Reintentando…":"Retrying…"))
+    : (es?"Error de API":"API error");
+  const bg=transient?"#F59E0B":"var(--warn)";
+  const tip=transient
+    ? (es?"Zoho limitó las conexiones un momento. Se reconecta solo — los datos en pantalla siguen siendo los últimos recibidos."
+        :"Zoho throttled us for a moment. It reconnects on its own — what you see is the last data received.")
+    : String(err||"");
+  return `<span class="pill" style="background:${bg};color:#1a1a1a;font-weight:800" title="${esc(tip)}">${esc(label)}</span><button class="btn3d sm" data-action="${esc(action)}">⟳</button>`;
+}
 function jobCat(j){ return j.cat || (j.status==="done"?"completed":j.status==="pastdue"?"pastdue":j.status==="enroute"||j.status==="onsite"?"in_progress":"scheduled"); }
 function stageMeta(cat){ return STAGE_CATS.find(c=>c.key===cat)||{key:cat,color:"var(--wh-grey)",icon:"●",en:cat,es:cat}; }
 function stageText(cat){ const m=stageMeta(cat); return S.lang==="es"?m.es:m.en; }
@@ -1061,7 +1080,7 @@ function livePill(){
     +(L.updated?`<span style="font-size:11px;color:var(--text-dim)">updated ${new Date(L.updated).toLocaleTimeString()}</span>`:"")
     +`<button class="btn3d sm" data-action="jobsRefresh">⟳</button>`;
   if(L.status==="loading") return `<span class="pill" style="background:var(--wh-grey)">… loading</span>`;
-  if(L.status==="error") return `<span class="pill" style="background:var(--warn)" title="${esc(L.err||"")}">API error</span><button class="btn3d sm" data-action="jobsRefresh">⟳</button>`;
+  if(L.status==="error") return wmFeedPill("error",L.err,!!(L.jobs&&L.jobs.length),"jobsRefresh");
   return `<span class="pill" style="background:var(--wh-grey)">demo data</span><button class="btn3d sm" data-action="jobsRefresh">⟳ Try live</button>`;
 }
 // Build the monthly Snapshot structure from the live feed (mirrors CAL_SNAPSHOT shape).
@@ -1605,7 +1624,7 @@ function projPill(){
   const P=S.proj;
   if(P.ok) return `<span class="pill" style="background:var(--jc-DL)"><span class="livedot" style="background:#bdf7c8;margin-right:5px"></span>LIVE</span>`+(P.updated?`<span style="font-size:11px;color:var(--text-dim)">updated ${new Date(P.updated).toLocaleTimeString()}</span>`:"")+`<button class="btn3d sm" data-action="projRefresh">⟳</button>`;
   if(P.status==="loading") return `<span class="pill" style="background:var(--wh-grey)">… loading</span>`;
-  if(P.status==="error") return `<span class="pill" style="background:var(--warn)" title="${esc(P.err||"")}">API error</span><button class="btn3d sm" data-action="projRefresh">⟳</button>`;
+  if(P.status==="error") return wmFeedPill("error",P.err,!!(P.list&&P.list.length),"projRefresh");
   return `<span class="pill" style="background:var(--wh-grey)">not connected</span><button class="btn3d sm" data-action="projRefresh">⟳ Try live</button>`;
 }
 async function loadProjectNotes(id){
