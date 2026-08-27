@@ -349,7 +349,12 @@ async function lookupService(recordId, token) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=120");
+  // A closed historical window (only=install over past years) never changes — cache it for an
+  // hour instead of 30s. The live board keeps its short window so the calendar stays current.
+  const histWin = req.query.only === "install" && req.query.to && String(req.query.to) < new Date().toISOString().slice(0, 10);
+  res.setHeader("Cache-Control", histWin
+    ? "s-maxage=3600, stale-while-revalidate=86400"
+    : "s-maxage=30, stale-while-revalidate=300");
   if (!hasCreds()) return res.status(200).json({ configured: false, ok: false, jobs: [] });
 
   // Single Service_Ticket editable-record lookup (Calendar/Coordinator service editor): ?svc=<recordId>

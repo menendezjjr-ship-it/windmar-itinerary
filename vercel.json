@@ -30,5 +30,8 @@
       "path": "/api/onsite-cron",
       "schedule": "*/3 * * * *"
     }
+  ],
+  "regions": [
+    "iad1"
   ]
 }

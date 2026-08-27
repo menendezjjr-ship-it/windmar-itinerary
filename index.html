@@ -3499,7 +3499,15 @@ async function loadInstallMap(){
     const to=new Date(), f=(d)=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
     // 2-year windows keep each Zoho query under its 2000-record pagination cap; merged for true all-time coverage.
     const yNow=to.getFullYear(), wins=[]; for(let y=yNow;y>=yNow-8;y-=2){ wins.push([(y-1)+"-01-01",(y===yNow?f(to):y+"-12-31")]); }
-    const results=await Promise.all(wins.map(([a,b])=>fetch("/api/zoho-jobs?from="+a+"&to="+b+"&only=install&t="+Date.now(),{cache:"no-store"}).then(r=>r.json()).catch(()=>({jobs:[]}))));
+    // These windows are historical completed installs — 2018-2024 does not change. The old code
+    // appended &t=Date.now() (a cache-buster) and fired all 5 windows at once, so every open of
+    // this tab cold-started 5 lambdas and minted 5 Zoho tokens for data that was already cached.
+    // No buster, and at most 2 in flight.
+    const results=[];
+    for(let i=0;i<wins.length;i+=2){
+      const batch=wins.slice(i,i+2).map(([a,b])=>fetch("/api/zoho-jobs?from="+a+"&to="+b+"&only=install").then(r=>r.json()).catch(()=>({jobs:[]})));
+      results.push(...await Promise.all(batch));
+    };
     const seen={}, items=[];
     results.forEach(j=>(j.jobs||[]).filter(x=>x.kind==="install"&&x.cat==="completed"&&x.address).forEach(x=>{ const k=x.num||x.id; if(seen[k])return; seen[k]=1; items.push({address:x.address,dlNumber:x.num,customerName:x.project,team:x.crewLabel,date:x.date,id:x.id,scope:x.scope}); }));
     items.sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))); // most-recent first

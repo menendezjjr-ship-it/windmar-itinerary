@@ -233,7 +233,8 @@ const FIELDS = [
 ].join(",");
 
 export default async function handler(req, res) {
-  res.setHeader("Cache-Control", "s-maxage=15, stale-while-revalidate=30");
+  // Pipeline stages move over hours, not seconds. 15s forced a lambda on nearly every poll.
+  res.setHeader("Cache-Control", "s-maxage=45, stale-while-revalidate=300");
   if (!hasCreds()) return res.status(200).json({ configured: false, ok: false, stages: STAGES, projects: [] });
   try {
     const token = await getAccessToken();

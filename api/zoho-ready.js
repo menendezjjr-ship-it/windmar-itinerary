@@ -348,7 +348,7 @@ function mapPreEngDeal(d) {
 export const config = { maxDuration: 30 };
 
 export default async function handler(req, res) {
-  res.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=120");
+  res.setHeader("Cache-Control", "s-maxage=30, stale-while-revalidate=300");
   if (!hasCreds()) return res.status(200).json({ configured: false, ok: false, jobs: [] });
 
   const todayISO = new Date().toISOString().slice(0, 10);
