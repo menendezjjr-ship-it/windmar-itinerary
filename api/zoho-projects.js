@@ -2,6 +2,7 @@
 // Pulls Zoho CRM Deals across the operational lifecycle (NTP → Post-Installation)
 // with full status, homeowner contact, system specs and a dated stage timeline.
 // Secrets live ONLY in env vars (ZOHO_CLIENT_ID/SECRET/REFRESH_TOKEN).
+import { rememberGood, failoverBody } from "./_lastgood.js";
 import { zohoFetch } from "./_zoho.js";
 
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
@@ -262,11 +263,15 @@ export default async function handler(req, res) {
     const byStage = {};
     STAGES.forEach((s) => (byStage[s] = 0));
     projects.forEach((p) => { if (byStage[p.stage] != null) byStage[p.stage]++; });
-    return res.status(200).json({
+    const payload = {
       configured: true, ok: true, updated: new Date().toISOString(),
       stages: STAGES, counts: { total: projects.length, byStage }, projects,
-    });
+    };
+    rememberGood("projects", payload);
+    return res.status(200).json(payload);
   } catch (e) {
-    return res.status(200).json({ configured: true, ok: false, error: String(e && e.message || e), stages: STAGES, projects: [] });
+    const fo = failoverBody("projects", e && e.message || e, { stages: STAGES, projects: [] });
+    res.setHeader("Cache-Control", fo.cache);
+    return res.status(200).json(fo.body);
   }
 }

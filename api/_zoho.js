@@ -27,7 +27,7 @@ let cachedToken = null, tokenExpiry = 0, inflight = null, lastMint = 0;
 // fleet can deadlock: the shared row is empty, so everyone mints, so nobody is ever allowed to
 // mint and write the one token that would end it.
 let mintBlockedUntil = 0;
-const MINT_BLOCK_MS = 60000;
+const MINT_BLOCK_MS = 90000;
 
 /* ── Shared token store (optional) ─────────────────────────────────────────────────────────
    Each Vercel API route is its OWN lambda with its own memory, so every cold start used to
@@ -92,10 +92,12 @@ async function sharedWrite(token, exp) {
     else { sharedLastErr = ""; sharedOK = true; }
   } catch (e) { /* the shared store is an optimisation; never fail a request over it */ }
 }
+// Raised from 10s/60s: with last-good failover in place a longer quiet period costs a reader
+// nothing (they still get data), while every avoided mint is real pressure off Zoho's limit.
 // A 401 storm (several routes waking at once) must not turn into a refresh storm. One forced
 // mint per instance per MIN_MINT_MS; inside that window a caller reuses the token we just got,
 // which is almost certainly the fresh one anyway.
-const MIN_MINT_MS = 10000;
+const MIN_MINT_MS = 30000;
 
 /** @param force  true = ignore the cache and mint a fresh token (use after a 401). */
 /**

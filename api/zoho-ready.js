@@ -13,6 +13,7 @@
 // Both are mapped to the SAME job shape /api/zoho-jobs emits so the client can reuse
 // jobType(), the Coordinator card, and coordDetailModal (editable Installation detail).
 // Self-contained (CommonJS-safe: only export default + global fetch — no import.meta).
+import { rememberGood, failoverBody } from "./_lastgood.js";
 
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
@@ -401,14 +402,18 @@ export default async function handler(req, res) {
     const preEngJobs = preEngDeals.map(mapPreEngDeal);
     jobs.push(...preEngJobs);
 
-    return res.status(200).json({
+    const payload = {
       configured: true,
       ok: true,
       updated: new Date().toISOString(),
       counts: { installs: instJobs.length, services: svcJobs.length, coordination: coordJobs.length, preeng: preEngJobs.length, jobs: jobs.length, filteredStale },
       jobs,
-    });
+    };
+    rememberGood("ready", payload);
+    return res.status(200).json(payload);
   } catch (e) {
-    return res.status(200).json({ configured: true, ok: false, error: String(e && e.message || e), jobs: [] });
+    const fo = failoverBody("ready", e && e.message || e, { jobs: [] });
+    res.setHeader("Cache-Control", fo.cache);
+    return res.status(200).json(fo.body);
   }
 }

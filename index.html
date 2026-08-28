@@ -697,7 +697,9 @@ async function loadOpsCal(silent){
     // DL / RDL / S. Filtered client-side on purpose: the Zoho feed is shared with the Field
     // HUB, and stripping RL server-side would empty the Windmar Roofing crew's own calendar.
     if(j&&j.ok&&Array.isArray(j.jobs)){ S.cal.records=dedupCalRecs(j.jobs.map(calRec)).filter(x=>String(x.code||"").toUpperCase()!=="RL"); S.cal.status="live"; }
-    else if(j&&j.configured){ S.cal.records=[]; S.cal.status="error"; S.cal.err=j.error||"error"; }
+    // A transient Zoho blip must NOT wipe the board — keep the last-good records on screen and
+    // let the view render a calm "Reconnecting…" note over them (see WM_TRANSIENT_RX/wmFeedPill).
+    else if(j&&j.configured){ if(!WM_TRANSIENT_RX.test(String(j.error||""))) S.cal.records=[]; S.cal.status="error"; S.cal.err=j.error||"error"; }
     else { S.cal.records=[]; S.cal.status="unconfigured"; }
   }catch(e){ S.cal.records=[]; S.cal.status="error"; S.cal.err=String(e); }
   if(!silent || S.tab==="calendar" || (S.tab==="itinerary"&&S.itinView==="brigada")) render(silent);
@@ -958,7 +960,16 @@ function opsCalHTML(){
     !c._mapItems.length ? `<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">${es2?"Sin trabajos para "+mapScopeLbl:"No jobs for "+mapScopeLbl}</div>`
     : mpm.status==="ready" ? `<div class="card" style="border-radius:12px;overflow:hidden"><div id="calPinMap" style="height:560px"></div></div><div style="font-size:11.5px;color:var(--text-dim);margin-top:6px">${(mpm.pins||[]).length} ${es2?"de":"of"} ${c._mapItems.length} ${es2?"trabajos ubicados ("+mapScopeLbl+") · pin por cuadrilla · 🔧=servicio":"jobs mapped ("+mapScopeLbl+") · pinned by crew · 🔧=service"}</div>`
     : `<div class="card" style="padding:44px;text-align:center;color:var(--text-dim)"><div style="font-size:26px;margin-bottom:8px">🗺</div>${es2?"Ubicando trabajos":"Locating jobs"} ${mpm.total?((mpm.done||0)+"/"+mpm.total):"…"}<div style="font-size:11px;margin-top:6px">${es2?"(en caché — la próxima vez es instantáneo)":"(cached — instant next time)"}</div></div>`);
-  const view=c.status==="loading"?`<div style="text-align:center;padding:50px;color:var(--text-dim)">⟳ ${S.lang==='es'?'Cargando…':'Loading…'}</div>`:c.status==="error"?`<div class="card" style="padding:18px;color:var(--warn)">API error: ${esc(c.err||"")}</div>`:c.view==="month"?monthGrid:c.view==="week"?weekView:c.view==="grid"?gridView:c.view==="map"?mapView:listView;
+  const _calBody=c.view==="month"?monthGrid:c.view==="week"?weekView:c.view==="grid"?gridView:c.view==="map"?mapView:listView;
+  // A Zoho token/rate-limit blip clears itself in under a minute. Never paint a red "API error"
+  // over a board that still has good jobs on it — a calm amber note (wmFeedPill) and the data stay.
+  const _calTr=c.status==="error"&&WM_TRANSIENT_RX.test(String(c.err||""));
+  const _calHasRecs=!!(c.records&&c.records.length);
+  const _calNote=`<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:12px;padding:9px 13px;border-radius:11px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.45);font-size:12.5px;color:var(--text-dim)">${wmFeedPill("error",c.err,_calHasRecs,"calRefresh")}<span>${_calHasRecs?(S.lang==='es'?"Mostrando los últimos datos recibidos.":"Showing the last data received."):(S.lang==='es'?"Reconectando con Zoho — un momento.":"Reconnecting to Zoho — one moment.")}</span></div>`;
+  const view=c.status==="loading"?`<div style="text-align:center;padding:50px;color:var(--text-dim)">⟳ ${S.lang==='es'?'Cargando…':'Loading…'}</div>`
+    :_calTr?(_calHasRecs?_calNote+_calBody:_calNote)
+    :c.status==="error"?`<div class="card" style="padding:18px;color:var(--warn)">API error: ${esc(c.err||"")}</div>`
+    :_calBody;
   const navLabel=(c.view==="week"||c.view==="grid"||c.view==="map")?(M[ws.getMonth()].slice(0,3)+" "+ws.getDate()+" - "+(ws.getMonth()!==we.getMonth()?M[we.getMonth()].slice(0,3)+" ":"")+we.getDate()+", "+we.getFullYear()):(M[c.m-1]+" "+c.y);
   const dayModal=c.dayPanel!=null?calModal((function(){const recs=byDate[c.dayPanel]||[];return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><h3 style="margin:0;font-size:18px;font-weight:700">${M[c.m-1]} ${c.dayPanel}, ${c.y} <span style="color:var(--text-dim);font-weight:500;font-size:14px">· ${recs.length} ${recs.length!==1?'jobs':'job'}</span></h3><button class="btn3d grey sm" data-action="calClose">✕</button></div><div style="display:flex;flex-direction:column;gap:8px">${recs.map(r=>calRow(r,r.startDate!==c.dayPanel)).join("")}</div>`;})()):"";
   const selModal=c.selected?(function(){const r=c.records.find(x=>x.id===c.selected);if(!r)return "";const editingInst=r.type!=="service"&&!!(S.coord.edit&&S.coord.edit.dl===String(r.dlNumber||"").toUpperCase().replace(/\s+/g,""));const editingSvc=r.type==="service"&&!!(S.svc.edit&&S.svc.edit.rid===String(r.recordId||"").replace(/[^0-9]/g,""));return calModal(calDetailHTML(r),editingInst||editingSvc);})():"";
@@ -1122,7 +1133,7 @@ async function loadProjects(silent,fresh){
     if(j&&j.configured&&j.ok&&Array.isArray(j.projects)){
       S.proj.status="live"; S.proj.ok=true; S.proj.list=(j.projects||[]).filter(p=>!/^RL\d/i.test(String(p.num||""))); S.proj.updated=j.updated; // exclude roofing-only (RL); RDL keeps solar
       notifyProjects(j.projects);
-    } else if(j&&j.configured){ S.proj.status="error"; S.proj.ok=false; S.proj.list=[]; S.proj.err=j.error||"error"; }
+    } else if(j&&j.configured){ S.proj.status="error"; S.proj.ok=false; if(!WM_TRANSIENT_RX.test(String(j.error||""))) S.proj.list=[]; S.proj.err=j.error||"error"; } // transient → keep the last-good pipeline on screen
     else { S.proj.status="unconfigured"; S.proj.ok=false; S.proj.list=[]; }
   }catch(e){ S.proj.status="error"; S.proj.ok=false; S.proj.err=String(e); }
   // "coordinator" is in this list because that tab renders project-derived data too
@@ -1747,7 +1758,8 @@ function loadCoordReady(silent){
   const R=S.coord.ready;
   if(!silent && (R.status==="idle"||R.status==="error")) { S.coord.ready={status:"loading",list:R.list||[],err:""}; if(S.tab==="coordinator") render(); }
   wmApiJson("/api/zoho-ready").then(j=>{
-    S.coord.ready=(j&&j.ok&&Array.isArray(j.jobs))?{status:"live",list:j.jobs,err:""}:{status:"error",list:[],err:(j&&j.error)||"error"};
+    const _rerr=(j&&j.error)||"error"; // transient → keep the last-good ready list rather than blanking the tab
+    S.coord.ready=(j&&j.ok&&Array.isArray(j.jobs))?{status:"live",list:j.jobs,err:""}:{status:"error",list:(WM_TRANSIENT_RX.test(String(_rerr))?(R.list||[]):[]),err:_rerr};
     if(S.tab==="coordinator") render(true);
   }).catch(e=>{ S.coord.ready={status:"error",list:[],err:String(e)}; if(S.tab==="coordinator") render(true); });
 }
@@ -1984,6 +1996,10 @@ function coordinatorHTML(){
   });
   const loading=(P.status==="loading"&&!P.list.length)||(R.status==="loading"&&!R.list.length)||R.status==="idle";
   const errored=P.status==="error"&&R.status==="error";
+  // Transient Zoho blip: never a red card. With rows on screen it is a small amber note above them;
+  // with nothing loaded yet it is a calm "Reconnecting…" state that keeps its ⟳ retry.
+  const _coordErr=String(R.err||P.err||"");
+  const _coordTr=errored&&WM_TRANSIENT_RX.test(_coordErr);
   const head=`<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:4px">
     <div><div style="font-weight:900;font-size:22px">🗒 ${es?"Coordinador":"Coordinator"}</div>
       <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Toca un número para ver solo ese trabajo. Toca un trabajo para ver todo + notas.":"Tap a number to see only that work. Tap a job for full details + notes."}</div></div>
@@ -2005,6 +2021,7 @@ function coordinatorHTML(){
   // confident-looking list. Say so instead.
   const feedWarn=(dispFeeds().svcOK&&dispFeeds().inspOK)?"":`<div class="card" style="padding:10px 14px;margin-bottom:10px;border-left:5px solid #F59E0B;background:rgba(245,158,11,.08);font-size:12.5px">⚠ ${es?"Una de las fuentes no cargó — esta lista está incompleta.":"One of the data feeds didn't load — this list is incomplete."}</div>`;
   if(loading&&!total) body=`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">⟳ ${es?"Cargando…":"Loading…"}</div>`;
+  else if(errored&&!total&&_coordTr) body=`<div class="card" style="padding:18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--text-dim)">${wmFeedPill("error",_coordErr,false,"coordRefresh")}<span>${es?"Reconectando con Zoho — un momento.":"Reconnecting to Zoho — one moment."}</span></div>`
   else if(errored&&!total) body=`<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudo cargar.":"Couldn't load."} ${esc(R.err||P.err||"")}</div>`;
   else if(!items.length) body=feedWarn+`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">${q?(es?"Sin coincidencias":"No matches"):(es?"Nada listo para programar 🎉":"Nothing ready to schedule 🎉")}</div>`;
   else {
@@ -2045,7 +2062,9 @@ function coordinatorHTML(){
   const dispN=dispReady?dispatchItems().length:0;
   const dispToggle=`<div style="margin:8px 0 4px"><button class="btn3d ${S.dispatch.open?'':'ghost'} sm" data-action="dispatchToggle" style="${S.dispatch.open?'background:#0EA5E9':''}">🗺 ${es?'Programar Cuadrilla Más Cercana':'Schedule Nearest Crew'} ${dispReady?(dispN+((dispFeed.svcOK&&dispFeed.inspOK)?'':' ⚠')):'—'}</button></div>`;
   const dispPanel=!S.dispatch.open?"":(dispReady?dispatchHTML():`<div class="card" style="padding:22px;text-align:center;color:var(--text-dim)">${(dispFeed.svcLoading||dispFeed.inspLoading)?("⟳ "+(es?"Cargando…":"Loading…")):("⚠ "+(es?"No se pudo cargar la lista — reintenta en un momento.":"Couldn't load the list — try again in a moment."))}</div>`);
-  return `<div class="fade">${head}${dispToggle}${dispPanel}${body}${C.selected?coordDetailModal():""}</div>`;
+  // Rows are on screen but the feed just blipped → say it quietly, above the data, and keep the data.
+  const coordTrNote=(_coordTr&&total)?`<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:10px;padding:9px 13px;border-radius:11px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.45);font-size:12.5px;color:var(--text-dim)">${wmFeedPill("error",_coordErr,true,"coordRefresh")}<span>${es?"Mostrando los últimos datos recibidos.":"Showing the last data received."}</span></div>`:"";
+  return `<div class="fade">${head}${dispToggle}${dispPanel}${coordTrNote}${body}${C.selected?coordDetailModal():""}</div>`;
 }
 // One report section: a clickable collapsible header row (caret + icon + name + count) over compact one-line rows.
 function coordSectionHTML(bucket,items,searching){ const m=coordBucketMeta(bucket); const es=S.lang==="es";
@@ -2591,7 +2610,11 @@ function projectsHTML(){
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">${projPill()}${alertsBtn}</div></div>
   <div style="margin:12px 0"><input id="projSearch" placeholder="${ptr("search")}" value="${esc(P.q||"")}" style="width:100%;max-width:420px;padding:10px 14px;border-radius:12px;border:1px solid var(--line);background:var(--bg-2);color:var(--text);font-size:14px"/></div>
   <div class="chipbar" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:8px;margin-bottom:4px">${chips}</div>`;
-  const body=(P.status==="error")?`<div class="card" style="padding:18px;color:var(--warn)">API error: ${esc(P.err||"")}</div>`
+  // Transient Zoho blip → the header pill (projPill) already says "Reconnecting…"; the list itself
+  // must keep rendering. Only a genuine failure gets the red card with its raw text.
+  const _projTr=P.status==="error"&&WM_TRANSIENT_RX.test(String(P.err||""));
+  const body=(P.status==="error"&&!_projTr)?`<div class="card" style="padding:18px;color:var(--warn)">API error: ${esc(P.err||"")}</div>`
+    :(_projTr&&!(P.list&&P.list.length))?`<div class="card" style="padding:18px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:13px;color:var(--text-dim)">${wmFeedPill("error",P.err,false,"projRefresh")}<span>${S.lang==='es'?"Reconectando con Zoho — un momento.":"Reconnecting to Zoho — one moment."}</span></div>`
     :(!P.ok&&P.status==="unconfigured")?`<div class="card" style="padding:18px;color:var(--text-dim)">Not connected to Zoho yet — add credentials to go live.</div>`
     :(P.status==="loading"&&!P.list.length)?`<div class="card" style="padding:18px;color:var(--text-dim)">Loading…</div>`
     :(sel?projectDetailHTML(sel):"")+groups;
@@ -2669,6 +2692,9 @@ function snapshotHTML(){
 }
 function brigadaHTML(){
   const c=S.cal, live=c.status==="live", d=c.data;
+  // Shared S.cal.status: a Zoho token/rate-limit blip can land here too. Calm amber, never red,
+  // and never the raw internal message.
+  const _bTr=c.status==="error"&&WM_TRANSIENT_RX.test(String(c.err||""));
   const mObj=new Date(c.month+"T00:00:00");
   const monthLabel=I18N[S.lang].months[mObj.getMonth()]+" "+mObj.getFullYear();
   const head=`<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px">
@@ -2681,13 +2707,14 @@ function brigadaHTML(){
       <button class="btn3d ${c.view==='service'?'':'ghost'} sm" data-action="calView" data-id="service">Service</button>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
-      <span class="pill" style="background:${live?'var(--jc-DL)':c.status==='error'?'var(--warn)':'var(--wh-grey)'}">${live?'● LIVE':c.status==='loading'?'…':c.status==='error'?'API ERROR':'not connected'}</span>
+      <span class="pill" style="background:${live?'var(--jc-DL)':_bTr?'#F59E0B':c.status==='error'?'var(--warn)':'var(--wh-grey)'}${_bTr?';color:#1a1a1a':''}">${live?'● LIVE':c.status==='loading'?'…':_bTr?(S.lang==='es'?'RECONECTANDO…':'RECONNECTING…'):c.status==='error'?'API ERROR':'not connected'}</span>
       ${d&&d.updated?`<span style="font-size:11px;color:var(--text-dim)">updated ${new Date(d.updated).toLocaleTimeString()}</span>`:""}
       <button class="btn3d sm" data-action="calRefresh">⟳</button>
     </div></div>`;
   if(c.status==="unconfigured"||c.status==="idle"){ return snapshotHTML(); }
-  if(c.status==="error") return head+`<div class="card" style="padding:18px;color:var(--warn)">Couldn’t load the calendar (${esc(c.err||'auth/login')}). Check WP_USER / WP_APP_PASSWORD.</div>`;
-  if(!d) return head+`<div class="card" style="padding:18px;color:var(--text-dim)">Loading…</div>`;
+  if(c.status==="error"&&!_bTr) return head+`<div class="card" style="padding:18px;color:var(--warn)">Couldn’t load the calendar (${esc(c.err||'auth/login')}). Check WP_USER / WP_APP_PASSWORD.</div>`;
+  const _bNote=_bTr?`<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:12px;padding:9px 13px;border-radius:11px;background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.45);font-size:12.5px;color:var(--text-dim)">${wmFeedPill("error",c.err,!!d,"calRefresh")}<span>${d?(S.lang==='es'?"Mostrando los últimos datos recibidos.":"Showing the last data received."):(S.lang==='es'?"Reconectando — un momento.":"Reconnecting — one moment.")}</span></div>`:"";
+  if(!d) return head+_bNote+(_bTr?"":`<div class="card" style="padding:18px;color:var(--text-dim)">Loading…</div>`);
   const tot=d.totals||{install:{},service:{}};
   const kpi=(label,o,color)=>`<div class="card" style="padding:12px 14px;min-width:160px">
     <div class="label" style="margin:0">${label}</div>
@@ -2703,7 +2730,7 @@ function brigadaHTML(){
     return `<tr><td style="position:sticky;left:0;background:var(--panel);padding:8px 10px;font-weight:700;font-size:12.5px;border-right:1px solid var(--line);z-index:1">${esc(b.name)} <span style="color:var(--text-dim);font-weight:600">(${b.jobCount})</span></td>${cells}</tr>`;
   }).join("");
   const grid=`<div class="card scroll" style="padding:0;overflow:auto;max-height:62vh"><table style="border-collapse:collapse;width:100%">${headRow}${bodyRows}</table></div>`;
-  return head+totals+grid;
+  return head+_bNote+totals+grid;
 }
 
 /* ---------- TAB: ITINERARY ---------- */
@@ -2959,7 +2986,8 @@ async function loadSiteCapture(q,silent,_try){
   }catch(e){ S.sc.scState="sample"; }
   // Transient upstream hiccup → retry up to 2x (short backoff) before showing sample/error.
   if(!good && _try<2){ await new Promise(r=>setTimeout(r,700*(_try+1))); return loadSiteCapture(q,silent,_try+1); }
-  if(!good) S.sc.results=[];
+  // A transient upstream blip keeps the last-good project list on screen (banner says "Reconnecting…").
+  if(!good && !(S.sc.scState==="error" && WM_TRANSIENT_RX.test(String(S.sc.err||"")))) S.sc.results=[];
   if(!silent || S.tab==="sitecapture") render(silent);
 }
 async function loadSCTemplates(){

@@ -8,6 +8,7 @@
 //   (optional) ZOHO_ACCOUNTS_HOST   default https://accounts.zoho.com
 //   (optional) ZOHO_API_DOMAIN      default https://www.zohoapis.com
 //   (optional) ZOHO_API_VERSION     default v8   (v2 rejects between: on dates)
+import { rememberGood, failoverBody } from "./_lastgood.js";
 import { zohoFetch } from "./_zoho.js";
 
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
@@ -351,6 +352,7 @@ async function lookupService(recordId, token) {
 export default async function handler(req, res) {
   // A closed historical window (only=install over past years) never changes — cache it for an
   // hour instead of 30s. The live board keeps its short window so the calendar stays current.
+  const lgKey = "jobs:" + JSON.stringify(req.query || {});
   const histWin = req.query.only === "install" && req.query.to && String(req.query.to) < new Date().toISOString().slice(0, 10);
   res.setHeader("Cache-Control", histWin
     ? "s-maxage=3600, stale-while-revalidate=86400"
@@ -404,15 +406,21 @@ export default async function handler(req, res) {
       ...services.flatMap((r) => expandServiceVisits(r, todayISO)).filter((j) => j.date && j.date >= from && j.date <= to),
     ].filter((j) => j.date);
 
-    return res.status(200).json({
+    const payload = {
       configured: true,
       ok: true,
       updated: new Date().toISOString(),
       range: { from, to },
       counts: { installs: installs.length, services: services.length, jobs: jobs.length },
       jobs,
-    });
+    };
+    rememberGood(lgKey, payload);            // so a later Zoho blip serves this instead of an error
+    return res.status(200).json(payload);
   } catch (e) {
-    return res.status(200).json({ configured: true, ok: false, error: String(e && e.message || e), jobs: [] });
+    // A failure must NEVER be cached at the edge — that is what served one lambda's error to
+    // every user for 30 seconds. Serve the previous good payload when we have one.
+    const fo = failoverBody(lgKey, e && e.message || e, { jobs: [] });
+    res.setHeader("Cache-Control", fo.cache);
+    return res.status(200).json(fo.body);
   }
 }
