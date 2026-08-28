@@ -1770,9 +1770,10 @@ function loadCoordNotes(dl,force){ const key=String(dl||"").toUpperCase().replac
   S.coord.notes[key]={status:"loading",text:(cur&&cur.text)||"",recordId:(cur&&cur.recordId)||"",rec:(cur&&cur.rec)||null};
   const refreshTip=()=>{ const tp=document.getElementById("wmjtip"); if(tp&&tp.style.display==="block"&&tp._ctip===key) tp.innerHTML=coordTipHTML(dl); };
   fetch("/api/zoho-jobs?dl="+encodeURIComponent(dl),{cache:"no-store"}).then(r=>r.json()).then(j=>{
-    S.coord.notes[key]=(j&&j.ok)?{status:"live",text:j.installNotes||"",recordId:j.recordId||"",rec:j.rec||null}:{status:"error",text:"",recordId:"",rec:null};
+    // Keep the error text: the detail panel needs it to tell a transient Zoho blip from a real failure.
+    S.coord.notes[key]=(j&&j.ok)?{status:"live",text:j.installNotes||"",recordId:j.recordId||"",rec:j.rec||null}:{status:"error",text:"",recordId:"",rec:null,err:(j&&j.error)||"error"};
     refreshTip(); if(["coordinator","calendar","projects"].includes(S.tab)) render(true);
-  }).catch(()=>{ S.coord.notes[key]={status:"error",text:"",recordId:"",rec:null}; refreshTip(); if(["coordinator","calendar","projects"].includes(S.tab)) render(true); });
+  }).catch(e=>{ S.coord.notes[key]={status:"error",text:"",recordId:"",rec:null,err:String(e)}; refreshTip(); if(["coordinator","calendar","projects"].includes(S.tab)) render(true); });
 }
 // Populate the per-DL install cache SYNCHRONOUSLY from a feed-embedded editable record (installRec) —
 // no per-open /api/zoho-jobs?dl= fetch, so no Zoho token refresh (avoids the shared-token rate limit).
@@ -1815,7 +1816,9 @@ function serviceNotesHTML(recordId){
   const rid=String(recordId||"").replace(/[^0-9]/g,""); if(!rid) return "";
   const es=S.lang==="es", n=S.svc.notes[rid];
   if(!n||n.status==="loading") return `<div style="font-size:12px;color:var(--text-dim);margin-top:8px">⟳ ${es?"Cargando notas…":"Loading notes…"}</div>`;
-  if(n.status==="error") return `<div style="font-size:12px;color:var(--warn);margin-top:8px">${es?"No se pudieron cargar las notas.":"Couldn't load notes."}</div>`;
+  if(n.status==="error") return WM_TRANSIENT_RX.test(String(n.err||""))
+    ? `<div style="font-size:12px;color:#B45309;margin-top:8px">⟳ ${es?"Reconectando con Zoho — las notas cargarán en un momento.":"Reconnecting to Zoho — notes will load in a moment."}</div>`
+    : `<div style="font-size:12px;color:var(--warn);margin-top:8px">${es?"No se pudieron cargar las notas.":"Couldn't load notes."}</div>`;
   if(!n.list.length) return `<div style="font-size:12px;color:var(--text-dim);margin-top:8px">${es?"Sin notas en este ticket todavía.":"No notes on this ticket yet."}</div>`;
   return `<div style="margin-top:10px"><div style="font-size:10px;font-weight:900;letter-spacing:.05em;text-transform:uppercase;color:var(--text-dim);margin-bottom:5px">📒 ${es?"Notas del ticket":"Ticket notes"} (${n.list.length})</div>`
     +n.list.slice(0,25).map(function(x){
@@ -1830,9 +1833,10 @@ function loadServiceRec(recordId,force){ const rid=String(recordId||"").replace(
   const cur=S.svc.rec[rid]; if(!force&&cur&&(cur.status==="loading"||cur.status==="live")) return;
   S.svc.rec[rid]={status:"loading",rec:(cur&&cur.rec)||null,module:"Service_Ticket"};
   fetch("/api/zoho-jobs?svc="+encodeURIComponent(rid),{cache:"no-store"}).then(r=>r.json()).then(j=>{
-    S.svc.rec[rid]=(j&&j.ok)?{status:"live",rec:j.rec||null,module:j.module||"Service_Ticket"}:{status:"error",rec:null,module:"Service_Ticket"};
+    // err kept so the editor can tell a transient Zoho blip from a real failure.
+    S.svc.rec[rid]=(j&&j.ok)?{status:"live",rec:j.rec||null,module:j.module||"Service_Ticket"}:{status:"error",rec:null,module:"Service_Ticket",err:(j&&j.error)||"error"};
     if(["coordinator","calendar"].includes(S.tab)) render(true);
-  }).catch(()=>{ S.svc.rec[rid]={status:"error",rec:null,module:"Service_Ticket"}; if(["coordinator","calendar"].includes(S.tab)) render(true); });
+  }).catch(e=>{ S.svc.rec[rid]={status:"error",rec:null,module:"Service_Ticket",err:String(e)}; if(["coordinator","calendar"].includes(S.tab)) render(true); });
 }
 // Service_Ticket field metadata (Ticket_Status/Priority picklists discovered live). Loaded once.
 function loadServiceFields(){ const F=S.svc.fields; if(F.status==="loading"||F.status==="live") return;
@@ -2343,13 +2347,19 @@ function installEditorParts(dlKey){
   const E=S.coord.edit;
   let recBlock="",fieldsLoading="",editBanner="",savedFlash="",actionsRO="",actionsEdit="",noteBox="";
   if(nc.status==="loading"||nc.status==="idle") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">⟳ ${es?"Cargando registro de instalación…":"Loading installation record…"}</div>`;
-  else if(nc.status==="error") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--warn)">${es?"No se pudo cargar el registro.":"Couldn't load the record."}</div>`;
+  else if(nc.status==="error") recBlock=WM_TRANSIENT_RX.test(String(nc.err||""))
+    ? `<div style="margin-top:14px;font-size:12.5px;color:#B45309">⟳ ${es?"Reconectando con Zoho — el registro cargará en un momento.":"Reconnecting to Zoho — the record will load in a moment."}</div>`
+    : `<div style="margin-top:14px;font-size:12.5px;color:var(--warn)">${es?"No se pudo cargar el registro.":"Couldn't load the record."}</div>`;
   else if(!rec||!nc.recordId) recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">${es?"No se encontró un registro de instalación editable para este DL.":"No editable Installation record found for this DL."}</div>`;
   else recBlock=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px">
       ${coordGroupHTML((es?"🗓 Información de Programación":"🗓 Schedule Information"),"sched",rec,editing)}
       ${coordGroupHTML((es?"📝 Notas":"📝 Notes"),"notes",rec,editing)}
       ${coordGroupHTML((es?"⚙️ Otros":"⚙️ Other"),"other",rec,editing)}</div>`;
-  editBanner=editing&&E&&E.err?`<div style="grid-column:1/-1;margin-top:10px;background:rgba(239,68,68,.12);border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--warn)">⚠ ${esc(E.err)}</div>`:"";
+  // A save that failed on a token blip is not a red error — it just needs one more tap. The raw
+  // internal message is never shown; only a genuine failure keeps its text.
+  editBanner=editing&&E&&E.err?(WM_TRANSIENT_RX.test(String(E.err))
+    ?`<div style="grid-column:1/-1;margin-top:10px;background:rgba(245,158,11,.12);border:1px solid #F59E0B;border-radius:9px;padding:9px 12px;font-size:12.5px;color:#B45309">⟳ ${es?"Zoho se está reconectando — no se guardó nada. Intenta de nuevo en un momento.":"Zoho is reconnecting — nothing was saved. Try again in a moment."}</div>`
+    :`<div style="grid-column:1/-1;margin-top:10px;background:rgba(239,68,68,.12);border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--warn)">⚠ ${esc(E.err)}</div>`):"";
   savedFlash=(!editing&&S.coord.savedMsg&&S.coord.savedMsg.dl===dlKey)?`<div style="margin-top:12px;background:rgba(34,197,94,.12);border:1px solid var(--ok);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--ok)">✓ ${es?"Guardado en Zoho":"Saved to Zoho"} (${S.coord.savedMsg.n} ${es?"campo(s)":"field(s)"})</div>`:"";
   const canEdit=nc.status==="live"&&nc.recordId&&rec&&!window.WM_VIEWER; // viewers are view-only → no Edit button
   actionsRO=canEdit?`<button class="btn3d sm" data-action="coordEditStart" style="background:#0EA5E9">✏️ ${es?"Editar":"Edit"}</button>`:"";
@@ -2373,7 +2383,9 @@ function noteBoxHTML(module,recordId){ if(window.WM_VIEWER) return ""; // viewer
       <button class="btn3d blue sm" data-action="noteAdd" data-module="${esc(module)}" data-rid="${esc(recordId)}" ${N.sending?"disabled":""}>${N.sending?"⟳ "+(es?"Agregando…":"Adding…"):"➕ "+(es?"Agregar":"Add")}</button>
       ${N.sending&&N.prog?`<span style="font-size:12.5px;color:var(--text-dim)">${esc(N.prog)}</span>`:""}
       ${okThis?`<span style="font-size:12.5px;color:var(--ok)">✓ ${esc(N.prog||(es?"Nota agregada":"Note added to Zoho"))}</span>`:""}
-      ${N.err?`<span style="font-size:12.5px;color:var(--warn)">⚠ ${esc(N.err)}</span>`:""}
+      ${N.err?(WM_TRANSIENT_RX.test(String(N.err))
+        ?`<span style="font-size:12.5px;color:#B45309">⟳ ${es?"Zoho se está reconectando — la nota no se guardó. Intenta de nuevo en un momento.":"Zoho is reconnecting — the note wasn't saved. Try again in a moment."}</span>`
+        :`<span style="font-size:12.5px;color:var(--warn)">⚠ ${esc(N.err)}</span>`):""}
     </div></div>`;
 }
 // Live label for the photo picker (updates without a re-render so the file selection survives).
@@ -2432,10 +2444,16 @@ function serviceEditorParts(recordId,visitN,visitField){ const es=S.lang==="es",
   const flds=vN>1?SERVICE_EDIT_FIELDS.map(fd=>fd.dt?{k:vF,en:"Scheduled Visit "+vN,es:"Visita Programada "+vN,dt:1,ro:1}:fd):SERVICE_EDIT_FIELDS;
   let recBlock="",fieldsLoading="",editBanner="",savedFlash="",actionsRO="",actionsEdit="",noteBox="";
   if(rc.status==="loading"||rc.status==="idle") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">⟳ ${es?"Cargando ticket de servicio…":"Loading service ticket…"}</div>`;
-  else if(rc.status==="error") recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--warn)">${es?"No se pudo cargar el ticket.":"Couldn't load the ticket."}</div>`;
+  else if(rc.status==="error") recBlock=WM_TRANSIENT_RX.test(String(rc.err||""))
+    ? `<div style="margin-top:14px;font-size:12.5px;color:#B45309">⟳ ${es?"Reconectando con Zoho — el ticket cargará en un momento.":"Reconnecting to Zoho — the ticket will load in a moment."}</div>`
+    : `<div style="margin-top:14px;font-size:12.5px;color:var(--warn)">${es?"No se pudo cargar el ticket.":"Couldn't load the ticket."}</div>`;
   else if(!rec) recBlock=`<div style="margin-top:14px;font-size:12.5px;color:var(--text-dim)">${es?"No se encontró un ticket editable.":"No editable ticket found."}</div>`;
   else recBlock=`<div style="grid-column:1/-1;margin-top:8px"><div style="font-size:11px;font-weight:800;color:var(--text-dim);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">🔧 ${es?"Editar Ticket de Servicio (Zoho)":"Edit Service Ticket (Zoho)"}${vN>1?` · ${es?"Visita":"Visit"} ${vN}`:""}</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px">${flds.map(fd=>svcFieldCell(fd,rec,editing)).join("")}</div></div>`;
-  editBanner=editing&&E&&E.err?`<div style="grid-column:1/-1;margin-top:10px;background:rgba(239,68,68,.12);border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--warn)">⚠ ${esc(E.err)}</div>`:"";
+  // A save that failed on a token blip is not a red error — it just needs one more tap. The raw
+  // internal message is never shown; only a genuine failure keeps its text.
+  editBanner=editing&&E&&E.err?(WM_TRANSIENT_RX.test(String(E.err))
+    ?`<div style="grid-column:1/-1;margin-top:10px;background:rgba(245,158,11,.12);border:1px solid #F59E0B;border-radius:9px;padding:9px 12px;font-size:12.5px;color:#B45309">⟳ ${es?"Zoho se está reconectando — no se guardó nada. Intenta de nuevo en un momento.":"Zoho is reconnecting — nothing was saved. Try again in a moment."}</div>`
+    :`<div style="grid-column:1/-1;margin-top:10px;background:rgba(239,68,68,.12);border:1px solid var(--warn);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--warn)">⚠ ${esc(E.err)}</div>`):"";
   savedFlash=(!editing&&S.svc.savedMsg&&S.svc.savedMsg.rid===rid)?`<div style="margin-top:12px;background:rgba(34,197,94,.12);border:1px solid var(--ok);border-radius:9px;padding:9px 12px;font-size:12.5px;color:var(--ok)">✓ ${es?"Guardado en Zoho":"Saved to Zoho"} (${S.svc.savedMsg.n} ${es?"campo(s)":"field(s)"})</div>`:"";
   const canUpd=S.svc.scope.status==="live"?S.svc.scope.canUpdate:true; // optimistic until probe returns; save still fails-safe
   const canEdit=rc.status==="live"&&rec&&canUpd&&!window.WM_VIEWER; // viewers are view-only → no Edit button
@@ -3236,7 +3254,7 @@ function siteCaptureHTML(){
     ${live?`<span class="pill" style="background:var(--jc-DL)">${S.sc.results.length}+ ${t("sc_projects")}</span>`:""}
     ${(live&&S.sc.searchOk)?`<span class="pill" style="background:var(--jc-DL)">🔎 ${S.lang==='es'?'Búsqueda activa':'Live search'}</span>`:""}
     ${(live&&!S.sc.searchOk)?`<span class="pill" style="background:var(--warn)" title="${S.lang==='es'?'Agrega SITECAPTURE_USER + SITECAPTURE_PASS en Vercel':'Add SITECAPTURE_USER + SITECAPTURE_PASS in Vercel'}">⚠ ${S.lang==='es'?'Solo navegación — búsqueda/creación requieren login':'Browse only — search & create need a SiteCapture login'}</span>`:""}
-    ${S.sc.scState==="error"?`<span class="pill" style="background:var(--warn)">API error</span>`:""}</div>`;
+    ${S.sc.scState==="error"?wmFeedPill("error",S.sc.err,!!(S.sc.results&&S.sc.results.length),"scRefresh"):""}</div>`;
   // Templates load live from SiteCapture (real, portal-valid keys), grouped into friendly categories.
   const SCT=S.sc.scTemplates||[];
   const SC_CATS=[
@@ -3924,6 +3942,7 @@ document.addEventListener("click",e=>{
     case "zohoToggleCode": S.zoho.showCode=!S.zoho.showCode; render(); break;
     case "wxRefresh": loadWeather(); break;
     case "scSelectProject": S.sc.project=id; S.sc.done=false; render(); break;
+    case "scRefresh": loadSiteCapture((S.sc.q||"").trim()); break;
     case "scLiveSearch": { const inp=document.getElementById("scSearch"); S.sc.q=inp?inp.value:""; loadSiteCapture(S.sc.q.trim()); break; }
     case "recRefresh": loadCrewRecords(); break;
     case "revlogToggle": S.crewRec.revlogOpen=!S.crewRec.revlogOpen; render(); break;
