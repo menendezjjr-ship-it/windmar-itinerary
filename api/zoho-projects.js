@@ -79,7 +79,7 @@ function canonTeam(raw) {
   const n = s.toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
   if (/elite crew #?3|in ?house #?3|william sierra|luis vargas/.test(n)) return "Elite Crew #3";
   if (/elite crew #?2|in ?house #?2|tailor herrera|maykel pimentel/.test(n)) return "Elite Crew #2";
-  if (/crew #?1s|leonardo torres/.test(n)) return "Crew #1S";
+  if (/crew #?1s|george rivera|leonardo torres/.test(n)) return "Crew #1S"; // George Rivera took over Crew #1S (Sept 2026); keep Leonardo for historical rows
   if (/crew #?2s|david radke/.test(n)) return "Crew #2S";
   if (/crew #?3s|luis morales/.test(n)) return "Crew #3S";
   if (/crew h|holi/.test(n)) return "Crew H";

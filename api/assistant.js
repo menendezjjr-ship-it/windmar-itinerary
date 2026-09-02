@@ -115,7 +115,7 @@ function canonTeam(raw) {
   const n = s.toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
   if (/elite crew #?3|in ?house #?3|william sierra|luis vargas/.test(n)) return "Elite Crew #3";
   if (/elite crew #?2|in ?house #?2|tailor herrera|maykel pimentel/.test(n)) return "Elite Crew #2";
-  if (/crew #?1s|leonardo torres/.test(n)) return "Crew #1S";
+  if (/crew #?1s|george rivera|leonardo torres/.test(n)) return "Crew #1S"; // George Rivera took over Crew #1S (Sept 2026); keep Leonardo for historical rows
   if (/crew #?2s|david radke/.test(n)) return "Crew #2S";
   if (/crew #?3s|luis morales/.test(n)) return "Crew #3S";
   if (/crew h|holi/.test(n)) return "Crew H";
@@ -375,7 +375,7 @@ async function pageSearch(mod, criteria, fields, token) {
 // Answers "how many … did Crew #X do in July", totals, per-crew tallies. CRITICAL: MSP work happens
 // TWO ways — (1) as an install line-item (MSP_Upgrade_Required='MSP', done by INSTALL crews: Crew H,
 // Elite Crew #2/#3) and (2) as a SERVICE job (Service_Type1='(5) MSP/Electrical Work', done by SERVICE
-// crews: Crew #1S=Leonardo Torres, #2S=David Radke, #3S=Luis Morales). So for an MSP-by-crew question,
+// crews: Crew #1S=George Rivera, #2S=David Radke, #3S=Luis Morales). So for an MSP-by-crew question,
 // query BOTH modules — otherwise a service crew's MSPs read as 0. module 'both' does exactly that.
 async function toolCountJobs(input) {
   if (!hasZoho()) return { error: "Zoho is not configured on this server" };
@@ -457,7 +457,7 @@ async function toolCountJobs(input) {
     matchedCount: matched.length,
     filters: { crew: crewFilter || null, type: typeFilter || null },
     byCrew,
-    note: "INSTALL msp = MSP_Upgrade_Required='MSP' / MSP-coded deal (install crews: Crew H, Elite Crew #2, Elite Crew #3). SERVICE msp = Service_Type1 '(5) MSP/Electrical Work' (service crews: Crew #1S=Leonardo Torres, #2S=David Radke, #3S=Luis Morales). byCrew.msp already sums BOTH. matchedCount applies your crew/type filters.",
+    note: "INSTALL msp = MSP_Upgrade_Required='MSP' / MSP-coded deal (install crews: Crew H, Elite Crew #2, Elite Crew #3). SERVICE msp = Service_Type1 '(5) MSP/Electrical Work' (service crews: Crew #1S=George Rivera, #2S=David Radke, #3S=Luis Morales). byCrew.msp already sums BOTH. matchedCount applies your crew/type filters.",
     sample: matched.slice(0, 40).map((x) => ({ id: x.id, customer: x.customer, crew: x.crew, msp: x.msp, source: x.source, serviceType: x.serviceType, date: x.date, stage: x.stage })),
   };
 }
@@ -529,7 +529,10 @@ async function fetchCrews() {
   const body = await r.json().catch(() => ({}));
   const crews = (body.data || []).filter((v) => CREW_RX.test(v.name || "")).map((v) => {
     const g = v.gps || {};
-    return { raw: v.name || "", canon: canonTeam(v.name || ""), person: (String(v.name || "").match(/\(([^)]+)\)/) || [])[1] || "",
+    // George Rivera took over Crew #1S + Leonardo's truck (Sept 2026) — show George even if the
+    // Samsara vehicle is still named after Leonardo.
+    const nm = String(v.name || "").replace(/leonardo\s+torres/ig, "George Rivera");
+    return { raw: nm, canon: canonTeam(nm), person: (nm.match(/\(([^)]+)\)/) || [])[1] || "",
       lat: g.latitude, lon: g.longitude, mph: g.speedMilesPerHour != null ? Math.round(g.speedMilesPerHour) : 0,
       addr: (g.reverseGeo && g.reverseGeo.formattedLocation) || "", time: g.time || null };
   }).filter((c) => c.lat != null && c.lon != null);
@@ -658,8 +661,8 @@ const TOOLS = [
   },
   {
     name: "crew_location",
-    description: "Where is a crew's truck RIGHT NOW — live Samsara GPS. Use for 'where is Crew #1S', 'where's Leonardo', 'where is the service crew located', 'where are the trucks'. Pass the crew name/person (Crew #1S=Leonardo Torres, #2S=David Radke, #3S=Luis Morales, Elite Crew #2=Tailor Herrera, Elite Crew #3=William Sierra, or a person's name); omit to list all live trucks. Returns each truck's current location (address), whether it's moving (mph), last ping time, and a Google Maps link.",
-    input_schema: { type: "object", properties: { crew: { type: "string", description: "Crew or person, e.g. 'Crew #1S', 'Leonardo', 'service crew', 'David Radke'. Omit for all trucks." } }, required: [] },
+    description: "Where is a crew's truck RIGHT NOW — live Samsara GPS. Use for 'where is Crew #1S', 'where's George', 'where is the service crew located', 'where are the trucks'. Pass the crew name/person (Crew #1S=George Rivera, #2S=David Radke, #3S=Luis Morales, Elite Crew #2=Tailor Herrera, Elite Crew #3=William Sierra, or a person's name); omit to list all live trucks. Returns each truck's current location (address), whether it's moving (mph), last ping time, and a Google Maps link.",
+    input_schema: { type: "object", properties: { crew: { type: "string", description: "Crew or person, e.g. 'Crew #1S', 'George Rivera', 'service crew', 'David Radke'. Omit for all trucks." } }, required: [] },
   },
   {
     name: "closest_crew",
@@ -686,7 +689,7 @@ const TOOLS = [
   },
   {
     name: "count_jobs",
-    description: "Count / aggregate WindMar jobs over a DATE RANGE. Use for ANY 'how many', 'how much', total, tally, or per-crew breakdown question — e.g. 'how many MSPs did Crew #2S do in July', 'how many installs last month', 'which crew did the most jobs this week'. Queries Zoho Installations ('install'), Service tickets ('service'), or BOTH ('both'), returning the total, total MSP count, a per-crew breakdown {total, msp, install, service}, and a sample. IMPORTANT: MSP work happens BOTH as an install line-item (INSTALL crews: Crew H, Elite Crew #2/#3) AND as a service job (SERVICE crews: Crew #1S=Leonardo Torres, #2S=David Radke, #3S=Luis Morales). For ANY MSP question use module 'both' (the tool defaults to 'both' when type='msp' and you omit module). Compute from/to yourself from TODAY'S DATE; a bare month name = most recent PAST occurrence. Pass crew and/or type to pre-filter (matchedCount reflects those).",
+    description: "Count / aggregate WindMar jobs over a DATE RANGE. Use for ANY 'how many', 'how much', total, tally, or per-crew breakdown question — e.g. 'how many MSPs did Crew #2S do in July', 'how many installs last month', 'which crew did the most jobs this week'. Queries Zoho Installations ('install'), Service tickets ('service'), or BOTH ('both'), returning the total, total MSP count, a per-crew breakdown {total, msp, install, service}, and a sample. IMPORTANT: MSP work happens BOTH as an install line-item (INSTALL crews: Crew H, Elite Crew #2/#3) AND as a service job (SERVICE crews: Crew #1S=George Rivera, #2S=David Radke, #3S=Luis Morales). For ANY MSP question use module 'both' (the tool defaults to 'both' when type='msp' and you omit module). Compute from/to yourself from TODAY'S DATE; a bare month name = most recent PAST occurrence. Pass crew and/or type to pre-filter (matchedCount reflects those).",
     input_schema: { type: "object", properties: {
       module: { type: "string", enum: ["install", "service", "both"], description: "'install' (default), 'service', or 'both'. Use 'both' for MSP or any cross-crew question." },
       from: { type: "string", description: "Start date YYYY-MM-DD (inclusive)." },
@@ -1164,7 +1167,7 @@ export default async function handler(req, res) {
     const attributeSearch = /\bground\s*mount|roof[- ]?mount|\b(tile|shingle|metal|flat|pergola|carport)\b|\b\d+\s*k(w|wh|ilowatt)|\b(over|under|above|below|more than|less than|at least|fewer than)\s+\d+\s*(kw|panel|module|kilowatt|watt)|\bwith\s+(a\s+)?(ground|battery|tesla|generac|enphase|powerwall)\b|battery\s+(jobs|installs?|systems?)|jobs?\s+in\s+\w+\s+county|\bin\s+\w+\s+county\b/i.test(question);
     // CREW LOCATION / PROXIMITY (Samsara GPS) → crew_location / closest_crew (agent tools).
     const crewIntent = (/\b(where\s*(is|are|s)?|located?|location|closest|nearest|far|distance|how far)\b/i.test(question) &&
-      /\b(crew|crews|truck|trucks|leonardo|david|luis|carlos|jose|tailor|william|holi|camion|elite\s*crew|service\s*crew|install(acion|ation)?)\b/i.test(question)) ||
+      /\b(crew|crews|truck|trucks|george|leonardo|david|luis|carlos|jose|tailor|william|holi|camion|elite\s*crew|service\s*crew|install(acion|ation)?)\b/i.test(question)) ||
       /\b(closest|nearest)\s+crew\b/i.test(question);
 
     let used = [], records = [], search = null, sitecapture = null;

@@ -300,7 +300,7 @@ const CREWS=[
   {id:"crew-radke",type:"SERVICE",lead:"David Radke",phone:"863-555-1102",color:"#F89B24",gps:{lat:27.7470,lon:-80.8900},addr:"Florida's Turnpike, Okeechobee County, FL",precision:"CITY-LEVEL",ping:"11:48:19 AM",mph:79,state:"enroute"},
   {id:"crew-herrera",type:"IN HOUSE 2",lead:"Tailor Herrera",phone:"863-555-1103",color:"#16A34A",gps:{lat:28.4631,lon:-81.3848},addr:"1105 Arrowsmith Ave, Pine Castle, FL 32809",precision:"GEOCODED",ping:"11:45:25 AM",mph:0,state:"avail"},
   {id:"crew-sierra",type:"IN HOUSE 3",lead:"William Sierra",phone:"863-555-1104",color:"#06B6D4",gps:{lat:28.3850,lon:-81.2700},addr:"Northlake Pkwy, Orlando, FL 32827",precision:"GEOCODED",ping:"11:48:21 AM",mph:25,state:"enroute"},
-  {id:"crew-torres",type:"INSTALACION",lead:"Leonardo Torres",phone:"863-555-1105",color:"#A855F7",gps:{lat:28.5700,lon:-81.2700},addr:"River's Edge Dr, Union Park, FL 32817",precision:"GEOCODED",ping:"11:48:15 AM",mph:0,state:"onJob"},
+  {id:"crew-torres",type:"INSTALACION",lead:"George Rivera",phone:"929-794-6388",color:"#A855F7",gps:{lat:28.5700,lon:-81.2700},addr:"River's Edge Dr, Union Park, FL 32817",precision:"GEOCODED",ping:"11:48:15 AM",mph:0,state:"onJob"},
   {id:"crew-holi",type:"HOLI SOLAR",lead:"Sub-Contractor",phone:"863-555-1106",color:"#EC4899",gps:{lat:28.3800,lon:-81.4200},addr:"S Orange Blossom Trl, Meadow Woods, FL 32837",precision:"CITY-LEVEL",ping:"11:48:23 AM",mph:0,state:"avail"},
 ];
 const SUPERVISORS=[
@@ -327,7 +327,7 @@ window.WM_CONTACTS=[
   {name:"Pedro Rosado",phone:"407-729-6221",email:"pedro.rosado@windmarhome.com"},
   {name:"William Sierra",phone:"787-550-7884",email:"william.sierra@windmarhome.com"},
   {name:"Luis Vargas",phone:"407-202-0746",email:"luis.matos@windmarhome.com"},
-  {name:"Leonardo Torres",phone:"407-497-4669",email:"leonardo.trujillo@windmarhome.com"},
+  {name:"George Rivera",phone:"929-794-6388",email:"George.rivera@windmarhome.com"},
   {name:"David Radke",phone:"407-883-0866",email:"david.radke@windmarhome.com"},
   {name:"Luis Morales",phone:"689-500-5715",email:"luis.morales@windmarhome.com"},
   {name:"Douglas Olivera",phone:"689-318-3944",email:""},
@@ -1478,7 +1478,7 @@ function attentionHTML(){
     var n=String((e&&e.team)||c||"").toLowerCase().replace(/[-_]/g," ").replace(/\s+/g," ").trim();
     if(/elite crew #?3|in ?house #?3|william sierra|luis vargas/.test(n)) return "Elite Crew #3";
     if(/elite crew #?2|in ?house #?2|tailor herrera|maykel pimentel/.test(n)) return "Elite Crew #2";
-    if(/crew #?1s|leonardo torres/.test(n)) return "Crew #1S";
+    if(/crew #?1s|george rivera|leonardo torres/.test(n)) return "Crew #1S"; // George Rivera took over Crew #1S (Sept 2026); keep Leonardo so historical jobs still group here
     if(/crew #?2s|david radke/.test(n)) return "Crew #2S";
     if(/crew #?3s|luis morales/.test(n)) return "Crew #3S";
     if(/crew h|holi/.test(n)) return "Crew H";
@@ -2830,10 +2830,12 @@ async function loadFleet(silent){
     if(j&&j.configured&&j.ok&&j.crews&&j.crews.length){
       const pal=["#3B82F6","#F89B24","#16A34A","#06B6D4","#A855F7","#EC4899","#DC2626","#10B981","#EAB308","#14B8A6"];
       const norm=x=>(x||"").toUpperCase().replace(/\s+/g," ").trim();
-      const ALLOW=["SITE SURVEY (CODY JONES)","ROOFING (PEDRO SANCHEZ RAMIREZ)","SERVICE (LUIS MORALES)","SERVICE (LUIS ORTIZ RODRIGUEZ)","SERVICE (DAVID RADKE)","IN HOUSE 2 (TAILOR HERRERA)","INSTALACION (CARLOS ACEVEDO)","IN HOUSE 3 (WILLIAM SIERRA)","ROOFING (ROBERT RUIZ)","SITE SURVEY (DANIEL LAIZ)","SERVICE (JOALISMAR WILLIM)","INSTALACION (LEONARDO TORRES)","CAMION DE PRUEBA","IN HOUSE 3 (PREVIOUS TRUCK)"].map(norm);
-      const mapped=j.crews.map((v,i)=>({id:"veh-"+v.id,name:v.name,type:null,lead:v.name,color:pal[i%pal.length],
+      const ALLOW=["SITE SURVEY (CODY JONES)","ROOFING (PEDRO SANCHEZ RAMIREZ)","SERVICE (LUIS MORALES)","SERVICE (LUIS ORTIZ RODRIGUEZ)","SERVICE (DAVID RADKE)","IN HOUSE 2 (TAILOR HERRERA)","INSTALACION (CARLOS ACEVEDO)","IN HOUSE 3 (WILLIAM SIERRA)","ROOFING (ROBERT RUIZ)","SITE SURVEY (DANIEL LAIZ)","SERVICE (JOALISMAR WILLIM)","INSTALACION (GEORGE RIVERA)","CAMION DE PRUEBA","IN HOUSE 3 (PREVIOUS TRUCK)"].map(norm);
+      // George Rivera took over Crew #1S + Leonardo's truck (Sept 2026) — show George on the map even
+      // if the Samsara vehicle is still named after Leonardo.
+      const mapped=j.crews.map((v,i)=>{ const nm=String(v.name||"").replace(/leonardo\s+torres/ig,"George Rivera"); return {id:"veh-"+v.id,name:nm,type:null,lead:nm,color:pal[i%pal.length],
         gps:v.gps,mph:v.mph||0,addr:v.addr||"—",precision:v.addr?"GEOCODED":"APPROX",
-        ping:v.time?new Date(v.time).toLocaleTimeString():"—"}));
+        ping:v.time?new Date(v.time).toLocaleTimeString():"—"}; });
       let filt=mapped.filter(c=>ALLOW.indexOf(norm(c.name))>=0);
       if(!filt.length) filt=mapped.filter(c=>/^(SERVICE|ROOFING|SITE SURVEY|INSTALACION|IN HOUSE|CAMION DE PRUEBA)\b/.test(norm(c.name)));
       // keep the allowlist display order
@@ -3140,7 +3142,7 @@ async function loadBomNotes(dl){
 const CREW_ROSTER={
   "Elite Crew #2":[{n:"Tailor Herrera",r:"Crew Lead",e:"tailor.herrera@windmarhome.com"},{n:"Maykel Pimentel",r:"Sub Lead",e:"maykel.pimentel@windmarhome.com"}],
   "Elite Crew #3":[{n:"William Sierra",r:"Crew Lead",e:"william.sierra@windmarhome.com"},{n:"Luis Vargas",r:"Sub Lead",e:"luis.matos@windmarhome.com"}],
-  "Crew #1S":[{n:"Leonardo Torres",e:"leonardo.trujillo@windmarhome.com"}],
+  "Crew #1S":[{n:"George Rivera",e:"George.rivera@windmarhome.com"}],
   "Crew #2S":[{n:"David Radke",e:"david.radke@windmarhome.com"}],
   "Crew #3S":[{n:"Luis Morales",e:"luis.morales@windmarhome.com"}],
   "Crew H":[{n:"Douglas Olivera"},{n:"Anderson Terra"}],
