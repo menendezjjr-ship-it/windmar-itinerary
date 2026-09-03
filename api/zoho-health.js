@@ -16,14 +16,14 @@ export default async function handler(req, res) {
     ZOHO_CLIENT_SECRET: !!process.env.ZOHO_CLIENT_SECRET,
     ZOHO_REFRESH_TOKEN: !!process.env.ZOHO_REFRESH_TOKEN,
     SUPABASE_SERVICE_ROLE_KEY: !!(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY),
-  }, token: zohoTokenState() };
+  } };   // token state is filled in AFTER the probe below — before it, nothing has been tried
   // Which Supabase project the shared store actually talks to. If the table was created in a
   // DIFFERENT project than this host, the read 404s and everything above looks identical to
   // "table missing" — so show it rather than guess.
   out.supabaseHost = (process.env.SUPABASE_URL || "https://lmlixmzmzpzgeggvywwb.supabase.co").replace(/^https?:\/\//, "");
   out.supabaseUrlFromEnv = !!process.env.SUPABASE_URL;
 
-  if (!hasZohoCreds()) { out.error = "Zoho creds not set"; return res.status(200).json(out); }
+  if (!hasZohoCreds()) { out.token = zohoTokenState(); out.error = "Zoho creds not set"; return res.status(200).json(out); }
   try {
     // Cheapest possible authenticated call.
     const r = await zohoFetch(`${ZOHO_API_DOMAIN}/crm/${ZOHO_API_VERSION}/Deals?fields=id&per_page=1`);
@@ -40,5 +40,6 @@ export default async function handler(req, res) {
     if (out.state === "refresh-rate-limited")
       out.hint = "Zoho is throttling token refreshes. It clears in a few minutes; do not retry in a loop.";
   }
+  out.token = zohoTokenState();   // now it reflects a real attempt
   return res.status(200).json(out);
 }

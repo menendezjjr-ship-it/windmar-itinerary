@@ -234,8 +234,12 @@ const FIELDS = [
 ].join(",");
 
 export default async function handler(req, res) {
-  // Pipeline stages move over hours, not seconds. 15s forced a lambda on nearly every poll.
-  res.setHeader("Cache-Control", "s-maxage=45, stale-while-revalidate=300");
+  // HEAVIEST route in the app: the paginated Deal search PLUS two Deal-id lookups chunked by 10
+  // (Final_Inspectin and Installation) — roughly 40 Zoho calls per invocation for ~200 deals.
+  // Pipeline stages move over HOURS, so a 45s cache was spending thousands of Zoho calls an hour
+  // to re-derive data that had not changed. 5 minutes fresh + 15 minutes stale-while-revalidate:
+  // a reader still gets an instant response, the refresh happens behind them.
+  res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=900");
   if (!hasCreds()) return res.status(200).json({ configured: false, ok: false, stages: STAGES, projects: [] });
   try {
     const token = await getAccessToken();
