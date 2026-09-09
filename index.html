@@ -2253,7 +2253,8 @@ function coordAreaClusters(items,sortFn){
   // address string, so each city is differentiated correctly, and it works even before geocoding
   // finishes. Coordinates (GEO_CACHE) are used ONLY to order the stops within a city and to show
   // the driving legs — never to decide which city a job belongs to. ──
-  const norm=(c)=>String(c||"").toLowerCase().replace(/\bst\.?\b/g,"saint").replace(/\s+/g," ").trim();
+  const norm=(c)=>String(c||"").toLowerCase().replace(/\./g,"").replace(/\bst\b/g,"saint").replace(/\s+/g," ").trim();
+  const titleCity=(s)=>String(s||"").toLowerCase().replace(/\b([a-z])/g,(m,ch)=>ch.toUpperCase());
   const geoOf=(it)=>{ const g=GEO_CACHE[geoKey(it.address)]; return (g&&g.lat!=null&&g.lon!=null)?g:null; };
   const buckets=new Map(), noCity=[];
   items.forEach(it=>{
@@ -2291,7 +2292,7 @@ function coordAreaClusters(items,sortFn){
     const roundTrip=gj.reduce((s,p)=>s+(p._legMi||0),0)+returnMi;            // base → all stops → base
     const clat=gj.length?gj.reduce((s,p)=>s+p.lat,0)/gj.length:null, clon=gj.length?gj.reduce((s,p)=>s+p.lon,0)/gj.length:null;
     let spread=0; for(let a=0;a<gj.length;a++)for(let bx=a+1;bx<gj.length;bx++){const d=haversineMi(gj[a].lat,gj[a].lon,gj[bx].lat,gj[bx].lon); if(d>spread)spread=d;}
-    out.push({ items:ordered, label:b.label, count:b.items.length, spread, roundTrip, returnMi, clat, clon,
+    out.push({ items:ordered, label:titleCity(b.label), count:b.items.length, spread, roundTrip, returnMi, clat, clon,
       hqMi:(clat!=null?haversineMi(RO.lat,RO.lon,clat,clon):Infinity), unmapped:false });
   });
   out.sort((a,z)=>(a.hqMi-z.hqMi)||String(a.label).localeCompare(String(z.label))); // nearest city to base first
@@ -3548,7 +3549,7 @@ function cityFromAddr(a){
     const parts=s.split(",").map(x=>x.trim()).filter(Boolean);
     s=parts[parts.length-1]||parts[0];       // last remaining segment after stripping state/zip = city
   } else {
-    const norm=s.toLowerCase().replace(/\bst\.?\b/g,"st").replace(/\bsaint\b/g,"st").replace(/\s+/g," ").trim();
+    const norm=s.toLowerCase().replace(/\./g,"").replace(/\bsaint\b/g,"st").replace(/\s+/g," ").trim();
     let hit="";
     for(const c of WM_CITIES){ const key=c.replace(/\bsaint\b/g,"st"); if(norm===key||norm.endsWith(" "+key)){ hit=c; break; } }
     const words=s.split(/\s+/);
