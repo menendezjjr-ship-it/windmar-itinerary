@@ -2247,58 +2247,57 @@ function coordItemRow(it,i){ const es=S.lang==="es", m=coordBucketMeta(it.bucket
 // ── Coordinator "By Area" (proximity) view — cluster ready jobs geographically so a coordinator
 // can schedule a whole route in one trip. Reads coords from GEO_CACHE (populated by geocodeInto).
 function coordAreaClusters(items,sortFn){
-  const es=S.lang==="es";
-  const withGeo=[], noGeo=[];
-  items.forEach(it=>{ const g=GEO_CACHE[geoKey(it.address)]; if(g&&g.lat!=null&&g.lon!=null){ withGeo.push(Object.assign({},it,{lat:g.lat,lon:g.lon})); } else { noGeo.push(it); } });
-  // Single-linkage clustering: two jobs are in the same area if within TH miles of any member.
-  const TH=15, used=new Array(withGeo.length).fill(false), clusters=[];
-  for(let i=0;i<withGeo.length;i++){ if(used[i])continue; const cl=[withGeo[i]]; used[i]=true; let grew=true;
-    while(grew){ grew=false; for(let j=0;j<withGeo.length;j++){ if(used[j])continue;
-      if(cl.some(m=>haversineMi(m.lat,m.lon,withGeo[j].lat,withGeo[j].lon)<=TH)){ cl.push(withGeo[j]); used[j]=true; grew=true; } } } clusters.push(cl); }
-  // Route order within a cluster: FURTHEST-from-HQ first → CLOSEST last, so the crew works its way
-  // back toward base and ends the loop at HQ. Each stop is annotated with the driving leg from the
-  // previous stop (_legMi) and its own distance to HQ (_hqMi) so the UI can show the gaps.
-  // The coordinator picks the order (S.coord.route). "far" is the original behaviour and the
-  // default, so an untouched account sees exactly what it saw before.
-  //   far   — furthest from HQ first, ending closest: the crew works back toward base.
-  //   near  — closest first: nearest jobs knocked out early, ending furthest out.
-  //   short — nearest-neighbour from HQ: each stop is the closest one not yet visited, which
-  //           is the least total driving. Greedy, not a true optimum, but it beats both
-  //           distance sorts in practice and is instant on these list sizes.
-  const ROUTE=String(S.coord.route||"far"), RO=routeOrigin();
+  const es=S.lang==="es", RO=routeOrigin();
+  // ── Group STRICTLY by CITY (parsed from the address text), NOT by geographic single-linkage.
+  // The old clustering chained neighbouring towns — Orlando → an in-between town → Winter Haven →
+  // Lakeland (40+ mi apart) all fell into one "Orlando area" blob. City comes straight from the
+  // address string, so each city is differentiated correctly, and it works even before geocoding
+  // finishes. Coordinates (GEO_CACHE) are used ONLY to order the stops within a city and to show
+  // the driving legs — never to decide which city a job belongs to. ──
+  const norm=(c)=>String(c||"").toLowerCase().replace(/\bst\.?\b/g,"saint").replace(/\s+/g," ").trim();
+  const geoOf=(it)=>{ const g=GEO_CACHE[geoKey(it.address)]; return (g&&g.lat!=null&&g.lon!=null)?g:null; };
+  const buckets=new Map(), noCity=[];
+  items.forEach(it=>{
+    const g=geoOf(it); const rec=g?Object.assign({},it,{lat:g.lat,lon:g.lon}):Object.assign({},it);
+    const city=cityFromAddr(it.address);
+    if(!city){ noCity.push(rec); return; }
+    const k=norm(city); if(!buckets.has(k)) buckets.set(k,{label:city,items:[]}); buckets.get(k).items.push(rec);
+  });
+  // Route order WITHIN a city. The coordinator picks the mode (S.coord.route, default "far").
+  //   far   — furthest from base first, ending closest (work back toward HQ).
+  //   near  — closest first.
+  //   short — greedy nearest-neighbour from base (least total driving).
+  // Geocoded stops get ordered + annotated with the driving leg from the previous stop (_legMi) and
+  // their own distance to base (_hqMi); stops still awaiting geocode trail at the end with null legs.
+  const ROUTE=String(S.coord.route||"far");
   const routeOrder=(cl)=>{
+    const gj=cl.filter(p=>p.lat!=null&&p.lon!=null), ng=cl.filter(p=>p.lat==null||p.lon==null);
     let ordered;
-    if(ROUTE==="short"){
-      const pool=cl.slice(); ordered=[]; let cur={lat:RO.lat,lon:RO.lon};
-      while(pool.length){
-        let bi=0,bd=Infinity;
-        for(let i=0;i<pool.length;i++){ const d=haversineMi(cur.lat,cur.lon,pool[i].lat,pool[i].lon); if(d<bd){ bd=d; bi=i; } }
-        cur=pool.splice(bi,1)[0]; ordered.push(cur);
-      }
-    } else if(ROUTE==="near"){
-      ordered=cl.slice().sort((a,b)=>haversineMi(RO.lat,RO.lon,a.lat,a.lon)-haversineMi(RO.lat,RO.lon,b.lat,b.lon));
-    } else {
-      ordered=cl.slice().sort((a,b)=>haversineMi(RO.lat,RO.lon,b.lat,b.lon)-haversineMi(RO.lat,RO.lon,a.lat,a.lon));
-    }
+    if(ROUTE==="short"){ const pool=gj.slice(); ordered=[]; let cur={lat:RO.lat,lon:RO.lon};
+      while(pool.length){ let bi=0,bd=Infinity; for(let i=0;i<pool.length;i++){ const d=haversineMi(cur.lat,cur.lon,pool[i].lat,pool[i].lon); if(d<bd){ bd=d; bi=i; } } cur=pool.splice(bi,1)[0]; ordered.push(cur); } }
+    else if(ROUTE==="near"){ ordered=gj.slice().sort((a,b)=>haversineMi(RO.lat,RO.lon,a.lat,a.lon)-haversineMi(RO.lat,RO.lon,b.lat,b.lon)); }
+    else { ordered=gj.slice().sort((a,b)=>haversineMi(RO.lat,RO.lon,b.lat,b.lon)-haversineMi(RO.lat,RO.lon,a.lat,a.lon)); }
     let prev={lat:RO.lat,lon:RO.lon};
     ordered.forEach(p=>{ p._hqMi=haversineMi(RO.lat,RO.lon,p.lat,p.lon); p._legMi=haversineMi(prev.lat,prev.lon,p.lat,p.lon); prev=p; });
-    return ordered;
+    ng.forEach(p=>{ p._hqMi=null; p._legMi=null; });
+    return ordered.concat(ng);
   };
-  const out=clusters.map(cl=>{
-    const ordered=routeOrder(cl); // furthest→closest; sortFn kept for callers that need a manual order
-    if(sortFn){ ordered.sort(sortFn); let prev={lat:RO.lat,lon:RO.lon}; ordered.forEach(p=>{ p._legMi=haversineMi(prev.lat,prev.lon,p.lat,p.lon); prev=p; }); }
-    const last=ordered[ordered.length-1]||{lat:RO.lat,lon:RO.lon};
-    const returnMi=haversineMi(last.lat,last.lon,RO.lat,RO.lon);          // final leg back to base
-    const roundTrip=ordered.reduce((s,p)=>s+(p._legMi||0),0)+returnMi;    // HQ → all stops → HQ
-    const clat=cl.reduce((s,p)=>s+p.lat,0)/cl.length, clon=cl.reduce((s,p)=>s+p.lon,0)/cl.length;
-    let spread=0; for(let a=0;a<cl.length;a++)for(let b=a+1;b<cl.length;b++){const d=haversineMi(cl[a].lat,cl[a].lon,cl[b].lat,cl[b].lon); if(d>spread)spread=d;}
-    const freq={}; cl.forEach(p=>{const c=cityFromAddr(p.address); if(c)freq[c]=(freq[c]||0)+1;});
-    const top=Object.keys(freq).sort((a,b)=>freq[b]-freq[a])[0]||(es?"Zona":"Area");
-    const label=Object.keys(freq).length>1?(top+" "+(es?"y alrededores":"area")):top;
-    return { items:ordered, label, count:cl.length, spread, roundTrip, returnMi, clat, clon, unmapped:false };
+  const out=[];
+  buckets.forEach(b=>{
+    const ordered=routeOrder(b.items);
+    if(sortFn){ ordered.sort(sortFn); let prev={lat:RO.lat,lon:RO.lon}; ordered.forEach(p=>{ if(p.lat!=null&&p.lon!=null){ p._legMi=haversineMi(prev.lat,prev.lon,p.lat,p.lon); prev=p; } }); }
+    const gj=ordered.filter(p=>p.lat!=null&&p.lon!=null);
+    const last=gj[gj.length-1]||null;
+    const returnMi=last?haversineMi(last.lat,last.lon,RO.lat,RO.lon):0;      // final leg back to base
+    const roundTrip=gj.reduce((s,p)=>s+(p._legMi||0),0)+returnMi;            // base → all stops → base
+    const clat=gj.length?gj.reduce((s,p)=>s+p.lat,0)/gj.length:null, clon=gj.length?gj.reduce((s,p)=>s+p.lon,0)/gj.length:null;
+    let spread=0; for(let a=0;a<gj.length;a++)for(let bx=a+1;bx<gj.length;bx++){const d=haversineMi(gj[a].lat,gj[a].lon,gj[bx].lat,gj[bx].lon); if(d>spread)spread=d;}
+    out.push({ items:ordered, label:b.label, count:b.items.length, spread, roundTrip, returnMi, clat, clon,
+      hqMi:(clat!=null?haversineMi(RO.lat,RO.lon,clat,clon):Infinity), unmapped:false });
   });
-  out.sort((a,z)=>haversineMi(RO.lat,RO.lon,a.clat,a.clon)-haversineMi(RO.lat,RO.lon,z.clat,z.clon)); // nearest-to-base first
-  if(noGeo.length) out.push({ items:noGeo, label:(es?"Ubicación desconocida":"Location unknown"), count:noGeo.length, spread:0, unmapped:true });
+  out.sort((a,z)=>(a.hqMi-z.hqMi)||String(a.label).localeCompare(String(z.label))); // nearest city to base first
+  if(noCity.length){ const ordered=routeOrder(noCity);
+    out.push({ items:ordered, label:(es?"Ubicación desconocida":"Location unknown"), count:noCity.length, spread:0, roundTrip:0, returnMi:0, clat:null, clon:null, unmapped:true }); }
   return out;
 }
 // Google Maps loop route: HQ → each job (furthest→closest) → back to HQ. All stops are waypoints
