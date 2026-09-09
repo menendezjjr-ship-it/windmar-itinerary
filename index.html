@@ -2220,8 +2220,7 @@ function coordPickPanel(){
   </div>`;
 }
 function coordItemRow(it,i){ const es=S.lang==="es", m=coordBucketMeta(it.bucket);
-  const cityOf=(a)=>{ if(!a)return ""; const p=String(a).split(","); let cc=p.length>=2?p[1]:p[0]; return cc.replace(/\bFL\b/ig,"").replace(/\d{5}(-\d{4})?/g,"").replace(/[,\s]+$/,"").trim(); };
-  const city=cityOf(it.address);
+  const city=cityFromAddr(it.address); // same extractor as the area grouping, so pill matches the group
   const isInsp=it.source==="insp"&&it.it;
   const statusTxt=isInsp?inspTypeText(it.it.type):(it.stage||"");
   const statusCol=isInsp?inspTypeMeta(it.it.type).c:"var(--wh-grey)";
@@ -3536,7 +3535,27 @@ function initPinMap(elId, pins, mapVar, opts){
   setTimeout(function(){ try{m.invalidateSize();}catch(e){} },150);
 }
 // City from a free-form address (global; opsCalHTML has its own local copy for the grid).
-function cityFromAddr(a){ if(!a)return ""; const p=String(a).split(","); let c=p.length>=2?p[1]:p[0]; return c.replace(/\bFL\b/ig,"").replace(/\d{5}(-\d{4})?/g,"").replace(/[,\s]+$/,"").trim(); }
+// Multi-word cities in WindMar's FL service area — a comma-less address ends with one of these as a
+// whole city name, so we can't just grab the last word (that would split "Winter Haven" → "Haven").
+const WM_CITIES=["winter haven","winter garden","winter springs","altamonte springs","st cloud","saint cloud","polk city","haines city","lake wales","lake alfred","lake mary","lake nona","lake hamilton","babson park","plant city","palm bay","palm coast","palm harbor","port orange","new smyrna beach","new smyrna","port saint lucie","port st lucie","boynton beach","delray beach","cape coral","fort myers","fort pierce","fort meade","pembroke pines","miami gardens","ormond beach","daytona beach shores","daytona beach","pinellas park","temple terrace","sun city center","sun city","howey in the hills","mount dora","belle isle","ponce inlet","holly hill","green cove springs","indian rocks beach"];
+// Extract the CITY from an address that may or may not have commas. Comma'd → the segment before the
+// state/zip. Comma-less → a known multi-word FL city if it ends with one, else the last word.
+function cityFromAddr(a){
+  if(!a) return "";
+  let s=String(a).replace(/\b\d{5}(-\d{4})?\b/g,"").replace(/,?\s*(fl|florida)\b\.?/ig,"").replace(/[,\s]+$/,"").trim();
+  if(!s) return "";
+  if(s.indexOf(",")>=0){
+    const parts=s.split(",").map(x=>x.trim()).filter(Boolean);
+    s=parts[parts.length-1]||parts[0];       // last remaining segment after stripping state/zip = city
+  } else {
+    const norm=s.toLowerCase().replace(/\bst\.?\b/g,"st").replace(/\bsaint\b/g,"st").replace(/\s+/g," ").trim();
+    let hit="";
+    for(const c of WM_CITIES){ const key=c.replace(/\bsaint\b/g,"st"); if(norm===key||norm.endsWith(" "+key)){ hit=c; break; } }
+    const words=s.split(/\s+/);
+    s=hit?words.slice(-hit.split(" ").length).join(" "):(words[words.length-1]||s);
+  }
+  return s.replace(/\bFL\b/ig,"").replace(/\d{5}(-\d{4})?/g,"").replace(/[,\s]+$/,"").trim();
+}
 // Get-Directions button for map popups — deep-links to Google Maps (native app on mobile) for the exact coords.
 function dirLink(p){ if(p==null||p.lat==null) return ""; const dest=p.lat+","+p.lon; const es=S.lang==="es";
   return `<a href="https://www.google.com/maps/dir/?api=1&destination=${dest}" target="_blank" rel="noopener" style="display:inline-block;margin-top:7px;padding:5px 10px;border-radius:8px;background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff;font-weight:800;font-size:12px;text-decoration:none">🧭 ${es?"Cómo llegar":"Get Directions"}</a>`; }
