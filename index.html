@@ -538,6 +538,7 @@ async function loadCalendar(){
   render();
 }
 /* ═══════════ OPERATIONS CALENDAR — replica of project-g7v0r ═══════════ */
+const CREW1S_HANDOVER="2026-09-07"; // George Rivera took Crew #1S from Leonardo Torres (Mon 07 Sep 2026)
 const CAL_TEAM_COLORS={ "holi":"#3b82f6","in house #2":"#a78bfa","in house #3":"#06b6d4","in house #4":"#2dd4bf","windmar roof":"#f97316","doga":"#14b8a6","elite crew #2":"#a78bfa","elite crew #3":"#06b6d4","crew h":"#3b82f6","crew #1s":"#a3e635","crew #2s":"#ef4444","crew #3s":"#fb7185","david radke":"#ef4444","luis morales":"#fb7185","luis g":"#e11d48","leonardo torres":"#a3e635","eagle eye":"#eab308", "in house 3":"#06b6d4", "william sierra":"#06b6d4", "in house 2":"#a78bfa", "tailor herrera":"#a78bfa" };
 function teamColor(name){ if(!name)return "#64748b"; const n=name.toLowerCase().replace(/-/g," ").replace(/\s+/g," ").trim(); for(const k in CAL_TEAM_COLORS){ if(n.indexOf(k)>=0)return CAL_TEAM_COLORS[k]; } let h=0; for(let i=0;i<name.length;i++)h=name.charCodeAt(i)+((h<<5)-h); return "hsl("+(Math.abs(h)%360)+",70%,58%)"; }
 function _relLum(r,g,b){ const a=[r,g,b].map(v=>{v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);}); return 0.2126*a[0]+0.7152*a[1]+0.0722*a[2]; }
@@ -1487,7 +1488,16 @@ function attentionHTML(){
     var n=String((e&&e.team)||c||"").toLowerCase().replace(/[-_]/g," ").replace(/\s+/g," ").trim();
     if(/elite crew #?3|in ?house #?3|william sierra|luis vargas/.test(n)) return "Elite Crew #3";
     if(/elite crew #?2|in ?house #?2|tailor herrera|maykel pimentel/.test(n)) return "Elite Crew #2";
-    if(/crew #?1s|george rivera/.test(n)) return "Crew #1S"; // Crew #1S is George Rivera (took over Sept 2026). Leonardo Torres is deliberately NOT an alias: a job still assigned to him in Zoho must surface under his own name so a coordinator sees it needs reassigning, not silently counted as George's work.
+    if(/crew #?1s|george rivera/.test(n)) return "Crew #1S";
+    // Leonardo led Crew #1S until George took over. These are LIVE crew status events, so judge
+    // each by when it was posted: anything before the handover still groups under Crew #1S.
+    // Anything after falls through to the Unassigned card — that card always renders and still
+    // counts toward the "needs stage change" badge, so the update stays visible and obviously
+    // needs reassigning. (The APIs return his own label instead; both are "never Crew #1S".)
+    if(/leonardo torres/.test(n)){
+      var ed=String((e&&e.created_at)||"").slice(0,10);
+      if(!ed||ed<CREW1S_HANDOVER) return "Crew #1S";
+    }
     if(/crew #?2s|david radke/.test(n)) return "Crew #2S";
     if(/crew #?3s|luis morales/.test(n)) return "Crew #3S";
     if(/crew h|holi/.test(n)) return "Crew H";

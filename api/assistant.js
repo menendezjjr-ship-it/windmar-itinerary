@@ -110,12 +110,22 @@ function normDL(s) {
 }
 
 // Canonicalize a Zoho crew/team label to the official roster name (mirrors zoho-jobs / zoho-ready).
-function canonTeam(raw) {
+const CREW1S_HANDOVER = "2026-09-07"; // George Rivera took Crew #1S from Leonardo Torres (Mon 07 Sep 2026)
+function canonTeam(raw, dateISO) {
   const s = (raw || "Unassigned").trim();
   const n = s.toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
   if (/elite crew #?3|in ?house #?3|william sierra|luis vargas/.test(n)) return "Elite Crew #3";
   if (/elite crew #?2|in ?house #?2|tailor herrera|maykel pimentel/.test(n)) return "Elite Crew #2";
-  if (/crew #?1s|george rivera/.test(n)) return "Crew #1S"; // Crew #1S is George Rivera (took over Sept 2026). Leonardo Torres is deliberately NOT an alias: a job still assigned to him in Zoho must surface under his own name so a coordinator sees it needs reassigning, not silently counted as George's work.
+  if (/crew #?1s|george rivera/.test(n)) return "Crew #1S";
+  // Leonardo Torres LED Crew #1S until George Rivera took over on CREW1S_HANDOVER. Work dated
+  // BEFORE that is still Crew #1S work and stays credited to the crew. A job dated on or after
+  // it is not George's, so it surfaces under Leonardo's own name where a coordinator can see it
+  // needs reassigning. NO date supplied = a lookup or historical context, which groups as
+  // Crew #1S so name searches ("where is Crew #1S") and past totals keep working.
+  if (/leonardo torres/.test(n)) {
+    const d = String(dateISO || "").slice(0, 10);
+    if (!d || d < CREW1S_HANDOVER) return "Crew #1S";
+  }
   if (/crew #?2s|david radke/.test(n)) return "Crew #2S";
   if (/crew #?3s|luis morales/.test(n)) return "Crew #3S";
   if (/crew h|holi/.test(n)) return "Crew H";
