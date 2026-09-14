@@ -115,7 +115,7 @@ function canonTeam(raw) {
   const n = s.toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ").trim();
   if (/elite crew #?3|in ?house #?3|william sierra|luis vargas/.test(n)) return "Elite Crew #3";
   if (/elite crew #?2|in ?house #?2|tailor herrera|maykel pimentel/.test(n)) return "Elite Crew #2";
-  if (/crew #?1s|george rivera|leonardo torres/.test(n)) return "Crew #1S"; // George Rivera took over Crew #1S (Sept 2026); keep Leonardo for historical rows
+  if (/crew #?1s|george rivera/.test(n)) return "Crew #1S"; // Crew #1S is George Rivera (took over Sept 2026). Leonardo Torres is deliberately NOT an alias: a job still assigned to him in Zoho must surface under his own name so a coordinator sees it needs reassigning, not silently counted as George's work.
   if (/crew #?2s|david radke/.test(n)) return "Crew #2S";
   if (/crew #?3s|luis morales/.test(n)) return "Crew #3S";
   if (/crew h|holi/.test(n)) return "Crew H";
@@ -529,7 +529,7 @@ async function fetchCrews() {
   const body = await r.json().catch(() => ({}));
   const crews = (body.data || []).filter((v) => CREW_RX.test(v.name || "")).map((v) => {
     const g = v.gps || {};
-    // George Rivera took over Crew #1S + Leonardo's truck (Sept 2026) — show George even if the
+    // Crew #1S is George Rivera (took over Sept 2026). Leonardo Torres is deliberately NOT an alias: a job still assigned to him in Zoho must surface under his own name so a coordinator sees it needs reassigning, not silently counted as George's work.
     // Samsara vehicle is still named after Leonardo.
     const nm = String(v.name || "").replace(/leonardo\s+torres/ig, "George Rivera");
     return { raw: nm, canon: canonTeam(nm), person: (nm.match(/\(([^)]+)\)/) || [])[1] || "",

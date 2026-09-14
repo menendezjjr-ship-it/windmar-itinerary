@@ -1487,7 +1487,7 @@ function attentionHTML(){
     var n=String((e&&e.team)||c||"").toLowerCase().replace(/[-_]/g," ").replace(/\s+/g," ").trim();
     if(/elite crew #?3|in ?house #?3|william sierra|luis vargas/.test(n)) return "Elite Crew #3";
     if(/elite crew #?2|in ?house #?2|tailor herrera|maykel pimentel/.test(n)) return "Elite Crew #2";
-    if(/crew #?1s|george rivera|leonardo torres/.test(n)) return "Crew #1S"; // George Rivera took over Crew #1S (Sept 2026); keep Leonardo so historical jobs still group here
+    if(/crew #?1s|george rivera/.test(n)) return "Crew #1S"; // Crew #1S is George Rivera (took over Sept 2026). Leonardo Torres is deliberately NOT an alias: a job still assigned to him in Zoho must surface under his own name so a coordinator sees it needs reassigning, not silently counted as George's work.
     if(/crew #?2s|david radke/.test(n)) return "Crew #2S";
     if(/crew #?3s|luis morales/.test(n)) return "Crew #3S";
     if(/crew h|holi/.test(n)) return "Crew H";
@@ -2839,7 +2839,7 @@ async function loadFleet(silent){
       const pal=["#3B82F6","#F89B24","#16A34A","#06B6D4","#A855F7","#EC4899","#DC2626","#10B981","#EAB308","#14B8A6"];
       const norm=x=>(x||"").toUpperCase().replace(/\s+/g," ").trim();
       const ALLOW=["SITE SURVEY (CODY JONES)","ROOFING (PEDRO SANCHEZ RAMIREZ)","SERVICE (LUIS MORALES)","SERVICE (LUIS ORTIZ RODRIGUEZ)","SERVICE (DAVID RADKE)","IN HOUSE 2 (TAILOR HERRERA)","INSTALACION (CARLOS ACEVEDO)","IN HOUSE 3 (WILLIAM SIERRA)","ROOFING (ROBERT RUIZ)","SITE SURVEY (DANIEL LAIZ)","SERVICE (JOALISMAR WILLIM)","INSTALACION (GEORGE RIVERA)","CAMION DE PRUEBA","IN HOUSE 3 (PREVIOUS TRUCK)"].map(norm);
-      // George Rivera took over Crew #1S + Leonardo's truck (Sept 2026) — show George on the map even
+      // Crew #1S is George Rivera (took over Sept 2026). Leonardo Torres is deliberately NOT an alias: a job still assigned to him in Zoho must surface under his own name so a coordinator sees it needs reassigning, not silently counted as George's work.
       // if the Samsara vehicle is still named after Leonardo.
       const mapped=j.crews.map((v,i)=>{ const nm=String(v.name||"").replace(/leonardo\s+torres/ig,"George Rivera"); return {id:"veh-"+v.id,name:nm,type:null,lead:nm,color:pal[i%pal.length],
         gps:v.gps,mph:v.mph||0,addr:v.addr||"—",precision:v.addr?"GEOCODED":"APPROX",
