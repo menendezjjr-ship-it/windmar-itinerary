@@ -3763,7 +3763,7 @@ document.addEventListener("click",e=>{
         fetch(SB+"/rest/v1/quick_claims?id=eq."+encodeURIComponent(_qid),{method:"PATCH",headers:{apikey:K,Authorization:"Bearer "+K,"Content-Type":"application/json",Prefer:"return=minimal"},body:JSON.stringify({status:_st,updated_at:new Date().toISOString()})}).then(function(){ if(typeof window.loadQuickClaims==="function") window.loadQuickClaims(); }).catch(function(){});
         // Teams message to the crew (best-effort; server-side function holds the webhook URL secret).
         var _row=(window.QUICK_CLAIMS||[]).find(function(c){return c&&String(c.id)===String(_qid);})||{};
-        fetch("/api/notify-crew",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({num:_row.num,customer:_row.customer,address:_row.address,crew_name:_row.crew_name,miles:_row.miles,status:_st})}).catch(function(){});
+        fetch("/api/notify-crew",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({num:_row.num,customer:_row.customer,address:_row.address,scope:_row.scope,crew_name:_row.crew_name,crew_email:_row.crew_email,miles:_row.miles,status:_st})}).catch(function(){});
       }
       break;
     }
