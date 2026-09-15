@@ -2770,6 +2770,23 @@ function brigadaHTML(){
 }
 
 /* ---------- TAB: ITINERARY ---------- */
+function quickClaimsHTML(){
+  var es=S.lang==="es";
+  var all=(window.QUICK_CLAIMS||[]).filter(function(c){return c&&c.status==="claimed";});
+  if(!all.length) return "";
+  var ago=function(iso){ if(!iso) return ""; var s=(Date.now()-new Date(iso).getTime())/1000; return s<60?(es?"ahora":"just now"):s<3600?Math.floor(s/60)+"m":Math.floor(s/3600)+"h"; };
+  var cards=all.map(function(c){
+    return '<div style="background:var(--panel);border:1px solid var(--line);border-left:4px solid #F89B24;border-radius:11px;padding:11px 13px;margin-bottom:9px">'
+      +'<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap"><b style="font-size:13.5px;color:var(--wh-orange)">'+esc(c.num||"")+'</b><span style="font-size:12.5px;font-weight:600">'+esc(c.customer||"")+'</span><span style="margin-left:auto;font-size:10.5px;color:var(--text-dim)">'+esc(ago(c.created_at))+'</span></div>'
+      +(c.address?'<div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">'+esc(c.address)+'</div>':'')
+      +'<div style="font-size:11.5px;color:var(--text-muted);margin-top:3px">'+esc(c.crew_name||"Crew")+(c.miles!=null?' · '+esc(c.miles)+' mi':'')+(c.scope?' · '+esc(c.scope):'')+'</div>'
+      +'<div style="display:flex;gap:8px;margin-top:9px"><button data-action="qjConfirm" data-id="'+esc(c.id)+'" style="flex:1;padding:8px;border-radius:8px;border:none;cursor:pointer;font-weight:800;font-size:12.5px;background:#16A34A;color:#fff">✅ '+(es?"Confirmar":"Confirm")+'</button><button data-action="qjNoResp" data-id="'+esc(c.id)+'" style="flex:1;padding:8px;border-radius:8px;cursor:pointer;font-weight:800;font-size:12.5px;background:rgba(248,155,36,.16);color:#F89B24;border:1px solid #F89B24">⚠️ '+(es?"Sin respuesta":"No response")+'</button></div>'
+    +'</div>';
+  }).join("");
+  return '<div class="card" style="border-radius:12px;padding:13px 15px;margin-bottom:14px;border:1px solid #F89B2455">'
+    +'<div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--wh-orange);margin-bottom:10px">🙋 '+(es?"Solicitudes de Trabajo Rápido":"Quick Job Requests")+' <span style="color:var(--text-dim)">'+all.length+'</span></div>'
+    +cards+'</div>';
+}
 function itineraryHTML(){
   const viewToggle=`<div style="display:flex;gap:8px;margin-bottom:14px"><button class="btn3d ${S.itinView==='board'?'':'ghost'} sm" data-action="setItinView" data-id="board">\uD83D\uDCCB Crew Board</button><button class="btn3d ${S.itinView==='brigada'?'':'ghost'} sm" data-action="setItinView" data-id="brigada">\uD83D\uDCC5 Brigada Calendar</button></div>`;
   if(S.itinView==="brigada"){ return `<div class="fade">`+viewToggle+opsCalHTML()+`</div>`; }
@@ -2821,7 +2838,7 @@ function itineraryHTML(){
         <button class="btn3d grey sm" data-action="call" data-id="${sel.id}">📞 ${t("callCustomer")}</button>
         ${tabAllowed("sitecapture")?`<button class="btn3d sm" data-action="viewProject" data-id="${sel.id}">📁 ${t("viewProject")}</button>`:""}</div></div>`;
   }
-  return `<div class="fade">${viewToggle}${attentionHTML()}
+  return `<div class="fade">${viewToggle}${quickClaimsHTML()}${attentionHTML()}
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <button class="btn3d grey sm" data-action="dayPrev">◀ ${t("prevDay")}</button>
@@ -3735,6 +3752,18 @@ document.addEventListener("click",e=>{
       });
       break;
     }
+    case "qjConfirm": case "qjNoResp": {
+      // qjConfirm / qjNoResp — coordinator resolves a Quick Job claim (shared quick_claims bridge)
+      var _qid=id;
+      if(_qid){
+        var _st=(a==="qjConfirm")?"confirmed":"no_response";
+        (window.QUICK_CLAIMS||[]).forEach(function(c){ if(c&&String(c.id)===String(_qid)) c.status=_st; }); // optimistic drop-off
+        render();
+        var SB="https://lmlixmzmzpzgeggvywwb.supabase.co", K="sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
+        fetch(SB+"/rest/v1/quick_claims?id=eq."+encodeURIComponent(_qid),{method:"PATCH",headers:{apikey:K,Authorization:"Bearer "+K,"Content-Type":"application/json",Prefer:"return=minimal"},body:JSON.stringify({status:_st,updated_at:new Date().toISOString()})}).then(function(){ if(typeof window.loadQuickClaims==="function") window.loadQuickClaims(); }).catch(function(){});
+      }
+      break;
+    }
     case "notifToggle": S.notif.open=!S.notif.open; if(S.notif.open) S.notif.unread=0; render(); break;
     case "notifClose": S.notif.open=false; render(); break;
     case "notifOpen": { S.notif.open=false; if(!tabAllowed("projects")){ render(); break; } /* Projects hidden for this user → just close the bell panel; must NOT fall through, the lines below discard open editors and unsaved note text */ S.tab="projects"; S.proj.selected=id; S.proj.noteFrom=null; S.proj.stageFilter="all"; loadProjectNotes(id); loadProjectAttachments(id);
@@ -4120,6 +4149,14 @@ document.addEventListener("visibilitychange",function(){ if(!document.hidden) li
     try{if(typeof Notification!=='undefined'&&Notification.permission==='granted')new Notification('WindMar — '+ev.status,{body:who});}catch(e){}
   }
   function voided(r){return String(r&&r.status||'').indexOf('[VOID]')===0;} // reverted/soft-deleted rows
+  function loadQuickClaims(){
+    var SB="https://lmlixmzmzpzgeggvywwb.supabase.co", K="sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
+    return fetch(SB+"/rest/v1/quick_claims?select=*&order=created_at.desc&limit=60",{headers:{apikey:K,Authorization:"Bearer "+K},cache:"no-store"})
+      .then(function(r){return r.ok?r.json():[];})
+      .then(function(rows){ window.QUICK_CLAIMS=Array.isArray(rows)?rows:[]; })
+      .catch(function(){});
+  }
+  window.loadQuickClaims=loadQuickClaims; // let the click handler force a re-sync after Confirm / No-response
   function poll(){
     return fetch(SB_URL+'/rest/v1/job_status_events?select=*&source=neq.app-health&order=created_at.desc&limit=50',{headers:{apikey:SB_KEY,Authorization:'Bearer '+SB_KEY}})
       .then(function(r){return r.ok?r.json():[];}).then(function(rows){
@@ -4152,7 +4189,10 @@ document.addEventListener("visibilitychange",function(){ if(!document.hidden) li
       .then(function(r){return r.ok?r.json():{ok:false};}).then(function(j){return !!(j&&j.ok);}).catch(function(){return false;});
   };
   window.wmPollStatus=poll; // let the app force a feed re-sync after a revert
-  poll();setInterval(poll,25000);window.addEventListener('focus',poll);
+  // Keep the Dashboard's "Quick Job Requests" slab live: refresh the shared quick_claims
+  // rows on the SAME cadence as the crew feed (and once at startup), then repaint the board.
+  function pollAll(){ return poll().then(function(){ return loadQuickClaims(); }).then(function(){ if((S.tab==='itinerary'||S.tab==='calendar')&&typeof render==='function'){try{render(true);}catch(e){}} }); }
+  pollAll();setInterval(pollAll,25000);window.addEventListener('focus',pollAll);
 })();
 </script>
 <script>
