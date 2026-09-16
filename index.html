@@ -1945,10 +1945,9 @@ function allowedCoordBuckets(){
   const ids=Object.prototype.hasOwnProperty.call(USER_COORD_BUCKETS,key)?USER_COORD_BUCKETS[key]:null;
   return (Array.isArray(ids)&&ids.length)?ids:null; // null = no restriction
 }
-const COORD_BUCKETS=["preeng","coordination","install","msp","reinstall","removal","service","inspection"];
+const COORD_BUCKETS=["coordination","install","msp","reinstall","removal","service","inspection"];
 function coordBucketMeta(b){
   const es=S.lang==="es";
-  if(b==="preeng") return {label:es?"Pre-Ingeniería":"Pre-Engineering", color:"#0891B2", icon:"📋"};
   if(b==="coordination") return {label:es?"Coordinación — Planos Listos":"Coordination Ready — Plans Done", color:"#7C3AED", icon:"📐"};
   if(b==="inspection") return {label:es?"Inspecciones":"Inspections", color:"#0EA5E9", icon:"🔍"};
   const t=JOB_TYPES[b]||JOB_TYPES.install;
@@ -1961,11 +1960,12 @@ function coordItems(){
   const out=[];
   const pByNum={}; (S.proj.list||[]).forEach(p=>{ if(p.num) pByNum[String(p.num).toUpperCase().replace(/\s+/g,"")]=p; });
   (S.coord.ready.list||[]).forEach(j=>{
-    const isCoord=j.kind==="coordination", isPre=j.kind==="preeng";
+    if(j.kind==="preeng") return; // Pre-Engineering section removed from the Coordinator tab
+    const isCoord=j.kind==="coordination";
     const cls={type:j.kind==="service"?"service":"", code:j.code, msp:j.msp, scope:j.scope, dlNumber:j.num};
-    // preeng/coordination are pipeline-stage buckets, not job types — jobType() would read the
-    // DL code and file them under "install".
-    const bucket=isPre?"preeng":(isCoord?"coordination":jobType(cls));
+    // coordination is a pipeline-stage bucket, not a job type — jobType() would read the
+    // DL code and file it under "install".
+    const bucket=isCoord?"coordination":jobType(cls);
     const p=pByNum[String(j.num||"").toUpperCase().replace(/\s+/g,"")]||null;
     // kind is part of the key: a DL can be BOTH coordination-ready and have a ready install,
     // and the server deliberately doesn't dedupe those. Without kind they collide and
