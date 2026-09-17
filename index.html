@@ -4321,8 +4321,11 @@ document.addEventListener("visibilitychange",function(){ if(!document.hidden) li
   var SB_KEY='sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov';
   var KEY='wm_status_seen';
   var box=document.createElement('div');
-  box.style.cssText='position:fixed;top:14px;right:14px;z-index:99999;display:flex;flex-direction:column;gap:8px;max-width:340px;font-family:Montserrat,system-ui,sans-serif';
+  box.style.cssText='position:fixed;top:14px;right:14px;z-index:99999;display:flex;flex-direction:column;gap:8px;width:340px;max-width:calc(100vw - 28px);max-height:calc(100vh - 28px);overflow:hidden;pointer-events:none;font-family:Montserrat,system-ui,sans-serif';
   document.body.appendChild(box);
+  // How many toasts may stack at once. On a phone a backlog of unseen crew updates used to pop all
+  // at once and bury the screen — cap it hard on mobile; the full history is always in Crew Updates.
+  function maxToasts(){ return (window.matchMedia&&window.matchMedia('(max-width:768px)').matches)?2:4; }
   var st=document.createElement('style');st.textContent='@keyframes wmIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}';document.head.appendChild(st);
   function esc(s){return String(s==null?'':s).replace(/[<>&]/g,function(c){return{'<':'&lt;','>':'&gt;','&':'&amp;'}[c];});}
   var COL={'Complete':'#22c55e','Completado':'#22c55e','Concluído':'#22c55e','Inspection Complete':'#06b6d4','Inspección Completa':'#06b6d4','Inspeção Concluída':'#06b6d4','Needs Inspection':'#F89B24','Necesita Inspección':'#F89B24','Precisa Inspeção':'#F89B24','Needs Re-scheduling':'#ef4444','Necesita Reprogramación':'#ef4444','Precisa Reagendar':'#ef4444'};
@@ -4330,11 +4333,12 @@ document.addEventListener("visibilitychange",function(){ if(!document.hidden) li
     var col=COL[ev.status]||'#1D429B';
     var who=[ev.dl_number,ev.customer].filter(Boolean).join(' ')||ev.job_id||'Job';
     var d=document.createElement('div');
-    d.style.cssText='background:#122042;color:#f1f5f9;border:1px solid #1D429B55;border-left:4px solid '+col+';border-radius:12px;padding:12px 14px;box-shadow:0 12px 30px -8px rgba(0,0,0,.55);cursor:pointer;animation:wmIn .3s ease-out';
+    d.style.cssText='pointer-events:auto;background:#122042;color:#f1f5f9;border:1px solid #1D429B55;border-left:4px solid '+col+';border-radius:12px;padding:12px 14px;box-shadow:0 12px 30px -8px rgba(0,0,0,.55);cursor:pointer;animation:wmIn .3s ease-out';
     var note=ev.note?String(ev.note).trim():'';
     d.innerHTML='<div style="font-weight:800;font-size:13px;color:'+col+'">🔔 '+esc(ev.status)+'</div><div style="font-size:13px;font-weight:600;margin-top:2px">'+esc(who)+'</div><div style="font-size:11px;color:#A6C3E6;margin-top:2px">'+esc(ev.team||'')+(ev.created_at?' · '+new Date(ev.created_at).toLocaleTimeString():'')+'</div>'+(note?'<div style="font-size:12px;color:#f1f5f9;margin-top:7px;background:#0c1628;border:1px solid #1D429B55;border-left:3px solid '+col+';border-radius:8px;padding:7px 9px;white-space:pre-wrap;word-break:break-word">📝 '+esc(note)+'</div>':'');
     d.onclick=function(){d.remove();};
     box.appendChild(d);
+    while(box.children.length>maxToasts()){ box.firstChild.remove(); } // never let the stack overflow the screen
     setTimeout(function(){d.remove();},14000);
     try{if(typeof Notification!=='undefined'&&Notification.permission==='granted')new Notification('WindMar — '+ev.status,{body:who});}catch(e){}
   }
@@ -4359,7 +4363,10 @@ document.addEventListener("visibilitychange",function(){ if(!document.hidden) li
         else{
           var seenSet={};seen.forEach(function(id){seenSet[id]=1;});
           var fresh=rows.filter(function(r){return !seenSet[r.id]&&!voided(r);}); // never toast a reverted row
-          if(fresh.length){localStorage.setItem(KEY,JSON.stringify(rows.map(function(r){return r.id;}).concat(seen).slice(0,300)));fresh.reverse().forEach(toast);}
+          if(fresh.length){localStorage.setItem(KEY,JSON.stringify(rows.map(function(r){return r.id;}).concat(seen).slice(0,300)));
+            // Only toast the newest few — a big backlog (e.g. first open of the day) is marked seen
+            // above and lives in the Crew Updates panel, so it never floods the screen as toasts.
+            fresh.slice(0,maxToasts()).reverse().forEach(toast);}
         }
         // Repaint the CALENDAR too, not just the Dashboard. The crew ✓ and the crew cards both
         // read window.CREW_FEED, and this poll is the only thing that refreshes it — gating the
