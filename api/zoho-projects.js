@@ -222,6 +222,8 @@ export function mapDeal(r) {
     stageModified: r.Stage_Modified_Time || null,
     modifiedBy: lookup(r.Modified_By) || "",
     insp: inspStatus(r),
+    permitReceived: r.Permit_Received_Date || null, // "permit in" — an inspection is only truly ready to schedule once this is set
+    permitSubmitted: r.Permit_Submitted_Date || null,
     installCrew: "",     // crew that DID the install (from Installation_Team) — filled for inspection-relevant deals
     postInstallId: "",   // Final_Inspectin (CustomModule11) record id — filled for inspection-relevant deals
     postInstallName: "", // e.g. "FI8496"
