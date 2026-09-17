@@ -3642,7 +3642,22 @@ function _render(noAnim){
   // were already preserved below; scroll was not, so a silent 25s repaint yanked a coordinator
   // back to the top mid-read. Captured for SILENT renders only — an explicit action (tab switch,
   // opening a job) should still land at the top.
-  const _sy=noAnim?(window.scrollY||window.pageYOffset||0):0;
+  // Scroll is now held through EVERY render, not only silent ones. The old rule — "silent keeps
+  // position, everything else jumps to top" — assumed a bare render() meant a user navigated. It
+  // usually does not: notes finishing loading, attachments arriving, a permission resolving all
+  // call render() while you are mid-read, and each one threw you back to the top.
+  // Genuine navigation (changing tab) sets WM_JUMP_TOP explicitly instead.
+  const _sy=window.scrollY||window.pageYOffset||0;
+  // window.scrollTo only restores the PAGE. Long lists live inside their own overflow:auto
+  // containers, and replacing innerHTML resets each of those to 0 as well — which is why a feed
+  // could snap to the top even when the page had not moved. Keyed by id or data-sk so the value
+  // lands back on the same element after the rebuild.
+  const _sc=[];
+  try{
+    document.querySelectorAll("#root [id], #root [data-sk]").forEach(function(el){
+      if(el.scrollTop>0){ _sc.push([el.id||el.getAttribute("data-sk"), el.scrollTop, !!el.id]); }
+    });
+  }catch(e){}
   const VTABS=allowedTabs();
   // If S.tab isn't one this user may open (restricted set, or a stale/removed id in
   // localStorage), fall back to their first tab. Without this, active.fn() below throws
@@ -3671,7 +3686,17 @@ function _render(noAnim){
       </div></nav>
     <main style="max-width:1180px;margin:0 auto;padding:22px 20px 70px">${active.fn()}</main>${notifPanelHTML()}`;
   if(aeId){const el=document.getElementById(aeId);if(el){el.focus();if(caret!=null&&el.setSelectionRange){try{el.setSelectionRange(caret,caret);}catch(e){}}}}
-  if(_sy>0){ try{ window.scrollTo(0,_sy); }catch(e){} } // hold the reader's place through a silent refresh
+  // Put the reader back exactly where they were — page and every inner scroller.
+  if(window.WM_JUMP_TOP){ window.WM_JUMP_TOP=false; try{ window.scrollTo(0,0); }catch(e){} }
+  else{
+    if(_sy>0){ try{ window.scrollTo(0,_sy); }catch(e){} }
+    _sc.forEach(function(r){
+      try{
+        var el=r[2]?document.getElementById(r[0]):document.querySelector('#root [data-sk="'+r[0]+'"]');
+        if(el) el.scrollTop=r[1];
+      }catch(e){}
+    });
+  }
   if(S.tab==="crews") setTimeout(initCrewMap,0);
   // Job Map (calendar): geocode this week's jobs then pin them
   if(S.tab==="calendar" && S.cal.view==="map"){
@@ -3775,7 +3800,8 @@ document.addEventListener("click",e=>{
       render(); break; }
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
-    case "setTab": if(!tabAllowed(id)) break; S.tab=id; try{if(window.wmReportView)wmReportView();}catch(e){} try{localStorage.setItem("wm_itin_tab",id);}catch(e){} if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="coordinator"){ loadProjects(S.proj.status!=="idle",true); loadCoordReady(S.coord.ready.status!=="idle"&&S.coord.ready.status!=="error"); } if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); if(id==="instmap"&&S.instMap.status==="idle") loadInstallMap(); render(); break;
+    case "setTab": window.WM_JUMP_TOP=true; // a real navigation: start at the top
+ if(!tabAllowed(id)) break; S.tab=id; try{if(window.wmReportView)wmReportView();}catch(e){} try{localStorage.setItem("wm_itin_tab",id);}catch(e){} if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="coordinator"){ loadProjects(S.proj.status!=="idle",true); loadCoordReady(S.coord.ready.status!=="idle"&&S.coord.ready.status!=="error"); } if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); if(id==="instmap"&&S.instMap.status==="idle") loadInstallMap(); render(); break;
     case "jobsRefresh": loadJobs(); break;
     case "projRefresh": loadProjects(false,true); break;
     case "selectProject": { S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); loadProjectAttachments(id);
