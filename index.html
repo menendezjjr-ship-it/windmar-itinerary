@@ -159,6 +159,10 @@
     input, select, textarea, .input{ font-size:16px !important; }
     /* keep micro pills/labels legible */
     .pill{ font-size:10px !important; }
+    /* Dashboard scroll fix: on phones a panel with its own overflow:auto (e.g. Crew Updates at
+       78vh) TRAPS the swipe — you scroll the inner list, the page won't move, so the dashboard
+       feels stuck. Let these flow with the page so the whole dashboard scrolls as one column. */
+    .dashScroll{ max-height:none !important; overflow:visible !important; }
     /* comfortable, thumb-sized tap targets */
     .btn3d{ min-height:40px; display:inline-flex; align-items:center; justify-content:center; }
     .tabbtn{ padding:14px 12px !important; }
@@ -1749,7 +1753,7 @@ function attentionHTML(){
   // resolved is bucketed under its own card, but the header must never claim more than is visible.
   const crewShown=crewOrder.reduce(function(n,c){return n+crewBuckets[c].length;},0);
   const crewPending=crewOrder.reduce(function(n,c){return n+crewBuckets[c].filter(function(e){return e&&e.id!=null&&!ackSet.has(String(e.id));}).length;},0);
-  const col=(title,count,color,inner,maxH)=>`<div class="card" style="padding:0;overflow:hidden"><div style="padding:11px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;background:${color}22"><span style="font-weight:800;font-size:14px">${title}</span><span class="pill" style="background:${color};margin-left:auto">${count}</span></div><div style="padding:11px;max-height:${maxH||300}px;overflow:auto">${inner}</div></div>`;
+  const col=(title,count,color,inner,maxH)=>`<div class="card" style="padding:0;overflow:hidden"><div style="padding:11px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;background:${color}22"><span style="font-weight:800;font-size:14px">${title}</span><span class="pill" style="background:${color};margin-left:auto">${count}</span></div><div class="dashScroll" style="padding:11px;max-height:${maxH||300}px;overflow:auto">${inner}</div></div>`;
   // Estimator / Plan Analyzer updates (windmar-plan-analyzer) — latest status per job;
   // once a job reaches the completed stage ("BOM Done & Uploaded") it drops off the board.
   const planC=function(s){s=(s||'').toLowerCase();if(/permit/.test(s))return '#F59E0B';if(/service bom|bom made/.test(s))return '#06B6D4';if(/done|upload|complet/.test(s))return '#22c55e';return '#8B5CF6';};
@@ -1773,7 +1777,7 @@ function attentionHTML(){
     :pushSt==="denied"?`<span class="pill" style="background:var(--wh-grey);font-size:10px" title="${es?'Permite las notificaciones en el navegador':'Allow notifications in your browser settings'}">🔕 ${es?'Bloqueadas':'Blocked'}</span>`
     :pushSt==="unsupported"?``
     :`<button class="btn3d sm" data-action="enablePush" style="background:#ef4444;font-size:11px">🔔 ${es?'Activar alertas (aunque esté cerrada)':'Enable alerts (even when closed)'}</button>`;
-  const crewCol=`<div class="card" style="padding:0;overflow:hidden;border:1.5px solid ${crewPending?'#ef444488':'#F89B2455'}"><div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:${crewPending?'#ef444418':'#F89B2422'}"><span style="font-weight:900;font-size:17px">👷 ${es?'Actualizaciones de Cuadrilla':'Crew Updates'}</span><span style="font-size:11px;color:var(--text-dim)">${es?'en vivo desde el Field HUB':'live from Field HUB'}</span>${crewPending?`<span class="pill prioPulse" style="background:#ef4444;font-size:11px;font-weight:800">⚠ ${crewPending} ${es?'requieren cambio de etapa':'need stage change'}</span>`:''}<span style="margin-left:auto;display:flex;align-items:center;gap:8px">${pushBtn}<span class="pill" style="background:#F89B24;font-size:13px;padding:3px 11px">${crewShown}</span></span></div><div style="padding:14px;display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));align-items:stretch;max-height:min(78vh,900px);overflow:auto">${crewCards}</div></div>`;
+  const crewCol=`<div class="card" style="padding:0;overflow:hidden;border:1.5px solid ${crewPending?'#ef444488':'#F89B2455'}"><div style="padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:${crewPending?'#ef444418':'#F89B2422'}"><span style="font-weight:900;font-size:17px">👷 ${es?'Actualizaciones de Cuadrilla':'Crew Updates'}</span><span style="font-size:11px;color:var(--text-dim)">${es?'en vivo desde el Field HUB':'live from Field HUB'}</span>${crewPending?`<span class="pill prioPulse" style="background:#ef4444;font-size:11px;font-weight:800">⚠ ${crewPending} ${es?'requieren cambio de etapa':'need stage change'}</span>`:''}<span style="margin-left:auto;display:flex;align-items:center;gap:8px">${pushBtn}<span class="pill" style="background:#F89B24;font-size:13px;padding:3px 11px">${crewShown}</span></span></div><div class="dashScroll" style="padding:14px;display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(320px,100%),1fr));align-items:stretch;max-height:min(78vh,900px);overflow:auto">${crewCards}</div></div>`;
   return `<div class="card rise" style="padding:16px 18px;margin-bottom:18px;border-left:6px solid var(--wh-orange)">
     <div class="tap" data-action="attnToggle" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;cursor:pointer"><span style="font-weight:900;font-size:18px">🔔 ${es?'Atención Requerida':'Needs Attention'}</span><span style="margin-left:auto;color:var(--text-dim);font-size:12px">${es?'ocultar ▴':'hide ▴'}</span></div>
     <div style="margin-bottom:14px">${crewCol}</div>
