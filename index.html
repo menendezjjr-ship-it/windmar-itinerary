@@ -29,14 +29,28 @@
     --jc-RL:#DC2626;  --jc-RL-d:#991B1B;     /* Roofing — Red */
     --jc-S:#F89B24;   --jc-S-d:#B86A0D;      /* Service — Solar Orange */
     --jc-MSP:#7C3AED; --jc-MSP-d:#5B21B6;    /* MSP Upgrade — Violet */
-    /* dark surfaces (default) */
-    --bg:#0A1126; --bg-2:#101a30; --panel:#152251; --panel-2:#1A2B63;
-    --line:#2A3F7A; --text:#E8EEF8; --text-dim:#A6C3E6; --warn:#F87171; --warn-bg:#3A1B22;
+    /* dark surfaces (default) — LIQUID GLASS.
+       Brand hues above are untouched; only the SURFACES became translucent so the
+       WindMar blue/orange light behind them shows through the frost. */
+    --bg:#070D20;
+    --bg-2:rgba(9,16,38,.74); --panel:rgba(15,26,60,.72); --panel-2:rgba(23,39,90,.76);
+    --line:rgba(255,255,255,.14); --text:#EDF2FC; --text-dim:#A9BEE4; --warn:#F87171; --warn-bg:rgba(120,26,32,.62);
     --ok:#28A745;
+    /* the glass recipe */
+    --g-blur:blur(26px) saturate(185%);
+    --g-spec:inset 0 1px 0 rgba(255,255,255,.26), inset 0 -1px 0 rgba(0,0,0,.22);
+    --g-drop:0 14px 40px -18px rgba(0,0,0,.85);
+    --g-hi:rgba(255,255,255,.26);
+    --g-rim:rgba(255,255,255,.20);
   }
   [data-theme="light"]{
-    --bg:#EEF2F9; --bg-2:#FFFFFF; --panel:#FFFFFF; --panel-2:#F4F6FA;
-    --line:#C8D4E8; --text:#0c1322; --text-dim:#4a5a7a; --warn-bg:#FDECEC;
+    --bg:#E9EFF9;
+    --bg-2:rgba(255,255,255,.70); --panel:rgba(255,255,255,.74); --panel-2:rgba(255,255,255,.86);
+    --line:rgba(16,34,78,.14); --text:#0c1322; --text-dim:#485980; --warn-bg:rgba(220,38,38,.10);
+    --g-spec:inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(16,34,78,.06);
+    --g-drop:0 14px 34px -20px rgba(16,34,78,.45);
+    --g-hi:rgba(255,255,255,.85);
+    --g-rim:rgba(16,34,78,.10);
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;}
@@ -164,6 +178,153 @@
     .btn3d.sm{ min-height:36px; }
     /* leave room so the floating assistant never covers the last row */
     main{ padding-bottom:96px !important; }
+  }
+
+  /* ============================================================
+     LIQUID GLASS — surface treatment only.
+     Nothing here changes what is on screen or where it sits: it changes how the
+     surfaces are made. Brand colour is the light SOURCE (the orb field below);
+     the panels are frosted glass that the WindMar blue and orange shine through.
+     Job-code colours (DL/RDL/RL/S/MSP) are used exactly as before.
+     ============================================================ */
+
+  /* The light the glass refracts. Without a coloured field behind them, frosted
+     panels read as flat grey boxes — this is what makes them look like glass. */
+  body::before{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:
+      radial-gradient(820px 680px at 4% -8%,  rgba(29,66,155,.62), transparent 60%),
+      radial-gradient(680px 600px at 102% 10%, rgba(248,155,36,.26), transparent 58%),
+      radial-gradient(760px 700px at 22% 106%, rgba(124,58,237,.22), transparent 60%),
+      radial-gradient(520px 480px at 92% 88%,  rgba(22,163,74,.14), transparent 62%);
+  }
+  [data-theme="light"] body::before{
+    background:
+      radial-gradient(760px 620px at 6% -6%,  rgba(29,66,155,.28), transparent 62%),
+      radial-gradient(620px 560px at 100% 14%, rgba(248,155,36,.24), transparent 64%),
+      radial-gradient(700px 640px at 24% 104%, rgba(124,58,237,.16), transparent 66%),
+      radial-gradient(520px 480px at 92% 88%,  rgba(22,163,74,.14), transparent 66%);
+  }
+
+  /* Frost every real surface. The attribute selectors catch the panels that are
+     built with inline styles instead of .card — including sticky table headers,
+     which NEED the blur now that --panel is translucent. */
+  .card,
+  [style*="var(--panel)"], [style*="var(--bg-2)"], [style*="var(--panel-2)"]{
+    backdrop-filter:var(--g-blur); -webkit-backdrop-filter:var(--g-blur);
+  }
+  /* Only the OUTERMOST surface frosts. A nested panel keeps its translucent fill and its
+     rim, but re-blurring an already-blurred layer just costs a GPU pass and muddies it. */
+  .card .card, .card [style*="var(--panel)"], .card [style*="var(--bg-2)"], .card [style*="var(--panel-2)"],
+  [style*="var(--panel)"] [style*="var(--panel)"], [style*="var(--bg-2)"] [style*="var(--panel)"]{
+    backdrop-filter:none !important; -webkit-backdrop-filter:none !important;
+  }
+  .card{
+    border:1px solid var(--line); border-radius:20px;
+    box-shadow:var(--g-spec), var(--g-drop);
+  }
+  [data-theme="light"] .card{ box-shadow:var(--g-spec), var(--g-drop); }
+  .card.tap:hover{ border-color:var(--g-rim); box-shadow:var(--g-spec), 0 22px 50px -20px rgba(0,0,0,.9); }
+
+  /* Header + nav read as one piece of glass with the orange rule between them. */
+  header{ backdrop-filter:var(--g-blur); -webkit-backdrop-filter:var(--g-blur); }
+  nav{ backdrop-filter:var(--g-blur); -webkit-backdrop-filter:var(--g-blur);
+       box-shadow:0 1px 0 rgba(255,255,255,.08), 0 10px 30px -22px rgba(0,0,0,.9); }
+  .logoPlate{ box-shadow:inset 0 1px 0 rgba(255,255,255,.9), 0 8px 20px -10px rgba(0,0,0,.6); }
+  .logoPlate:hover{ box-shadow:inset 0 1px 0 rgba(255,255,255,.9), 0 14px 28px -12px rgba(0,0,0,.7); }
+
+  /* Tabs become capsules; the active one is a solid WindMar-orange lozenge. */
+  .tabbtn{ padding:11px 16px; margin:5px 2px; border-radius:999px; border-bottom:none;
+    transition:color .16s ease, background .16s ease, box-shadow .16s ease; }
+  .tabbtn:hover{ background:rgba(255,255,255,.08); }
+  [data-theme="light"] .tabbtn:hover{ background:rgba(16,34,78,.06); }
+  .tabbtn.active{ color:#1a1200; border-bottom-color:transparent;
+    background:linear-gradient(180deg, rgba(255,196,110,.98), var(--wh-orange));
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.60), 0 8px 20px -10px rgba(248,155,36,.85); }
+
+  /* Buttons: same colours, now glass capsules that press instead of stamped slabs.
+     No backdrop-filter here — 100+ buttons of blur would cost frames on a crew phone. */
+  .btn3d{
+    border-radius:999px; border:1px solid rgba(255,255,255,.28); color:#fff;
+    background:linear-gradient(180deg, rgba(255,255,255,.22), rgba(255,255,255,0)), var(--wh-orange);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.52), 0 10px 24px -12px rgba(0,0,0,.85);
+    transition:transform .16s cubic-bezier(.22,1,.36,1), box-shadow .16s ease, filter .16s ease;
+  }
+  .btn3d:hover{ filter:brightness(1.06); transform:translateY(-1.5px);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.6), 0 16px 30px -14px rgba(0,0,0,.9); }
+  .btn3d:active{ transform:translateY(1px) scale(.985);
+    box-shadow:inset 0 2px 5px rgba(0,0,0,.35); }
+  .btn3d.blue{ background:linear-gradient(180deg, rgba(255,255,255,.26), rgba(255,255,255,0)), var(--wh-blue); }
+  .btn3d.green{ background:linear-gradient(180deg, rgba(255,255,255,.24), rgba(255,255,255,0)), var(--jc-DL); }
+  .btn3d.red{ background:linear-gradient(180deg, rgba(255,255,255,.24), rgba(255,255,255,0)), var(--jc-RL); }
+  .btn3d.grey{ background:linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,.08)); }
+  .btn3d.ghost{ background:rgba(255,255,255,.08); color:var(--text);
+    border-color:var(--line); box-shadow:inset 0 1px 0 rgba(255,255,255,.22); }
+  .btn3d.ghost:hover{ background:rgba(255,255,255,.16); }
+  [data-theme="light"] .btn3d.ghost{ background:rgba(255,255,255,.7); color:var(--wh-blue);
+    border-color:var(--line); box-shadow:inset 0 1px 0 #fff, 0 6px 16px -10px rgba(16,34,78,.5); }
+  [data-theme="light"] .btn3d.grey{ background:linear-gradient(180deg, rgba(255,255,255,.9), rgba(236,241,250,.9)); color:var(--text); }
+  .btn3d.sm{ border-radius:999px; box-shadow:inset 0 1px 0 rgba(255,255,255,.45), 0 8px 18px -12px rgba(0,0,0,.8); }
+  .btn3d.sm:active{ box-shadow:inset 0 2px 4px rgba(0,0,0,.3); }
+
+  /* Job cards keep their exact job-code gradient. Glass adds the specular top edge,
+     a diagonal sheen, and a light sweep that runs across the card on hover. */
+  .jobchip{
+    position:relative; overflow:hidden; border-radius:16px;
+    border:1px solid rgba(255,255,255,.20);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.34), inset 0 -1px 0 rgba(0,0,0,.28), 0 10px 26px -16px rgba(0,0,0,.95);
+    transition:transform .2s cubic-bezier(.22,1,.36,1), box-shadow .2s ease;
+  }
+  .jobchip::before{ content:""; position:absolute; inset:0; pointer-events:none; border-radius:inherit;
+    background:linear-gradient(150deg, rgba(255,255,255,.26) 0%, rgba(255,255,255,.06) 34%, rgba(255,255,255,0) 60%); }
+  .jobchip::after{ content:""; position:absolute; top:0; left:-60%; width:45%; height:100%; pointer-events:none;
+    background:linear-gradient(105deg, transparent, rgba(255,255,255,.30), transparent);
+    transform:skewX(-18deg); transition:left .55s ease; }
+  .jobchip>*{ position:relative; z-index:1; }
+  .jobchip:hover{ transform:translateY(-3px) scale(1.012);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.44), 0 20px 40px -18px rgba(0,0,0,.95); }
+  .jobchip:hover::after{ left:120%; }
+  .jobchip:active{ transform:translateY(0) scale(.995); box-shadow:inset 0 2px 6px rgba(0,0,0,.3); }
+
+  /* Small chrome: rims and highlights, no blur. */
+  .pill{ border:1px solid rgba(255,255,255,.22); box-shadow:inset 0 1px 0 rgba(255,255,255,.28); }
+  .statpill{ border:1px solid rgba(255,255,255,.20); box-shadow:inset 0 1px 0 rgba(255,255,255,.26); }
+  .calchip{ border-radius:999px; border:1px solid rgba(255,255,255,.24);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.34), 0 4px 10px -6px rgba(0,0,0,.7); }
+  .calrow:hover{ box-shadow:var(--g-spec), 0 16px 32px -16px rgba(0,0,0,.85); }
+  .input, select.input{ border:1px solid var(--line); border-radius:14px;
+    background:rgba(255,255,255,.07); backdrop-filter:var(--g-blur); -webkit-backdrop-filter:var(--g-blur);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.18); transition:border-color .16s ease, box-shadow .16s ease; }
+  [data-theme="light"] .input, [data-theme="light"] select.input{ background:rgba(255,255,255,.75); }
+  .input:focus{ border-color:var(--wh-orange);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.2), 0 0 0 3px rgba(248,155,36,.24); }
+  .weatherAlert{ border:1px solid var(--warn); border-radius:16px;
+    backdrop-filter:var(--g-blur); -webkit-backdrop-filter:var(--g-blur);
+    box-shadow:var(--g-spec), var(--g-drop); }
+  .codebox{ background:rgba(4,8,22,.62); backdrop-filter:var(--g-blur); -webkit-backdrop-filter:var(--g-blur);
+    border:1px solid var(--line); box-shadow:var(--g-spec); }
+  .radar{ border:1px solid var(--line); box-shadow:var(--g-spec), var(--g-drop); }
+  .scroll::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.22); }
+
+  /* Maps must never be frosted — they are the content, not a surface. */
+  .leaflet-container, .leaflet-container *, .maplibregl-map, .maplibregl-map *{
+    backdrop-filter:none !important; -webkit-backdrop-filter:none !important; }
+
+  /* Phones: halve the blur radius. Real frost at full radius on a stack of panels
+     is the one thing in this treatment that can drop frames on an older phone. */
+  @media (max-width:640px){
+    :root{ --g-blur:blur(14px) saturate(160%); }
+    .card{ border-radius:18px; }
+    /* A phone viewport puts the orbs directly behind the text instead of out at the
+       margins, so the surfaces carry a little more body and the light backs off. */
+    :root{ --bg-2:rgba(9,16,38,.84); --panel:rgba(15,26,60,.82); --panel-2:rgba(23,39,90,.86); }
+    body::before{ opacity:.72; }
+  }
+  /* Respect the OS setting, and fall back to an opaque surface where the browser
+     has no backdrop-filter at all (older Android WebView) so nothing is unreadable. */
+  @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+    :root{ --bg-2:#131C38; --panel:#182346; --panel-2:#1E2B57; --line:#2E4180; }
+    [data-theme="light"]{ --bg-2:#FFFFFF; --panel:#FFFFFF; --panel-2:#F4F6FA; --line:#C8D4E8; }
   }
 </style>
 <style>vercel-live-feedback,[data-vercel-toolbar],#vercel-toolbar,vercel-toolbar,[data-testid="vercel-toolbar"],[class*="vercel-toolbar"],iframe[src*="vercel.live"],iframe[src*="vercel-toolbar"]{display:none!important;visibility:hidden!important;pointer-events:none!important}</style>
@@ -3670,7 +3831,7 @@ function _render(noAnim){
   const rootEl=document.getElementById("root");
   rootEl.classList.toggle("noanim",!!noAnim); // background/silent refresh → skip entry animations (no blink)
   rootEl.innerHTML=`
-    <header style="border-bottom:3px solid var(--wh-orange);background:var(--wh-blue)">
+    <header style="border-bottom:2px solid rgba(248,155,36,.85);background:linear-gradient(180deg,rgba(29,66,155,.72),rgba(29,66,155,.46))">
       <div style="max-width:1180px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <div class="logoPlate"><img src="data:image/png;base64,${LOGO_B64}" alt="WindMar Solar+Roofing"/></div>
         <div><div style="font-weight:900;font-size:18px;color:#fff">WindMar <span style="color:#FFD9A8">${t("appName")}</span></div>
