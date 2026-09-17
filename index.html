@@ -3798,8 +3798,30 @@ function instMapHTML(){
 }
 // Crash guard — a fatal render error shows a recovery card + Reload instead of a blank page.
 function wmCrash(){ if(document.getElementById("__wmc"))return; try{ var d=document.createElement("div"); d.id="__wmc"; d.style.cssText="position:fixed;inset:0;z-index:99999;background:#0a1024;color:#f1f5f9;display:flex;align-items:center;justify-content:center;padding:24px;font-family:system-ui,sans-serif"; d.innerHTML='<div style="max-width:420px;text-align:center;background:#122042;border:1px solid #1D429B30;border-radius:16px;padding:28px"><div style="font-size:40px;margin-bottom:8px">🔧</div><div style="font-size:18px;font-weight:800;margin-bottom:8px">Something hiccuped</div><div style="font-size:13.5px;color:#A6C3E6;margin-bottom:20px;line-height:1.5">The app hit a snag but your work was saved. Tap reload to pick up where you left off.</div><button onclick="location.reload()" style="padding:12px 22px;border-radius:10px;border:none;cursor:pointer;background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff;font-weight:800;font-size:14px">Reload</button></div>'; document.body.appendChild(d);}catch(e){} }
+// Scroll-idle guard: a background (silent) repaint replaces #root.innerHTML, which interrupts an
+// in-progress scroll and yanks the page — the "screen skip". We install a one-time scroll/touch
+// listener that timestamps activity; a silent render that lands mid-scroll is DEFERRED and fired the
+// moment scrolling stops, so the view never jumps under the reader. User actions (non-silent
+// renders) and explicit navigation are never deferred, so the UI stays instant.
+function _wmScrollGuardInit(){
+  if(window.__wmScrollGuard) return; window.__wmScrollGuard=true; window.__wmScrollTs=0;
+  var onMove=function(){ window.__wmScrollTs=Date.now();
+    if(window.__wmSilentPending){ clearTimeout(window.__wmSilentT); window.__wmSilentT=setTimeout(function(){ if(window.__wmSilentPending){ window.__wmSilentPending=false; render(true); } }, 200); } };
+  window.addEventListener("scroll", onMove, {passive:true});
+  window.addEventListener("touchmove", onMove, {passive:true});
+}
 function render(noAnim){ try{ return _render(noAnim); }catch(_e){ try{console.error(_e);}catch(__){} wmCrash(); } }
 function _render(noAnim){
+  _wmScrollGuardInit();
+  // Defer a SILENT background repaint while the user is actively scrolling — repainting mid-scroll is
+  // exactly what makes the screen skip. It re-fires within ~250ms of the scroll stopping (here or via
+  // the scroll listener). Never defers a user action (noAnim falsy) or an explicit jump-to-top.
+  if(noAnim && !window.WM_JUMP_TOP && (Date.now()-(window.__wmScrollTs||0))<450){
+    window.__wmSilentPending=true; clearTimeout(window.__wmSilentT);
+    window.__wmSilentT=setTimeout(function(){ if(window.__wmSilentPending){ window.__wmSilentPending=false; render(true); } }, 300);
+    return;
+  }
+  window.__wmSilentPending=false;
   document.documentElement.setAttribute("data-theme",S.theme);
   wmJtipInit();
   const ae=document.activeElement, aeId=ae&&ae.id, caret=ae&&ae.selectionStart;
