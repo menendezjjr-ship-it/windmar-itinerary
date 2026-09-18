@@ -148,6 +148,9 @@
   /* On background/silent re-renders, skip entry animations so the app doesn't blink */
   #root.noanim .fade, #root.noanim .rise, #root.noanim .stagger>*, #root.noanim .tabbtn.active{ animation:none !important; }
   /* stage chips scroller hides scrollbar for a cleaner look */
+  .chip{font-family:inherit;font-weight:700;font-size:12px;background:var(--bg-2);color:var(--text);border:1px solid var(--line);border-radius:999px;padding:7px 14px;cursor:pointer;}
+  .chip.active{background:linear-gradient(135deg,var(--wh-blue),var(--wh-orange));color:#fff;border-color:transparent;}
+  .ph{color:var(--wh-orange);font-weight:700;}
   .chipbar::-webkit-scrollbar{height:0;}
   img{max-width:100%;height:auto;}
   /* ── Phones (≤640px): tighten chrome, protect touch + iOS ── */
@@ -3717,14 +3720,18 @@ function serviceMonHTML(){ svcInit(); const es=S.lang==="es", C=S.svcmon;
   if(C.sub==="outages"&&C.out.status==="idle") svcLoadOutages();
   const subBtn=(id,lbl)=>`<button class="btn3d ${C.sub===id?'':'ghost'} sm" data-action="noop" onclick="svcSub('${id}')" style="${C.sub===id?'background:linear-gradient(135deg,var(--wh-blue),var(--wh-orange))':''}">${lbl}</button>`;
   const nav=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-    ${subBtn("dash",es?"🎫 Panel de Tickets":"🎫 Ticket Dashboard")}${subBtn("tickets",es?"🔧 Tickets de Servicio":"🔧 Service Tickets")}${subBtn("sites",es?"⚡ Producción":"⚡ Site Production")}${subBtn("outages",es?"🔌 Cortes":"🔌 Outages")}${subBtn("equip",es?"🧰 Equipo y Códigos":"🧰 Equipment & Codes")}</div>`;
+    ${subBtn("dash",es?"🎫 Panel de Tickets":"🎫 Ticket Dashboard")}${subBtn("tickets",es?"🔧 Tickets de Servicio":"🔧 Service Tickets")}${subBtn("reports",es?"📄 Formularios":"📄 Report Forms")}${subBtn("saved",es?"🗄 Guardados":"🗄 Saved Reports")}${subBtn("sites",es?"⚡ Producción":"⚡ Site Production")}${subBtn("outages",es?"🔌 Cortes":"🔌 Outages")}${subBtn("equip",es?"🧰 Equipo y Códigos":"🧰 Equipment & Codes")}</div>`;
   let body="";
   if(C.sub==="dash") body=svcDashHTML(es);
   else if(C.sub==="sites") body=svcSitesHTML(es);
   else if(C.sub==="outages") body=svcOutagesHTML(es);
   else if(C.sub==="equip") body=svcEquipHTML(es);
+  else if(C.sub==="reports") body=svcReportsShell(es);
+  else if(C.sub==="saved") body=svcSavedShell(es);
   else body=svcTicketsHTML(es);
   const detail=C.detail?svcSiteDetailHTML(es):"";
+  if(C.sub==="reports") setTimeout(function(){ if(S.svcmon.sub==="reports"&&document.getElementById("rf-chips")) rfInit(); },0);
+  if(C.sub==="saved") setTimeout(function(){ if(S.svcmon.sub==="saved"&&document.getElementById("saved-list")) savedInit(); },0);
   return `<div class="fade"><div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <h2 style="margin:0;font-size:20px;font-weight:900">🛰 ${es?"Servicio y Monitoreo":"Service & Monitoring"}</h2>
       <span style="font-size:12px;color:var(--text-dim)">${es?"Datos en vivo · SolarEdge · Enphase · FDEM · Zoho":"Live · SolarEdge · Enphase · FDEM · Zoho"}</span></div>
@@ -3881,6 +3888,233 @@ function svcTicketsHTML(es){ const st=S.svcmon.tk;
     <div>${secHead("📅",es?"Este Mes":"This Month",mo.length,st.month.length,"#1D429B")}${mo.length?mo.map(row).join(""):empty(q?(es?"Sin coincidencias":"No matches"):(es?"Sin tickets este mes":"No tickets this month"))}</div></div>`;
 }
 function svcTitle(s){ return String(s||"").toLowerCase().replace(/\b([a-z])/g,(m,c)=>c.toUpperCase()); }
+
+// ── Report Forms + Saved Reports (ported from windmar-service-app; same shared Supabase) ──
+function RFLANG(){return S.lang==="es"?"es":"en";}
+const RF_SB_URL="https://lmlixmzmzpzgeggvywwb.supabase.co", RF_SB_KEY="sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
+var RF_CUR='noprod',RF_VALS={};
+var RF={
+noprod:{n:{en:'No Production',es:'Sin Producción'},
+ f:[['cliente','Customer name','Nombre del cliente'],['serial','Serial #','Número de serie'],['ticket','Ticket #','Número de ticket'],['sistema','System type / inverter brand','Tipo / marca inversor'],['capacidad','Capacity (kW)','Capacidad (kW)'],['plataforma','Platform (Enphase/SolarEdge/Other)','Plataforma'],['ultima','Last production date','Última producción'],['com','Comm status (Online/Offline)','Estado de comunicación'],['alertas','Active alerts','Alertas activas'],['diag','Initial diagnosis','Diagnóstico inicial'],['accion','Recommended action','Acción recomendada'],['prioridad','Priority (High/Med/Low)','Prioridad (Alta/Media/Baja)']],
+ cust:{es:'Estimado/a {cliente},\n\nGracias por comunicarse con Windmar Home. Hemos recibido su reporte sobre la falta de producción en su sistema solar.\n\nNuestro equipo de soporte técnico está revisando los datos de monitoreo de su sistema para identificar la causa del problema. Para agilizar el proceso, le solicitamos lo siguiente:\n\n• Confirmar si hay alguna luz o indicador visible en el inversor (roja, verde, apagada)\n• Verificar que el breaker del sistema solar esté en posición ON\n• De ser posible, enviar una foto del inversor mostrando su estado actual\n\nNúmero de serie del equipo: {serial}\nNúmero de ticket: {ticket}\n\nEstaremos dándole seguimiento a su caso y le contactaremos con los próximos pasos.\n\nSaludos,\nWindmar Home — Soporte Técnico',
+ en:'Dear {cliente},\n\nThank you for contacting Windmar Home. We have received your report regarding the lack of production on your solar system.\n\nOur technical support team is reviewing your system’s monitoring data to identify the cause of the issue. To speed up the process, please:\n\n• Confirm whether any light or indicator is visible on the inverter (red, green, off)\n• Verify the solar system breaker is in the ON position\n• If possible, send a photo of the inverter showing its current state\n\nEquipment serial number: {serial}\nTicket number: {ticket}\n\nWe will follow up on your case and contact you with next steps.\n\nRegards,\nWindmar Home — Technical Support'},
+ int:{es:'REPORTE: Sin producción\nCLIENTE: {cliente}\nSISTEMA: {sistema}\nSERIAL: {serial}\nCAPACIDAD: {capacidad}\n\nHALLAZGOS EN MONITOREO:\n• Plataforma: {plataforma}\n• Última producción reportada: {ultima}\n• Estado de comunicación: {com}\n• Alertas activas: {alertas}\n\nDIAGNÓSTICO INICIAL:\n{diag}\n\nACCIÓN RECOMENDADA:\n{accion}\n\nPRIORIDAD: {prioridad}',
+ en:'REPORT: No production\nCUSTOMER: {cliente}\nSYSTEM: {sistema}\nSERIAL: {serial}\nCAPACITY: {capacidad}\n\nMONITORING FINDINGS:\n• Platform: {plataforma}\n• Last reported production: {ultima}\n• Comm status: {com}\n• Active alerts: {alertas}\n\nINITIAL DIAGNOSIS:\n{diag}\n\nRECOMMENDED ACTION:\n{accion}\n\nPRIORITY: {prioridad}'}},
+servicio:{n:{en:'Service Request',es:'Solicitud de Servicio'},
+ f:[['cliente','Customer name','Nombre del cliente'],['ticket','Ticket #','Número de ticket'],['direccion','Address','Dirección'],['contacto','Phone / email','Teléfono / email'],['tipo','Service type (Solar/Battery/Roof/Water)','Tipo (Solar/Batería/Techado/Agua)'],['producto','Product (brand/model)','Producto (marca/modelo)'],['problema','Problem as reported','Problema reportado'],['evaluacion','Initial assessment','Evaluación inicial'],['accion','Next action','Acción siguiente'],['prioridad','Priority','Prioridad'],['notas','Notes','Notas']],
+ cust:{es:'Estimado/a {cliente},\n\nHemos recibido su solicitud de servicio y le confirmamos que su caso ha sido registrado en nuestro sistema.\n\nDetalles del caso:\nNúmero de ticket: {ticket}\nTipo de servicio: {tipo}\nDescripción: {problema}\n\nNuestro equipo evaluará su solicitud y le contactará dentro de las próximas 24-48 horas para coordinar los próximos pasos, que pueden incluir diagnóstico remoto o la programación de una visita técnica.\n\nSi tiene información adicional que pueda ayudar con el diagnóstico (fotos, mensajes de error, cambios recientes), puede responder a este mensaje.\n\nSaludos,\nWindmar Home — Soporte Técnico',
+ en:'Dear {cliente},\n\nWe have received your service request and confirm that your case has been registered in our system.\n\nCase details:\nTicket number: {ticket}\nService type: {tipo}\nDescription: {problema}\n\nOur team will review your request and contact you within the next 24-48 hours to coordinate next steps, which may include remote diagnosis or scheduling a technical visit.\n\nIf you have additional information that could help with the diagnosis (photos, error messages, recent changes), feel free to reply to this message.\n\nRegards,\nWindmar Home — Technical Support'},
+ int:{es:'SOLICITUD DE SERVICIO\nCLIENTE: {cliente}\nTICKET: {ticket}\nDIRECCIÓN: {direccion}\nCONTACTO: {contacto}\n\nTIPO DE SERVICIO: {tipo}\nPRODUCTO/EQUIPO: {producto}\n\nPROBLEMA REPORTADO POR CLIENTE:\n{problema}\n\nEVALUACIÓN INICIAL:\n{evaluacion}\n\nACCIÓN SIGUIENTE:\n{accion}\n\nPRIORIDAD: {prioridad}\nNOTAS: {notas}',
+ en:'SERVICE REQUEST\nCUSTOMER: {cliente}\nTICKET: {ticket}\nADDRESS: {direccion}\nCONTACT: {contacto}\n\nSERVICE TYPE: {tipo}\nPRODUCT/EQUIPMENT: {producto}\n\nPROBLEM AS REPORTED BY CUSTOMER:\n{problema}\n\nINITIAL ASSESSMENT:\n{evaluacion}\n\nNEXT ACTION:\n{accion}\n\nPRIORITY: {prioridad}\nNOTES: {notas}'}},
+rma:{n:{en:'RMA / Replacement',es:'RMA / Reemplazo'},
+ f:[['cliente','Customer name','Nombre del cliente'],['ticket','Ticket #','Número de ticket'],['equipo','Brand / model','Marca / modelo'],['serial','Serial Number','Número de Serie'],['siteid','Site ID','ID del Sitio'],['claimno','Claim Number','Número de Reclamo'],['rma','RMA # (or pending)','# RMA (o pendiente)'],['dias','Estimated days','Días estimados'],['fechainst','Install date','Fecha de instalación'],['garantia','Warranty (valid/expired)','Garantía (vigente/vencida)'],['defecto','Identified defect','Defecto identificado'],['canal','Mfr. portal/channel','Portal/canal fabricante'],['rmafab','Manufacturer RMA #','# RMA del fabricante'],['fechasol','Request date','Fecha de solicitud'],['status','Status','Estado'],['accion','Next action','Acción siguiente']],
+ cust:{es:'Estimado/a {cliente},\n\nLe informamos que hemos identificado un equipo defectuoso en su sistema y hemos iniciado el proceso de reemplazo (RMA) con el fabricante.\n\nDetalles del caso:\nTicket: {ticket}\nEquipo afectado: {equipo}\nNúmero de serie: {serial}\nNúmero de RMA: {rma}\n\nPróximos pasos:\n1. El fabricante procesará la solicitud de reemplazo\n2. Una vez recibido el equipo nuevo, coordinaremos la visita técnica para la instalación\n3. Le mantendremos informado sobre el progreso\n\nTiempo estimado: El proceso de RMA generalmente toma entre {dias} días laborables, dependiendo de la disponibilidad del fabricante.\n\nCualquier duda, no dude en contactarnos.\n\nSaludos,\nWindmar Home — Soporte Técnico',
+ en:'Dear {cliente},\n\nWe have identified a defective component in your system and have initiated the replacement process (RMA) with the manufacturer.\n\nCase details:\nTicket: {ticket}\nAffected equipment: {equipo}\nSerial number: {serial}\nRMA number: {rma}\n\nNext steps:\n1. The manufacturer will process the replacement request\n2. Once the new equipment arrives, we will schedule the technical visit for installation\n3. We will keep you informed of progress\n\nEstimated time: the RMA process usually takes {dias} business days, depending on manufacturer availability.\n\nIf you have any questions, don’t hesitate to contact us.\n\nRegards,\nWindmar Home — Technical Support'},
+ int:{es:'RMA INICIADO\nCLIENTE: {cliente}\nTICKET: {ticket}\n\nEQUIPO DEFECTUOSO:\n• Marca/Modelo: {equipo}\n• Serial: {serial}\n• Fecha de instalación: {fechainst}\n• Garantía: {garantia}\n\nDEFECTO IDENTIFICADO:\n{defecto}\n\nEVIDENCIA RECOPILADA:\n☐ Fotos del equipo\n☐ Capturas de monitoreo / error codes\n☐ Reporte de visita técnica\n☐ Historial de troubleshooting\n\nGESTIÓN CON FABRICANTE:\n• Portal/Canal: {canal}\n• # RMA del fabricante: {rmafab}\n• Fecha de solicitud: {fechasol}\n• Status: {status}\n\nACCIÓN SIGUIENTE:\n{accion}',
+ en:'RMA INITIATED\nCUSTOMER: {cliente}\nTICKET: {ticket}\n\nDEFECTIVE EQUIPMENT:\n• Brand/Model: {equipo}\n• Serial: {serial}\n• Install date: {fechainst}\n• Warranty: {garantia}\n\nIDENTIFIED DEFECT:\n{defecto}\n\nEVIDENCE COLLECTED:\n☐ Equipment photos\n☐ Monitoring captures / error codes\n☐ Tech visit report\n☐ Troubleshooting history\n\nMANUFACTURER HANDLING:\n• Portal/Channel: {canal}\n• Manufacturer RMA #: {rmafab}\n• Request date: {fechasol}\n• Status: {status}\n\nNEXT ACTION:\n{accion}'}},
+cita:{n:{en:'Appointment',es:'Cita / Visita'},
+ f:[['cliente','Customer name','Nombre del cliente'],['ticket','Ticket #','Número de ticket'],['fecha','Date','Fecha'],['horario','Time window','Ventana de tiempo'],['tipo','Service description','Descripción del servicio'],['direccion','Address','Dirección'],['contacto','Phone','Teléfono'],['brigada','Assigned crew','Brigada asignada'],['alcance','Scope of work','Alcance del trabajo'],['materiales','Materials needed (or N/A)','Materiales (o N/A)'],['acceso','Access notes','Notas de acceso'],['historial','Relevant history','Historial relevante']],
+ cust:{es:'Estimado/a {cliente},\n\nLe confirmamos que su cita de servicio ha sido programada con los siguientes detalles:\n\nFecha: {fecha}\nVentana de tiempo: {horario}\nTipo de servicio: {tipo}\nTicket: {ticket}\n\nPara el día de la visita:\n• Favor asegurar acceso al área donde se encuentra el equipo\n• Tener disponible un adulto mayor de edad en la propiedad\n• Si necesita reprogramar, comuníquese con nosotros con al menos 24 horas de anticipación\n\nNuestro técnico le contactará el día de la visita para confirmar su llegada.\n\nSaludos,\nWindmar Home — Soporte Técnico',
+ en:'Dear {cliente},\n\nWe confirm that your service appointment has been scheduled with the following details:\n\nDate: {fecha}\nTime window: {horario}\nService type: {tipo}\nTicket: {ticket}\n\nFor the day of the visit:\n• Please ensure access to the area where the equipment is located\n• Have an adult available at the property\n• If you need to reschedule, contact us at least 24 hours in advance\n\nOur technician will contact you on the day of the visit to confirm arrival.\n\nRegards,\nWindmar Home — Technical Support'},
+ int:{es:'VISITA PROGRAMADA\nCLIENTE: {cliente}\nTICKET: {ticket}\nDIRECCIÓN: {direccion}\nCONTACTO: {contacto}\n\nPROGRAMACIÓN:\n• Fecha: {fecha}\n• Ventana: {horario}\n• Brigada asignada: {brigada}\n\nTIPO DE TRABAJO: {tipo}\n\nALCANCE:\n{alcance}\n\nMATERIALES/EQUIPO NECESARIO:\n{materiales}\n\nNOTAS DE ACCESO:\n{acceso}\n\nHISTORIAL RELEVANTE:\n{historial}',
+ en:'VISIT SCHEDULED\nCUSTOMER: {cliente}\nTICKET: {ticket}\nADDRESS: {direccion}\nCONTACT: {contacto}\n\nSCHEDULE:\n• Date: {fecha}\n• Window: {horario}\n• Assigned crew: {brigada}\n\nWORK TYPE: {tipo}\n\nSCOPE:\n{alcance}\n\nMATERIALS/EQUIPMENT NEEDED:\n{materiales}\n\nACCESS NOTES:\n{acceso}\n\nRELEVANT HISTORY:\n{historial}'}},
+brigada:{n:{en:'Crew Scheduled',es:'Brigada Programada'},
+ f:[['cliente','Customer name','Nombre del cliente'],['ticket','Ticket #','Número de ticket'],['fecha','Date','Fecha'],['horario','Time window','Ventana de tiempo'],['trabajo','Work description','Descripción del servicio'],['direccion','Address','Dirección'],['brigada','Crew (name/team)','Brigada (nombre/equipo)'],['lider','Crew lead','Líder de brigada'],['alcance','Detailed scope','Alcance detallado'],['materiales','Materials list','Lista de materiales'],['notas','Special notes','Notas especiales'],['resultado','Expected outcome','Resultado esperado']],
+ cust:{es:'Estimado/a {cliente},\n\nLe informamos que nuestro equipo técnico ha sido asignado y confirmado para atender su caso.\n\nDetalles de la visita:\nFecha: {fecha}\nVentana de tiempo: {horario}\nTrabajo a realizar: {trabajo}\nTicket: {ticket}\n\nEl día de la visita, nuestro técnico le contactará para confirmar su llegada. Favor tener acceso disponible al área del equipo.\n\nSi surge algún cambio, le notificaremos con anticipación.\n\nSaludos,\nWindmar Home — Soporte Técnico',
+ en:'Dear {cliente},\n\nWe are pleased to inform you that our technical crew has been assigned and confirmed for your case.\n\nVisit details:\nDate: {fecha}\nTime window: {horario}\nWork to be performed: {trabajo}\nTicket: {ticket}\n\nOn the day of the visit, our technician will contact you to confirm arrival. Please have access available to the equipment area.\n\nIf anything changes, we will notify you in advance.\n\nRegards,\nWindmar Home — Technical Support'},
+ int:{es:'BRIGADA LISTA — TRABAJO CONFIRMADO\nCLIENTE: {cliente}\nTICKET: {ticket}\nDIRECCIÓN: {direccion}\n\nPROGRAMACIÓN:\n• Fecha: {fecha}\n• Ventana: {horario}\n• Brigada: {brigada}\n• Líder de brigada: {lider}\n\nALCANCE DEL TRABAJO:\n{alcance}\n\nPRE-VISITA — CHECKLIST:\n☐ Materiales confirmados y disponibles\n☐ Equipo de reemplazo recibido (si aplica)\n☐ Cliente notificado de la fecha\n☐ Acceso confirmado\n☐ Permisos / documentación lista (si aplica)\n☐ Historial de caso revisado\n\nMATERIALES:\n{materiales}\n\nNOTAS ESPECIALES:\n{notas}\n\nRESULTADO ESPERADO:\n{resultado}',
+ en:'CREW READY — WORK CONFIRMED\nCUSTOMER: {cliente}\nTICKET: {ticket}\nADDRESS: {direccion}\n\nSCHEDULE:\n• Date: {fecha}\n• Window: {horario}\n• Crew: {brigada}\n• Crew lead: {lider}\n\nSCOPE OF WORK:\n{alcance}\n\nPRE-VISIT CHECKLIST:\n☐ Materials confirmed and available\n☐ Replacement equipment received (if applicable)\n☐ Customer notified of date\n☐ Access confirmed\n☐ Permits / documentation ready (if applicable)\n☐ Case history reviewed\n\nMATERIALS:\n{materiales}\n\nSPECIAL NOTES:\n{notas}\n\nEXPECTED OUTCOME:\n{resultado}'}}};
+function rfInit(){rfChips();rfForm();rfRender();if(window.WM_VIEWER){var _em=document.getElementById('rf-em');if(_em){_em.disabled=true;_em.style.opacity='.45';_em.style.pointerEvents='none';}}}
+function rfChips(){
+ var el=document.getElementById('rf-chips');el.innerHTML='';
+ Object.keys(RF).forEach(function(k){
+  var b=document.createElement('button');b.className='chip'+(RF_CUR===k?' active':'');b.textContent=RF[k].n[RFLANG()];
+  b.onclick=function(){RF_CUR=k;rfChips();rfForm();rfRender()};el.appendChild(b);
+ });
+}
+function rfForm(){
+ var el=document.getElementById('rf-form');el.innerHTML='';
+ RF[RF_CUR].f.forEach(function(f){
+  var w=document.createElement('div');
+  w.innerHTML='<label>'+(RFLANG()==='es'?f[2]:f[1])+'</label><input data-k="'+f[0]+'" value="'+((RF_VALS[f[0]]||'').replace(/"/g,'&quot;'))+'" oninput="RF_VALS[this.dataset.k]=this.value;rfRender()">';
+  el.appendChild(w);
+ });
+}
+function rfSub(txt){
+ var labels={};RF[RF_CUR].f.forEach(function(f){labels[f[0]]=(RFLANG()==='es'?f[2]:f[1])});
+ return txt.replace(/\{(\w+)\}/g,function(m,k){
+  var v=(RF_VALS[k]||'').trim();
+  return v?('<b>'+v.replace(/</g,'&lt;')+'</b>'):('<span class="ph">['+(labels[k]||k).toUpperCase()+']</span>');
+ });
+}
+function rfRender(){
+ var tpl=RF[RF_CUR];
+ document.getElementById('rf-tc').textContent=tpl.n[RFLANG()];
+ document.getElementById('rf-ti').textContent=tpl.n[RFLANG()];
+ document.getElementById('rf-bc').textContent=RFLANG()==='es'?'CLIENTE':'CUSTOMER';
+ document.getElementById('rf-bi').textContent=RFLANG()==='es'?'NOTA INTERNA':'INTERNAL NOTE';
+ document.getElementById('rf-prev-cust').innerHTML=rfSub(tpl.cust[RFLANG()]);
+ document.getElementById('rf-prev-int').innerHTML=rfSub(tpl.int[RFLANG()]);
+}
+function copyRF(which){
+ var tpl=RF[RF_CUR];var labels={};tpl.f.forEach(function(f){labels[f[0]]=(RFLANG()==='es'?f[2]:f[1])});
+ var txt=(which==='cust'?tpl.cust[RFLANG()]:tpl.int[RFLANG()]).replace(/\{(\w+)\}/g,function(m,k){
+  var v=(RF_VALS[k]||'').trim();return v||('['+(labels[k]||k).toUpperCase()+']');
+ });
+ navigator.clipboard.writeText(txt).then(function(){
+  var b=document.getElementById(which==='cust'?'rf-cp1':'rf-cp2');var o=b.textContent;
+  b.textContent='✓ '+(RFLANG()==='es'?'Copiado':'Copied');setTimeout(function(){b.textContent=o},1500);
+ });
+}
+/* ---------- report forms: export ---------- */
+function rfPlain(which){
+ var tpl=RF[RF_CUR];var labels={};tpl.f.forEach(function(f){labels[f[0]]=(RFLANG()==='es'?f[2]:f[1])});
+ return (which==='cust'?tpl.cust[RFLANG()]:tpl.int[RFLANG()]).replace(/\{(\w+)\}/g,function(m,k){
+  var v=(RF_VALS[k]||'').trim();return v||('['+(labels[k]||k).toUpperCase()+']');
+ });
+}
+function rfReportHTML(){
+ var tpl=RF[RF_CUR];
+ var es=RFLANG()==='es';
+ var V=RF_VALS;
+ var ticket=(V.ticket||'').trim();
+ var cliente=(V.cliente||'').trim();
+ var today=new Date().toLocaleDateString(es?'es-PR':'en-US');
+ function esc(t){return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\n/g,'<br>')}
+ var LOGO="https://windmar-service-app.vercel.app/windmar-fl-logo.png";
+ function fld(label,val,key){return '<div style="display:flex;gap:8px;margin:3px 0;font-size:11.5px"><span style="color:#1D429B;font-weight:700;white-space:nowrap">'+label+':</span><span class="ln" contenteditable="true" data-k="'+(key||'')+'">'+esc(val||'')+'</span></div>'}
+ function bar(txt){return '<div style="background:#1D429B;color:#fff;font-weight:700;font-size:12px;text-align:center;padding:6px;letter-spacing:.4px">'+txt+'</div>'}
+ function box(inner,extra,key){return '<div class="box" contenteditable="true"'+(extra||'')+(key?' data-k="'+key+'"':'')+'>'+(inner||'')+'</div>'}
+ function cbs(group,items){return '<div class="box" style="cursor:default">'+items.map(function(it){return '<div class="cbrow" data-grp="'+group+'" style="display:flex;align-items:center;font-size:11.5px;margin:5px 0"><span class="cb" onclick="this.classList.toggle(\'on\')"></span><span class="cbl">'+it+'</span></div>'}).join('')+'</div>'}
+ function cell(title,content){return '<div>'+bar(title)+content+'</div>'}
+ function sec(a,b){return '<div class="grid2" style="margin-top:4px">'+a+b+'</div>'}
+ var hl=[[es?'Fecha de Servicio':'Date of Service',today,'date_of_service'],[es?'Nombre del Cliente':'Customer Name',cliente,'customer_name'],[es?'Dirección de Servicio':'Service Address',(V.direccion||''),'service_address'],[es?'Teléfono':'Phone Number',(V.contacto||''),'phone']];
+ var hr=[[es?'Técnico':'Technician','','technician'],[es?'Orden de Trabajo #':'Work Order #',ticket,'work_order'],[es?'Email':'Email','','email'],[es?'Hora de Llegada':'Arrival Time','','arrival_time'],[es?'Hora de Salida':'Departure Time','','departure_time']];
+ function hcol(a){return a.map(function(r){return fld(r[0],r[1],r[2])}).join('')}
+ var siRows=[[es?'Tamaño del Sistema (kW)':'System Size (kW)',(V.capacidad||''),'system_size'],[es?'Modelo de Inversor':'Inverter Model',(V.sistema||V.equipo||V.producto||''),'inverter_model'],[es?'Plataforma de Monitoreo':'Monitoring Platform',(V.plataforma||''),'monitoring_platform'],[es?'Batería (si aplica)':'Battery (if applicable)','','battery'],[es?'Tipo de Techo':'Roof Type','','roof_type'],[es?'Fecha de Instalación':'Date Installed',(V.fechainst||''),'date_installed']];
+ var si='<div style="border:2px solid #F89B24;padding:2px 12px">'+siRows.map(function(r){return fld(r[0],r[1],r[2])}).join('')+'</div>';
+ var insp=cbs('insp',[es?'Módulos Solares':'Solar Modules',es?'Inversor(es)':'Inverter(s)',es?'Cableado AC':'AC Wiring',es?'Cableado DC':'DC Wiring',es?'Desconexiones y Breakers':'Disconnects and Breakers',es?'Sistema de Monitoreo':'Monitoring System',es?'Verificación de Producción':'Production Verification',es?'Inspección de Techo':'Roof Inspection',(es?'Otro':'Other')+': <span class="ln" contenteditable="true" data-k="inspection_other" style="min-width:90px"></span>']);
+ var stat=cbs('stat',[es?'Sistema Operando Normalmente':'System Operating Normally',es?'Monitoreo Restaurado':'Monitoring Restored',es?'Producción Verificada':'Production Verified',es?'Reparaciones Adicionales Recomendadas':'Additional Repairs Recommended',es?'Visita de Seguimiento Requerida':'Follow-Up Visit Required']);
+ var _shown={cliente:1,ticket:1,direccion:1,contacto:1,capacidad:1,sistema:1,equipo:1,producto:1,plataforma:1,fechainst:1};
+ if(RF_CUR==='rma'){_shown.serial=1;_shown.siteid=1;_shown.claimno=1;}
+ var _det=tpl.f.filter(function(f){return !_shown[f[0]]}).map(function(f){return '<div style="display:flex;gap:6px;margin:2px 0;font-size:11px"><b style="color:#1D429B;white-space:nowrap">'+(es?f[2]:f[1])+':</b><span class="ln" contenteditable="true" data-k="'+f[0]+'">'+esc((V[f[0]]||'').trim())+'</span></div>'}).join('');
+ var detTitle=({noprod:(es?'MONITOREO Y DIAGNÓSTICO':'MONITORING & DIAGNOSIS'),servicio:(es?'DETALLES DE LA SOLICITUD':'SERVICE REQUEST DETAILS'),rma:(es?'DETALLES RMA / GARANTÍA':'RMA / WARRANTY DETAILS'),cita:(es?'DETALLES DE LA CITA':'APPOINTMENT DETAILS'),brigada:(es?'DETALLES DE BRIGADA':'CREW / WORK DETAILS')})[RF_CUR]||(es?'SERVICIO SOLICITADO':'SERVICE REQUESTED');
+ var sr=box(_det,' style="min-height:74px"','service_requested');
+ var tag='<div style="text-align:center;color:#1D429B;font-weight:700;font-size:11px;letter-spacing:.5px;margin-top:16px">'+(es?'TRABAJO DE CALIDAD &nbsp;&bull;&nbsp; SERVICIO CONFIABLE &nbsp;&bull;&nbsp; IMPULSANDO UN MEJOR FUTURO':'QUALITY WORK &nbsp;&bull;&nbsp; RELIABLE SERVICE &nbsp;&bull;&nbsp; POWERING A BETTER FUTURE')+'</div>'+'<div style="text-align:center;color:#5a6b8c;font-weight:600;font-size:9.5px;margin-top:4px;letter-spacing:.3px">Windmar Solar &amp; Roofing | Quality Assurance &amp; Field Operations | Service &amp; Maintenance Division</div>';
+ var photoCaps=es?['Captura de Monitoreo','Foto de Equipo / Reparación','Verificación Operacional Final','Documentación Adicional']:['Monitoring Screenshot','Equipment / Repair Photo','Final Operational Verification','Additional Documentation'];
+ var slots=photoCaps.map(function(c,i){return '<div><div class="slot" onclick="this.nextElementSibling.click()" id="s'+i+'" data-cap="'+esc(c)+'"><span style="color:#999;font-style:italic">'+(es?'Insertar foto aquí':'Insert Photo Here')+'</span></div><input type="file" accept="image/*" style="display:none" onchange="ph(this,\'s'+i+'\')"><div style="color:#1D429B;font-weight:700;font-size:12px;margin:6px 0 16px">'+c+'</div></div>'}).join('');
+ return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>WindMar - '+tpl.n[RFLANG()]+(ticket?' - '+ticket:'')+'</title>'+
+ '<style>@page{size:Letter;margin:0}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{font-family:Segoe UI,Arial,sans-serif;color:#1a2233;margin:0;background:#e8e8e8}'+
+ '.page{background:#fff;width:8.5in;height:11in;box-sizing:border-box;margin:14px auto;border:6px solid #1D429B;padding:6px;overflow:hidden}'+
+ '.inner{border:2px solid #F89B24;box-sizing:border-box;height:100%;padding:0.10in 0.32in;display:flex;flex-direction:column;overflow:hidden}'+
+ '.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}'+
+ '.box{border:1px solid #999;min-height:48px;padding:8px 10px;font-size:11.5px;line-height:1.5}'+
+ '.ln{flex:1;border-bottom:1px solid #bbb;min-height:14px;font-weight:600}'+
+ '.cb{display:inline-block;width:13px;height:13px;border:1.6px solid #1D429B;border-radius:2px;margin-right:8px;cursor:pointer}'+
+ '.cb.on{background:#1D429B}'+
+ '.slot{border:1px solid #999;background:#f5f5f5;height:180px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden}'+
+ '.slot img{width:100%;height:100%;object-fit:cover;display:block}'+
+ '[contenteditable]:hover{outline:2px dashed #F89B24}'+
+ '@media print{*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}html,body{background:#fff;margin:0}.np{display:none}.page{margin:0;page-break-after:always}.page:last-of-type{page-break-after:auto}}'+
+ '</style></head><body>'+
+ '<div id="rptdoc">'+
+ '<div class="page"><div class="inner">'+
+ '<div style="text-align:center"><img src="'+LOGO+'" style="height:74px"></div>'+
+ '<div style="display:flex;align-items:center;gap:12px;margin:12px 0 6px"><div style="flex:1;height:2px;background:#F89B24"></div><div style="color:#1D429B;font-size:28px;font-weight:800;letter-spacing:1px;text-align:center;white-space:nowrap">'+(es?'REPORTE DE SERVICIO':'SERVICE REPORT')+'</div><div style="flex:1;height:2px;background:#F89B24"></div></div>'+
+ '<div style="text-align:center;color:#F89B24;font-weight:700;font-size:12px;margin:0 0 14px;letter-spacing:1px;text-transform:uppercase">'+tpl.n[RFLANG()]+'</div>'+
+ (RF_CUR==='rma'?'<div style="display:flex;justify-content:flex-end;gap:16px;font-size:11px;margin:-4px 0 8px;flex-wrap:wrap"><span><b style="color:#1D429B">'+(es?'Número de Serie':'Serial Number')+':</b> '+esc(V.serial||'—')+'</span><span><b style="color:#1D429B">'+(es?'ID del Sitio':'Site ID')+':</b> '+esc(V.siteid||'—')+'</span><span><b style="color:#1D429B">'+(es?'Número de Reclamo':'Claim Number')+':</b> '+esc(V.claimno||'—')+'</span></div>':'')+'<div class="grid2"><div>'+hcol(hl)+'</div><div>'+hcol(hr)+'</div></div>'+
+ '<div style="border-top:2px solid #F89B24;margin:12px 0 4px"></div>'+
+ sec(cell(es?'INFORMACIÓN DEL SISTEMA':'SYSTEM INFORMATION',si),cell(es?'INSPECCIÓN REALIZADA':'INSPECTION PERFORMED',insp))+
+ sec(cell(detTitle,sr),cell(es?'ESTADO DEL SISTEMA':'SYSTEM STATUS',stat))+
+ sec(cell(es?'HALLAZGOS':'FINDINGS',box('',' style="min-height:40px"','findings')),cell(es?'RECOMENDACIONES':'RECOMMENDATIONS',box('',' style="min-height:40px"','recommendations')))+
+ sec(cell(es?'ACCIÓN CORRECTIVA TOMADA':'CORRECTIVE ACTION TAKEN',box('',' style="min-height:40px"','corrective_action')),cell(es?'NOTAS DEL TÉCNICO':'TECHNICIAN NOTES',box('',' style="min-height:40px"','technician_notes')))+
+ '<div style="flex:1"></div>'+tag+
+ '</div></div>'+
+ '<div class="page"><div class="inner">'+
+ '<div style="text-align:center"><img src="'+LOGO+'" style="height:70px"></div>'+
+ '<div style="display:flex;align-items:center;gap:12px;margin:12px 0 14px"><div style="flex:1;height:2px;background:#F89B24"></div><div style="color:#1D429B;font-size:24px;font-weight:800;letter-spacing:1px;text-align:center;white-space:nowrap">'+(es?'DOCUMENTACIÓN FOTOGRÁFICA':'PHOTO DOCUMENTATION')+'</div><div style="flex:1;height:2px;background:#F89B24"></div></div>'+
+ '<div class="grid2" style="margin:4px 0 12px;font-size:12px"><div><span style="color:#1D429B;font-weight:700">'+(es?'Orden de Trabajo #':'Work Order #')+':</span> <b>'+esc(ticket||'-')+'</b></div><div><span style="color:#1D429B;font-weight:700">'+(es?'Nombre del Cliente':'Customer Name')+':</span> <b>'+esc(cliente||'-')+'</b></div></div>'+
+ bar(es?'FOTOS DE SERVICIO / CAPTURAS':'SERVICE PHOTOS / SCREENSHOTS')+
+ '<div class="grid2" style="margin-top:14px">'+slots+'</div>'+
+ bar(es?'NOTAS DE FOTOS':'PHOTO NOTES')+box('',' style="min-height:56px"','photo_notes')+
+ '<div style="flex:1"></div>'+tag+
+ '</div></div>'+
+ '<div id="moreWrap" style="display:none;max-width:8.5in;margin:14px auto 0;padding:0 0.34in;box-sizing:border-box">'+
+ '<div style="background:#1D429B;color:#fff;font-weight:700;font-size:13px;text-align:center;padding:7px;letter-spacing:.4px">'+(es?'FOTOS ADICIONALES':'ADDITIONAL PHOTOS')+'</div>'+
+ '<div id="morephotos" style="margin-top:12px"></div>'+
+ '</div>'+
+ '</div>'+
+ '<div class="np" style="text-align:center;padding:14px">'+'<button onclick="dlPDF()" style="background:#F89B24;color:#fff;border:none;padding:11px 26px;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px;margin:0 4px">&#11015; '+(es?'Guardar como PDF':'Save as PDF')+'</button>'+'<button onclick="addSlot()" style="background:#1D429B;color:#fff;border:none;padding:11px 22px;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px;margin:0 4px">&#43; '+(es?'Agregar Espacio de Foto':'Add Photo Slot')+'</button>'+(window.WM_VIEWER?'':'<button onclick="saveDB(this)" style="background:#F89B24;color:#fff;border:none;padding:11px 26px;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px;margin:0 4px">&#128190; '+(es?'Guardar en Base de Datos':'Save to Database')+'</button>')+'<button onclick="window.print()" style="background:#F89B24;color:#fff;border:none;padding:11px 26px;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px;margin:0 4px">&#128424; '+(es?'Imprimir':'Print')+'</button>'+
+ '<div style="font-size:11px;color:#777;margin-top:6px">'+(es?'Las cajas son editables - haga clic para escribir. Clic en los recuadros para insertar fotos.':'Boxes are editable - click to type. Click photo slots to insert photos.')+'</div></div>'+
+ '<script>'+
+ 'var RF_SB_URL="'+RF_SB_URL+'";var RF_SB_KEY="'+RF_SB_KEY+'";var RPT_TYPE="'+RF_CUR+'";var RPT_LANG="'+RFLANG()+'";var WM_VIEWER='+(window.WM_VIEWER?'true':'false')+';'+
+ 'var CAP={};'+
+ 'function ph(inp,id){var f=inp.files[0];if(!f)return;var el=document.getElementById(id);var r=new FileReader();r.onload=function(){el.innerHTML="<img src=\\\""+r.result+"\\\">";window.__ph=window.__ph||{};window.__ph[id]={url:r.result,name:f.name,type:f.type}};r.readAsDataURL(f)}'+
+ 'function addSlot(){window.__sn=window.__sn||0;var n=window.__sn++;var id="x"+n;var cap=(RPT_LANG==="es"?"Foto ":"Photo ")+(n+5);var box=document.getElementById("morephotos");document.getElementById("moreWrap").style.display="block";var wrap=document.createElement("div");wrap.style.cssText="display:inline-block;width:48%;vertical-align:top;margin:1%;page-break-inside:avoid";var slot=document.createElement("div");slot.className="slot";slot.id=id;slot.setAttribute("data-cap",cap);var inp=document.createElement("input");inp.type="file";inp.accept="image/*";inp.style.display="none";inp.onchange=function(){ph(inp,id);};slot.onclick=function(){inp.click();};var span=document.createElement("span");span.style.cssText="color:#999;font-style:italic";span.textContent=(RPT_LANG==="es"?"Insertar foto aqui":"Insert Photo Here");slot.appendChild(span);var lbl=document.createElement("div");lbl.contentEditable="true";lbl.style.cssText="color:#1D429B;font-weight:700;font-size:12px;margin:6px 0 10px";lbl.textContent=cap;wrap.appendChild(slot);wrap.appendChild(inp);wrap.appendChild(lbl);box.appendChild(wrap);}'+
+ 'function dlPDF(){window.focus();window.print();}'+
+ 'function collect(){var rec={report_type:RPT_TYPE,lang:RPT_LANG};document.querySelectorAll("[data-k]").forEach(function(el){var k=el.getAttribute("data-k");if(!k)return;var v=(el.innerText||"").trim();rec[k]=v});function grp(g){var out=[];document.querySelectorAll(".cbrow[data-grp=\\\'"+g+"\\\']").forEach(function(row){var cb=row.querySelector(".cb");var lbl=row.querySelector(".cbl");if(cb&&cb.classList.contains("on")&&lbl)out.push((lbl.innerText||"").trim())});return out}rec.inspection=grp("insp");rec.system_status=grp("stat");rec.full_html=document.documentElement.outerHTML;return rec}'+
+ 'function b64toBlob(durl){var p=durl.split(",");var mime=(p[0].match(/:(.*?);/)||[])[1]||"application/octet-stream";var bin=atob(p[1]);var n=bin.length;var u=new Uint8Array(n);while(n--)u[n]=bin.charCodeAt(n);return new Blob([u],{type:mime})}'+
+ 'async function saveDB(btn){if(WM_VIEWER){try{alert(RPT_LANG==="es"?"Solo lectura \\u2014 no tienes permiso.":"View only \\u2014 you don\\u0027t have permission to do that.")}catch(e){}return}var orig=btn.innerHTML;btn.innerHTML="Saving\\u2026";try{var rec=collect();var ph=window.__ph||{};var photos=[];var base=(rec.work_order||"report").replace(/[^A-Za-z0-9_-]/g,"_");for(var id in ph){if(!ph.hasOwnProperty(id))continue;var item=ph[id];var blob=b64toBlob(item.url);var ext=((item.name||"").split(".").pop()||"jpg").toLowerCase();var type=item.type||"image/jpeg";var path=base+"/"+Date.now()+"_"+id+"."+ext;var slot=document.getElementById(id);var cap=(item.cap)||(slot?(slot.getAttribute("data-cap")||""):"");var up=await fetch(RF_SB_URL+"/storage/v1/object/report-photos/"+path,{method:"POST",headers:{apikey:RF_SB_KEY,Authorization:"Bearer "+RF_SB_KEY,"Content-Type":type},body:blob});if(up.ok){photos.push({label:cap,url:RF_SB_URL+"/storage/v1/object/public/report-photos/"+path})}}rec.photos=photos;var res=await fetch(RF_SB_URL+"/rest/v1/service_reports",{method:"POST",headers:{apikey:RF_SB_KEY,Authorization:"Bearer "+RF_SB_KEY,"Content-Type":"application/json",Prefer:"return=minimal"},body:JSON.stringify(rec)});if(res.ok){btn.innerHTML="\\u2713 Saved"}else{var tx=await res.text();console.error("Save error",res.status,tx);btn.innerHTML="\\u26a0 Error"}}catch(e){console.error(e);btn.innerHTML="\\u26a0 Error";setTimeout(function(){btn.innerHTML=orig},2500)}}'+
+ '<'+'/script>'+
+ '</body></html>';
+}
+function rfFileName(){
+ var ticket=(RF_VALS.ticket||'').trim().replace(/[^\w-]/g,'');
+ return 'WindMar-'+RF[RF_CUR].n.en.replace(/[^\w]+/g,'')+(ticket?'-'+ticket:'')+'-'+new Date().toISOString().slice(0,10)+'.html';
+}
+function rfOpenReport(autoPrint){
+ var w=window.open('','_blank');
+ if(!w){alert(RFLANG()==='es'?'Permita ventanas emergentes para abrir el reporte':'Please allow pop-ups to open the report');return;}
+ w.document.write(rfReportHTML());w.document.close();
+ if(autoPrint){setTimeout(function(){try{w.focus();w.print()}catch(e){}},600);}
+}
+function rfDownload(){rfOpenReport(false)}
+function rfPrint(){rfOpenReport(true)}
+function rptClose(){}
+function rfEmail(){
+ if(window.WM_VIEWER){ try{ alert(RFLANG()==="es"?"Solo lectura — no tienes permiso.":"View only — you don't have permission to do that."); }catch(e){} return; }
+ var es=RFLANG()==='es';
+ var ticket=(RF_VALS.ticket||'').trim();
+ var subj='WindMar Home — '+RF[RF_CUR].n[RFLANG()]+(ticket?' — '+ticket:'');
+ window.location.href='mailto:?subject='+encodeURIComponent(subj)+'&body='+encodeURIComponent(rfPlain('cust'));
+}
+
+function savedInit(){
+ var list=document.getElementById('saved-list');
+ var es=RFLANG()==='es';
+ list.innerHTML='<div class="empty">'+(es?'Cargando…':'Loading…')+'</div>';
+ fetch(RF_SB_URL+'/rest/v1/service_reports?select=id,created_at,report_type,customer_name,work_order,findings,photos&order=created_at.desc&limit=200',{headers:{apikey:RF_SB_KEY,Authorization:'Bearer '+RF_SB_KEY}}).then(function(r){return r.json()}).then(function(rows){
+  if(!rows||!rows.length){list.innerHTML='<div class="empty">'+(es?'Sin reportes guardados':'No saved reports')+'</div>';return}
+  list.innerHTML=rows.map(function(o){
+   var dt=o.created_at?new Date(o.created_at).toLocaleString(es?'es-PR':'en-US'):'';
+   var np=(o.photos&&o.photos.length)?o.photos.length:0;
+   var name=o.customer_name||'—';var wo=o.work_order?(' · #'+o.work_order):'';
+   return '<div class="row" style="cursor:pointer;padding:10px 0;border-bottom:1px solid var(--border)" onclick="openSaved(\''+o.id+'\')"><div style="font-weight:700;color:var(--heading)">'+esc2(name)+wo+'</div><div class="meta">'+esc2(o.report_type||'')+' · '+esc2(dt)+(np?(' · '+np+' '+(es?'fotos':'photos')):'')+'</div></div>';
+  }).join('');
+ }).catch(function(e){console.error(e);list.innerHTML='<div class="empty">'+(es?'Error de conexión':'Connection error')+'</div>'});
+}
+function esc2(t){return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function openSaved(id){
+ fetch(RF_SB_URL+'/rest/v1/service_reports?id=eq.'+id+'&select=full_html',{headers:{apikey:RF_SB_KEY,Authorization:'Bearer '+RF_SB_KEY}}).then(function(r){return r.json()}).then(function(a){if(!a||!a[0])return;var w=window.open('','_blank');w.document.write(a[0].full_html);w.document.close()}).catch(function(e){console.error(e)});
+}
+// ── Shells rendered inside the Service & Monitoring tab; rfInit()/savedInit() populate them ──
+function svcReportsShell(es){
+  return '<div id="rf-chips" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>'
+   +'<div class="card" style="padding:16px;margin-bottom:16px">'
+   +'<div id="rf-form" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:10px 14px"></div>'
+   +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">'
+   +'<button class="btn3d sm" id="rf-dl" onclick="rfDownload()">📄 '+(es?'Abrir / Llenar Reporte':'Open / Fill Report')+'</button>'
+   +'<button class="btn3d blue sm" id="rf-em" onclick="rfEmail()">✉️ '+(es?'Enviar al Cliente':'Email Customer')+'</button>'
+   +'<button class="btn3d ghost sm" id="rf-pr" onclick="rfPrint()">🖨 '+(es?'Imprimir / PDF':'Print / PDF')+'</button>'
+   +'</div></div>'
+   +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(340px,100%),1fr));gap:16px">'
+   +'<div class="card" style="padding:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span class="pill" id="rf-bc" style="background:#1D429B;font-size:10px">CUSTOMER</span><b id="rf-tc" style="font-size:13px"></b><button class="btn3d sm" id="rf-cp1" onclick="copyRF(\'cust\')" style="margin-left:auto;font-size:11px">⧉ '+(es?'Copiar':'Copy')+'</button></div><div id="rf-prev-cust" style="white-space:pre-wrap;font-size:12.5px;line-height:1.55;color:var(--text)"></div></div>'
+   +'<div class="card" style="padding:14px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span class="pill" id="rf-bi" style="background:#F59E0B;font-size:10px">INTERNAL</span><b id="rf-ti" style="font-size:13px"></b><button class="btn3d sm" id="rf-cp2" onclick="copyRF(\'int\')" style="margin-left:auto;font-size:11px">⧉ '+(es?'Copiar':'Copy')+'</button></div><div id="rf-prev-int" style="white-space:pre-wrap;font-size:12.5px;line-height:1.55;color:var(--text)"></div></div>'
+   +'</div>';
+}
+function svcSavedShell(es){
+  return '<div class="card" style="padding:16px"><div style="font-size:12.5px;color:var(--text-dim);margin-bottom:12px">'+(es?'Reportes guardados en la base de datos':'Reports saved to the database')+'</div><div id="saved-list"><div style="text-align:center;color:var(--text-dim);padding:16px">—</div></div></div>';
+}
 
 const TABS=[
   {id:"itinerary",key:"tab_itinerary",fn:itineraryHTML},
