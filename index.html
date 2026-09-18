@@ -3579,11 +3579,12 @@ function zohoHTML(){
    the deployed service-app APIs (server-side keys, CORS-enabled) so NO secrets are duplicated here.
    Self-contained: state under S.svcmon, inline handlers call the svc* globals below. ─────────────── */
 const SVC_API="https://windmar-service-app.vercel.app";
-function svcInit(){ if(S.svcmon) return; S.svcmon={ sub:"sites",
+function svcInit(){ if(S.svcmon) return; S.svcmon={ sub:"dash",
+  dash:{status:"idle",newT:[],closed:[]},
   sites:{status:"idle",list:[],q:"",filter:"all",page:0}, enph:{status:"idle",list:[]},
   detail:null, out:{status:"idle",counties:[],updated:null},
   eqOpen:null, codeF:"all", codeQ:"", sysStatus:svcGetSysStatus(),
-  tk:{status:"idle",month:[],backlog:[],open:null} }; }
+  tk:{status:"idle",month:[],backlog:[],open:null,q:""} }; }
 function svcGetSysStatus(){ try{ return JSON.parse(localStorage.getItem("wm_sys_status")||"{}"); }catch(e){ return {}; } }
 const SVC_PER=25;
 function svcNum(v,dec){ if(v==null||isNaN(v))return "0"; dec=(dec==null?1:dec); return Number(v).toLocaleString(undefined,{minimumFractionDigits:dec,maximumFractionDigits:dec}); }
@@ -3688,6 +3689,7 @@ function svcCloseSite(){ S.svcmon.detail=null; render(true); }
 function svcSaveEq(k){ try{ const v=document.getElementById("svc-eq-st").value, note=document.getElementById("svc-eq-note").value;
   S.svcmon.sysStatus[k]={s:v,note:note,ts:Date.now()}; localStorage.setItem("wm_sys_status",JSON.stringify(S.svcmon.sysStatus)); }catch(e){} render(true); }
 function svcSub(x){ S.svcmon.sub=x; render(true);
+  if(x==="dash"&&S.svcmon.dash.status==="idle") svcLoadDash();
   if(x==="sites"&&S.svcmon.sites.status==="idle"){ svcLoadSites(); svcLoadEnphase(); }
   if(x==="outages"&&S.svcmon.out.status==="idle") svcLoadOutages();
   if(x==="tickets"&&S.svcmon.tk.status==="idle") svcLoadTickets();
@@ -3697,15 +3699,28 @@ function svcSetSiteFilter(f){ S.svcmon.sites.filter=f; S.svcmon.sites.page=0; re
 function svcSitePage(d){ S.svcmon.sites.page+=d; render(true); }
 function svcSetCodeF(f){ S.svcmon.codeF=f; render(true); }
 function svcSetCodeQ(v){ S.svcmon.codeQ=v; render(true); }
+function svcSetTkQ(v){ S.svcmon.tk.q=v; render(true); }
+function svcLoadDash(){ const st=S.svcmon.dash; if(st.status==="loading")return; st.status="loading"; render(true);
+  Promise.all([
+    fetch(SVC_API+"/api/zoho-service-tickets?mode=recent",{cache:"no-store"}).then(r=>r.json()).catch(()=>({})),
+    fetch(SVC_API+"/api/zoho-service-tickets?mode=closed",{cache:"no-store"}).then(r=>r.json()).catch(()=>({}))
+  ]).then(([nw,cl])=>{ st.newT=(nw&&nw.records)||[]; st.closed=(cl&&cl.records)||[]; st.status="live"; render(true); })
+   .catch(()=>{ st.status="error"; render(true); });
+}
 
 // ── Render ──────────────────────────────────────────────────────────────────────────────────────
 function serviceMonHTML(){ svcInit(); const es=S.lang==="es", C=S.svcmon;
+  // Load whichever section is showing (Ticket Dashboard is the default + first).
+  if(C.sub==="dash"&&C.dash.status==="idle") svcLoadDash();
+  if(C.sub==="tickets"&&C.tk.status==="idle") svcLoadTickets();
   if(C.sub==="sites"&&C.sites.status==="idle"){ svcLoadSites(); svcLoadEnphase(); }
+  if(C.sub==="outages"&&C.out.status==="idle") svcLoadOutages();
   const subBtn=(id,lbl)=>`<button class="btn3d ${C.sub===id?'':'ghost'} sm" data-action="noop" onclick="svcSub('${id}')" style="${C.sub===id?'background:linear-gradient(135deg,var(--wh-blue),var(--wh-orange))':''}">${lbl}</button>`;
   const nav=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
-    ${subBtn("sites",es?"⚡ Producción":"⚡ Site Production")}${subBtn("outages",es?"🔌 Cortes":"🔌 Outages")}${subBtn("equip",es?"🧰 Equipo y Códigos":"🧰 Equipment & Codes")}${subBtn("tickets",es?"🔧 Tickets":"🔧 Service Tickets")}</div>`;
+    ${subBtn("dash",es?"🎫 Panel de Tickets":"🎫 Ticket Dashboard")}${subBtn("tickets",es?"🔧 Tickets de Servicio":"🔧 Service Tickets")}${subBtn("sites",es?"⚡ Producción":"⚡ Site Production")}${subBtn("outages",es?"🔌 Cortes":"🔌 Outages")}${subBtn("equip",es?"🧰 Equipo y Códigos":"🧰 Equipment & Codes")}</div>`;
   let body="";
-  if(C.sub==="sites") body=svcSitesHTML(es);
+  if(C.sub==="dash") body=svcDashHTML(es);
+  else if(C.sub==="sites") body=svcSitesHTML(es);
   else if(C.sub==="outages") body=svcOutagesHTML(es);
   else if(C.sub==="equip") body=svcEquipHTML(es);
   else body=svcTicketsHTML(es);
@@ -3817,20 +3832,53 @@ function svcEqDetailHTML(es){ const k=S.svcmon.eqOpen, s=SVC_EQ[k]; if(!s)return
         <ul style="margin:0;padding-left:18px">${s.tr.map(x=>`<li style="font-size:12px;margin-bottom:4px">${esc(x[es?"es":"en"])}</li>`).join("")}</ul></div></div></div>`;
 }
 
+// ── Ticket Dashboard (New + Just-Closed) — liquid-glass UI ──────────────────────────────────────
+function svcPrioBadge(p){ p=String(p||"").toLowerCase();
+  if(/very high|critical|urgent/.test(p)) return '<span class="pill" style="background:#DC2626;font-size:9px">🔥 VERY HIGH</span>';
+  if(/\bhigh\b/.test(p)) return '<span class="pill" style="background:#F59E0B;font-size:9px">🔥 HIGH</span>';
+  if(/low/.test(p)) return '<span class="pill" style="background:rgba(148,163,184,.4);font-size:9px">LOW</span>';
+  if(/normal|medium/.test(p)) return '<span class="pill" style="background:rgba(148,163,184,.4);font-size:9px">NORMAL</span>';
+  return "";
+}
+// One frosted-glass row. tint = accent colour blended into the translucent card.
+function svcGlassRow(inner,tint){ return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 14px;margin-bottom:9px;border-radius:13px;background:linear-gradient(135deg,${tint}22,rgba(255,255,255,.05));backdrop-filter:blur(11px) saturate(150%);-webkit-backdrop-filter:blur(11px) saturate(150%);border:1px solid rgba(255,255,255,.13);box-shadow:0 6px 22px -10px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.16)">${inner}</div>`; }
+function svcDashHTML(es){ const st=S.svcmon.dash;
+  if(st.status==="loading"&&!st.newT.length&&!st.closed.length) return `<div style="padding:30px;text-align:center;color:var(--text-dim)">⟳ ${es?"Cargando panel…":"Loading dashboard…"}</div>`;
+  if(st.status==="error"&&!st.newT.length&&!st.closed.length) return `<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudo cargar el panel.":"Couldn't load the dashboard."}</div>`;
+  const panel=(accent,head,rows)=>`<div style="border-radius:20px;padding:16px 16px 8px;margin-bottom:16px;background:linear-gradient(160deg,${accent}20,rgba(255,255,255,.05));backdrop-filter:blur(18px) saturate(170%);-webkit-backdrop-filter:blur(18px) saturate(170%);border:1px solid ${accent}66;box-shadow:0 16px 46px -14px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.2)">${head}${rows}</div>`;
+  const newRow=(r)=>svcGlassRow(`<div style="min-width:0"><div style="font-weight:800;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--wh-orange)">#${esc(r.ticketNo||"")}</span> · ${esc(r.customer||"")}</div><div style="font-size:11.5px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc([r.city,r.serviceType].filter(Boolean).join(" · "))}</div></div><div style="display:flex;align-items:center;gap:6px;flex-shrink:0">${svcPrioBadge(r.priority)}<span class="pill" style="background:#1D429B;font-size:9px">NEW</span></div>`,"#F89B24");
+  const closedRow=(r)=>svcGlassRow(`<div style="min-width:0"><div style="font-weight:800;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--wh-orange)">#${esc(r.ticketNo||"")}</span> · ${esc(r.customer||"")}</div><div style="font-size:11.5px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc([r.team,r.city].filter(Boolean).join(" · "))}</div></div><div style="display:flex;align-items:center;gap:6px;flex-shrink:0">${svcPrioBadge(r.priority)}<span class="pill" style="background:#22c55e;font-size:9px">CLOSED</span></div>`,"#22c55e");
+  const head=(icon,txt)=>`<div style="display:flex;align-items:center;gap:9px;margin-bottom:13px"><span style="font-size:17px">${icon}</span><span style="font-weight:900;font-size:15.5px">${txt}</span></div>`;
+  const nRows=st.newT.length?st.newT.map(newRow).join(""):`<div style="padding:12px;text-align:center;color:var(--text-dim);font-size:12.5px">${es?"Sin tickets nuevos":"No new tickets"}</div>`;
+  const cRows=st.closed.length?st.closed.map(closedRow).join(""):`<div style="padding:12px;text-align:center;color:var(--text-dim);font-size:12.5px">${es?"Nada cerrado recientemente":"Nothing closed recently"}</div>`;
+  return panel("#F89B24",head("🔔",st.newT.length+" "+(es?"ticket(s) de servicio nuevos":"new service ticket(s)")),nRows)
+        +panel("#22c55e",head("✅",st.closed.length+" "+(es?"ticket(s) cerrados":"ticket(s) just closed")),cRows);
+}
+
 function svcTicketsHTML(es){ const st=S.svcmon.tk;
   if(st.status==="loading"&&!st.month.length&&!st.backlog.length) return `<div style="padding:30px;text-align:center;color:var(--text-dim)">⟳ ${es?"Cargando tickets…":"Loading tickets…"}</div>`;
   if(st.status==="error") return `<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudo cargar los tickets.":"Couldn't load service tickets."}</div>`;
   const tCol=(s)=>{ s=String(s||"").toLowerCase(); if(/complet|conclu|closed/.test(s))return "#22c55e"; if(/need|report|3\./.test(s))return "#ef4444"; if(/sched|program/.test(s))return "#1D429B"; if(/hold|pend/.test(s))return "#F59E0B"; return "#8B5CF6"; };
+  // Uniform, single-height rows so the eye scans fast: DL# + customer + status on line 1, one meta
+  // line, one truncated description line (full text on hover). Every field clamped to one line.
   const row=(r)=>{ const v1=(r.visits&&r.visits[0])||{}; const when=r.startDate?(r.startDate+(r.startTime?" "+r.startTime:"")):(v1.date||"");
-    return `<div style="padding:10px 12px;background:var(--bg-2);border:1px solid var(--line);border-left:4px solid ${tCol(r.status)};border-radius:10px;margin-bottom:7px">
-      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:13px">${esc(r.ticketNo||"")} <span style="color:var(--wh-orange)">${esc(r.customer||"")}</span></span><span class="pill" style="background:${tCol(r.status)};font-size:9.5px">${esc(r.status||"")}</span></div>
-      <div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">${esc([r.serviceType,r.city,r.team].filter(Boolean).join(" · "))}${when?" · "+esc(when):""}</div>
-      ${r.description?`<div style="font-size:11px;color:var(--text-dim);margin-top:4px;white-space:pre-wrap;word-break:break-word;max-height:54px;overflow:hidden">${esc(String(r.description).slice(0,180))}</div>`:""}</div>`; };
-  const backlog=st.backlog.length?st.backlog.map(row).join(""):`<div style="padding:14px;text-align:center;color:var(--text-dim)">${es?"Nada por programar 🎉":"Nothing to schedule 🎉"}</div>`;
-  const month=st.month.length?st.month.map(row).join(""):`<div style="padding:14px;text-align:center;color:var(--text-dim)">${es?"Sin tickets este mes":"No tickets this month"}</div>`;
-  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(340px,100%),1fr));gap:16px">
-    <div><div style="font-weight:800;font-size:13px;margin-bottom:8px">🗓 ${es?"Por Programar":"Needs Scheduling"} <span style="color:var(--text-dim);font-weight:600">(${st.backlog.length})</span></div>${backlog}</div>
-    <div><div style="font-weight:800;font-size:13px;margin-bottom:8px">📅 ${es?"Este Mes":"This Month"} <span style="color:var(--text-dim);font-weight:600">(${st.month.length})</span></div>${month}</div></div>`;
+    const meta=[r.serviceType,r.city,r.team].filter(Boolean).join(" · ")+(when?" · "+when:"");
+    const desc=r.description?String(r.description).replace(/\s+/g," ").trim():"";
+    return `<div title="${esc(desc)}" style="padding:8px 11px;background:var(--bg-2);border:1px solid var(--line);border-left:4px solid ${tCol(r.status)};border-radius:9px;margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><span style="font-weight:800;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--wh-orange)">${esc(r.ticketNo||"")}</span> ${esc(r.customer||"")}</span><span class="pill" style="background:${tCol(r.status)};font-size:9px;flex-shrink:0">${esc(r.status||"")}</span></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(meta)}</div>
+      ${desc?`<div style="font-size:10.5px;color:var(--text-dim);opacity:.8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(desc)}</div>`:""}</div>`; };
+  const q=(st.q||"").toLowerCase();
+  const match=(r)=> !q || ((r.ticketNo||"")+" "+(r.customer||"")+" "+(r.city||"")+" "+(r.serviceType||"")+" "+(r.team||"")+" "+(r.status||"")).toLowerCase().indexOf(q)>-1;
+  const byDate=(a,b)=>String(a.startDate||"").localeCompare(String(b.startDate||""));
+  const bl=st.backlog.filter(match), mo=st.month.filter(match).sort(byDate);
+  const search=`<input class="input" value="${esc(st.q||"")}" oninput="svcSetTkQ(this.value)" placeholder="${es?"🔎 Buscar ticket / cliente / ciudad / técnico / estado":"🔎 Search ticket / customer / city / tech / status"}" style="margin-bottom:12px;max-width:460px"/>`;
+  const cnt=(shown,total)=>q?`${shown} / ${total}`:`${total}`;
+  const secHead=(icon,label,shown,total,col)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid ${col}"><span style="font-weight:900;font-size:14px">${icon} ${label}</span><span class="pill" style="background:${col};font-size:10px;margin-left:auto">${cnt(shown,total)}</span></div>`;
+  const empty=(m)=>`<div style="padding:14px;text-align:center;color:var(--text-dim);font-size:12.5px">${m}</div>`;
+  return search+`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(340px,100%),1fr));gap:16px">
+    <div>${secHead("🗓",es?"Por Programar":"Needs Scheduling",bl.length,st.backlog.length,"#ef4444")}${bl.length?bl.map(row).join(""):empty(q?(es?"Sin coincidencias":"No matches"):(es?"Nada por programar 🎉":"Nothing to schedule 🎉"))}</div>
+    <div>${secHead("📅",es?"Este Mes":"This Month",mo.length,st.month.length,"#1D429B")}${mo.length?mo.map(row).join(""):empty(q?(es?"Sin coincidencias":"No matches"):(es?"Sin tickets este mes":"No tickets this month"))}</div></div>`;
 }
 function svcTitle(s){ return String(s||"").toLowerCase().replace(/\b([a-z])/g,(m,c)=>c.toUpperCase()); }
 
