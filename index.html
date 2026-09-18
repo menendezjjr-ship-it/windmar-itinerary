@@ -3596,8 +3596,10 @@ const USER_TABS={
   "maria.robles@windmarhome.com":["itinerary","coordinator","calendar","crews","records"],
 };
 function allowedTabs(){
-  const key=String(window.wmUser||"").trim().toLowerCase();
-  const ids=Object.prototype.hasOwnProperty.call(USER_TABS,key)?USER_TABS[key]:null; // own keys only, so "constructor"/"toString" can't match
+  // Primary source: per-user itin_tabs set from the Field HUB Admin panel (app_access.itin_tabs,
+  // captured into window.wmItinTabs by the gate). Legacy fallback: the hardcoded USER_TABS map.
+  let ids=(Array.isArray(window.wmItinTabs)&&window.wmItinTabs.length)?window.wmItinTabs:null;
+  if(!ids){ const key=String(window.wmUser||"").trim().toLowerCase(); ids=Object.prototype.hasOwnProperty.call(USER_TABS,key)?USER_TABS[key]:null; } // own keys only, so "constructor"/"toString" can't match
   if(!Array.isArray(ids)||!ids.length) return TABS;
   const ok=Object.create(null); ids.forEach(x=>{ok[String(x).trim().toLowerCase()]=1;});
   const out=TABS.filter(tb=>ok[tb.id]);
@@ -4524,7 +4526,7 @@ document.addEventListener("visibilitychange",function(){ if(!document.hidden) li
         if(wmForceLogoutCheck(rec, email)) return;
         if(rec&&rec.status==="disabled"){ showDenied(email); return; }
         if(rec&&appsFor(rec).indexOf(APP_KEY)<0){ showDenied(email); return; }
-        try{ window.wmRole=(rec&&rec.role)||""; window.wmUser=email; window.WM_VIEWER=(rec&&rec.role==="viewer"); if(typeof render==="function"){try{render(true);}catch(e){}} }catch(e){}
+        try{ window.wmRole=(rec&&rec.role)||""; window.wmUser=email; window.WM_VIEWER=(rec&&rec.role==="viewer"); window.wmItinTabs=(rec&&Array.isArray(rec.itin_tabs)&&rec.itin_tabs.length)?rec.itin_tabs:null; if(typeof render==="function"){try{render(true);}catch(e){}} }catch(e){}
         pass();
         try{ wmReportView(); }catch(e){}
       }).catch(function(){ pass(); });
