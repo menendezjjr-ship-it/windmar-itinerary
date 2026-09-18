@@ -1096,7 +1096,7 @@ function opsCalHTML(){
     }).join("");
     return `<div style="display:grid;grid-template-columns:${gCols}"><div style="padding:8px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);border-left:4px solid ${col};position:sticky;left:0;background:var(--bg-2);z-index:2"><div style="font-weight:800;font-size:12.5px;line-height:1.2">${esc(team)}</div><div style="font-size:10px;color:var(--text-dim)">${gByTeam[team].length} ${es?'trab.':'jobs'}</div></div>${cells}</div>`;
   }).join("");
-  const gridView=`<div class="card" style="border-radius:12px;overflow:auto;max-height:74vh"><div style="min-width:1340px">${gHead}${gTeams.length?gBody:`<div style="padding:44px;text-align:center;color:var(--text-dim)">${es?'Sin trabajos esta semana':'No jobs scheduled this week'}</div>`}</div></div>`;
+  const gridView=`<div class="card" data-sk="opsGrid" style="border-radius:12px;overflow:auto;max-height:74vh"><div style="min-width:1340px">${gHead}${gTeams.length?gBody:`<div style="padding:44px;text-align:center;color:var(--text-dim)">${es?'Sin trabajos esta semana':'No jobs scheduled this week'}</div>`}</div></div>`;
   // month view = simplified crew×month horizontal-scroll grid (same cell styling as the weekly Crew Grid, spanning every day of the selected month)
   const mDaysInMonth=new Date(c.y,c.m,0).getDate();
   const mDays=[]; for(let dd=1;dd<=mDaysInMonth;dd++) mDays.push(new Date(c.y,c.m-1,dd));
@@ -1112,7 +1112,7 @@ function opsCalHTML(){
     }).join("");
     return `<div style="display:grid;grid-template-columns:${mCols};min-width:${mMinW}px"><div style="padding:8px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);border-left:4px solid ${col};position:sticky;left:0;background:var(--bg-2);z-index:2"><div style="font-weight:800;font-size:12.5px;line-height:1.2">${esc(team)}</div><div style="font-size:10px;color:var(--text-dim)">${mByTeam[team].length} ${es?'trab.':'jobs'}</div></div>${cells}</div>`;
   }).join("");
-  const monthGrid=`<div class="card" style="border-radius:12px;overflow:auto;max-height:74vh"><div style="min-width:${mMinW}px">${mHead}${mTeams.length?mBody:`<div style="padding:44px;text-align:center;color:var(--text-dim)">${es?'Sin trabajos este mes':'No jobs scheduled this month'}</div>`}</div></div>`;
+  const monthGrid=`<div class="card" data-sk="opsMonth" style="border-radius:12px;overflow:auto;max-height:74vh"><div style="min-width:${mMinW}px">${mHead}${mTeams.length?mBody:`<div style="padding:44px;text-align:center;color:var(--text-dim)">${es?'Sin trabajos este mes':'No jobs scheduled this month'}</div>`}</div></div>`;
   // list
   const byTeam={}; visible.forEach(r=>{(byTeam[r.team]=byTeam[r.team]||[]).push(r);});
   const listKeys=Object.keys(byTeam).sort((a,b)=>byTeam[b].length-byTeam[a].length);
@@ -3844,7 +3844,7 @@ function _render(noAnim){
   const _sc=[];
   try{
     document.querySelectorAll("#root [id], #root [data-sk]").forEach(function(el){
-      if(el.scrollTop>0){ _sc.push([el.id||el.getAttribute("data-sk"), el.scrollTop, !!el.id]); }
+      if(el.scrollTop>0||el.scrollLeft>0){ _sc.push([el.id||el.getAttribute("data-sk"), el.scrollTop, !!el.id, el.scrollLeft||0]); }
     });
   }catch(e){}
   const VTABS=allowedTabs();
@@ -3882,7 +3882,11 @@ function _render(noAnim){
     _sc.forEach(function(r){
       try{
         var el=r[2]?document.getElementById(r[0]):document.querySelector('#root [data-sk="'+r[0]+'"]');
-        if(el) el.scrollTop=r[1];
+        if(el){ el.scrollTop=r[1]; if(r[3]) el.scrollLeft=r[3]; // restore BOTH axes — the crew grid scrolls sideways too
+          // Re-apply after layout settles: a big grid isn't measured synchronously right after
+          // innerHTML, so a single set can land at 0. rAF pins it once the rebuild has laid out.
+          requestAnimationFrame(function(){ try{ if(r[1])el.scrollTop=r[1]; if(r[3])el.scrollLeft=r[3]; }catch(e){} });
+        }
       }catch(e){}
     });
   }
