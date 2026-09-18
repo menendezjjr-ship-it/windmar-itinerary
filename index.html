@@ -345,7 +345,7 @@ const LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAoAAAAGNCAYAAACBu8BgAADG8ElEQVR42uz9fX
 const I18N = {
  en:{
   appName:"Itinerary", appTagline:"Dispatch & Field Operations", lang:"Español",
-  tab_itinerary:"Dashboard", tab_coordinator:"Coordinator", tab_projects:"Projects", tab_crews:"Dispatch", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_records:"Field Status Record", tab_instmap:"Install Map", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar",
+  tab_itinerary:"Dashboard", tab_coordinator:"Coordinator", tab_projects:"Projects", tab_crews:"Dispatch", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_records:"Field Status Record", tab_instmap:"Install Map", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar", tab_svcmon:"Service & Monitoring",
   // job codes
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Solar / Battery Install", jc_RDL_long:"Re-Roof + Solar", jc_RL_long:"Roofing", jc_S_long:"Service Call", jc_MSP_long:"Main Service Panel Upgrade",
@@ -395,7 +395,7 @@ const I18N = {
  },
  es:{
   appName:"Itinerario", appTagline:"Despacho y Operaciones de Campo", lang:"English",
-  tab_itinerary:"Panel", tab_coordinator:"Coordinador", tab_projects:"Proyectos", tab_crews:"Despacho", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_records:"Registro de Estado de Campo", tab_instmap:"Mapa de Instalaciones", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario",
+  tab_itinerary:"Panel", tab_coordinator:"Coordinador", tab_projects:"Proyectos", tab_crews:"Despacho", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_records:"Registro de Estado de Campo", tab_instmap:"Mapa de Instalaciones", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario", tab_svcmon:"Servicio y Monitoreo",
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Instalación Solar / Batería", jc_RDL_long:"Re-Techado + Solar", jc_RL_long:"Techado", jc_S_long:"Llamada de Servicio", jc_MSP_long:"Mejora del Panel Principal",
   legend:"Leyenda de Códigos", crew:"Cuadrilla", today:"Hoy", prevDay:"Anterior", nextDay:"Siguiente",
@@ -3573,13 +3573,273 @@ function zohoHTML(){
 /* ============================================================================
    SHELL + RENDER
    ============================================================================ */
+/* ══════════ TAB: SERVICE & MONITORING ══════════════════════════════════════════════════════════
+   Rebuilt natively from windmar-service-app's unique sections (SolarEdge/Enphase production
+   monitoring, FDEM outage tracker, equipment & error-code reference, Zoho service tickets). Reuses
+   the deployed service-app APIs (server-side keys, CORS-enabled) so NO secrets are duplicated here.
+   Self-contained: state under S.svcmon, inline handlers call the svc* globals below. ─────────────── */
+const SVC_API="https://windmar-service-app.vercel.app";
+function svcInit(){ if(S.svcmon) return; S.svcmon={ sub:"sites",
+  sites:{status:"idle",list:[],q:"",filter:"all",page:0}, enph:{status:"idle",list:[]},
+  detail:null, out:{status:"idle",counties:[],updated:null},
+  eqOpen:null, codeF:"all", codeQ:"", sysStatus:svcGetSysStatus(),
+  tk:{status:"idle",month:[],backlog:[],open:null} }; }
+function svcGetSysStatus(){ try{ return JSON.parse(localStorage.getItem("wm_sys_status")||"{}"); }catch(e){ return {}; } }
+const SVC_PER=25;
+function svcNum(v,dec){ if(v==null||isNaN(v))return "0"; dec=(dec==null?1:dec); return Number(v).toLocaleString(undefined,{minimumFractionDigits:dec,maximumFractionDigits:dec}); }
+const SVC_PO=["Polk","Osceola","Orange","Hillsborough"]; // WindMar core service-area counties
+const SVC_ICO={PV:"☀️",LOAD:"🏠",GRID:"🗼",STORAGE:"🔋"};
+
+// ── Equipment reference (static, copied verbatim from the service app) ──────────────────────────
+const SVC_EQ={
+ solaredge:{name:"SolarEdge",type:{en:"Inverter / Optimizers",es:"Inversor / Optimizadores"},portal:"https://monitoring.solaredge.com",
+  specs:[["1-ph models","SE3300US–SE6000US"],["Max input","500 Vdc (1-ph)"],["Efficiency","97.6%"],["SafeDC","1V/optimizer OFF"],["Isolation","600 kΩ thresh."],["Synergy","SE50K–SE120K, 1000 Vdc"],["Server","prod.solaredge.com:22222"],["RS485","30 slaves + 1 master"]],
+  leds:[{c:"#DC3545",en:"Red ON — arc detected · Red blink — isolation/RCD",es:"Rojo fijo — arco · Rojo parpadeo — aislamiento/RCD"},{c:"#28A745",en:"Green ON — grid error · Green blink — high temp",es:"Verde fijo — error de red · Verde parpadeo — temperatura"},{c:"#1D429B",en:"Blue ON — pairing failed · Blue blink — other",es:"Azul fijo — emparejamiento · Azul parpadeo — otro"}],
+  tr:[{en:"String 0V: verify series connections",es:"String 0V: verificar conexiones en serie"},{en:"V lower than 1V×count: reverse polarity / panel off optimizer",es:"V menor a 1V×cantidad: polaridad invertida"},{en:"V HIGHER than expected: ⚠ unsafe — isolate one by one",es:"V MAYOR: ⚠ riesgo — aislar uno por uno"},{en:"Isolation fault: shutdown, wait 5 min, megger strings, healthy >2 MΩ",es:"Aislamiento: apagar, 5 min, megger, sano >2 MΩ"}]},
+ tesla:{name:"Tesla Powerwall 3",type:{en:"Battery / ESS",es:"Batería / ESS"},portal:"https://www.tesla.com/teslaone",
+  specs:[["Capacity","13.5 kWh/unit"],["Output","5.8–11.5 kW"],["Solar input","20 kW, 6 MPPT"],["DC max","600V"],["Enclosure","NEMA 3R / IP67"],["Op. temp","-4°F to 122°F"],["Weight","291 lbs"],["Expansion","3 units → 54 kWh"]],
+  leds:[{c:"#28A745",en:"Green pulse — normal, connected",es:"Verde pulsante — normal, conectado"},{c:"#FFC107",en:"No app conn — check Cat5e/Wi-Fi/gateway",es:"Sin conexión — revisar Cat5e/Wi-Fi/gateway"},{c:"#DC3545",en:"Lights off after disconnect — de-energized (LOTOV)",es:"Luces apagadas — desenergizado (LOTOV)"}],
+  tr:[{en:"No AC output: breaker (60A/unit), lug torque 40–80 in-lbs",es:"Sin salida CA: disyuntor 60A, torque 40–80 in-lbs"},{en:"No commissioning <32°F — temp lockout",es:"No comisionar <0°C — bloqueo térmico"},{en:"Ground continuity <0.1 Ω required",es:"Continuidad a tierra <0.1 Ω"},{en:"NEVER use impact driver — cracks casing",es:"NUNCA llave de impacto — agrieta carcasa"}]},
+ generac:{name:"Generac PWRcell ATS",type:{en:"Transfer Switch",es:"Interruptor de Transferencia"},portal:"https://pwrfleet.generac.com",
+  specs:[["100A","CXSC/CXSW100A301"],["100A torque","50 in-lbs"],["200A","CXSW200A301"],["200A torque","275 in-lbs"],["Wire 100A","#14–1/0 AWG"],["Wire 200A","#6–250 MCM"],["Control","Cat5e, sep. raceway"],["Priority","8 levels"]],
+  leds:[{c:"#28A745",en:"Utility present — on grid",es:"Red presente"},{c:"#F89B24",en:"Transfer to backup active",es:"Transferencia a respaldo"},{c:"#DC3545",en:"No transfer — check Cat5e ≤0.1 Ω, NEC 725.136(D)",es:"No transfiere — Cat5e ≤0.1 Ω, NEC 725.136(D)"}],
+  tr:[{en:"Wrong load shed: review 8-level priority in app (L1 never, L8 first)",es:"Corte incorrecto: revisar prioridades (N1 nunca, N8 primero)"},{en:"Never bundle Cat5e with power; 6 in. separation",es:"No agrupar Cat5e con potencia; 6 pulg."},{en:"200A lugs: calibrated wrench only",es:"Terminales 200A: llave calibrada"}]},
+ qcells:{name:"Qcells Q.HOME COMBINER",type:{en:"Combiner / Gateway",es:"Combinador / Gateway"},portal:"https://qommand.qcells.com",
+  specs:[["AC","120/240V split"],["Busbar","Eaton BR 125A"],["Continuous","64A"],["GFDI","ext., >5 kW (690.5)"],["Meter","ANSI C12.20 CT"],["Modes","Solar/Backup/Grid"],["Modem","MultiTech 4G LTE"],["Priority","Eth › Wi-Fi › Cell"]],
+  leds:[{c:"#28A745",en:"Power green — powered",es:"Power verde — energizado"},{c:"#1D429B",en:"Link/LTE/SIM blue — comms OK; LTE off = no signal",es:"Link/LTE/SIM azul — OK; LTE apagado = sin señal"},{c:"#8A93A6",en:"Signal bars ≤2 — relocate modem",es:"Señal ≤2 barras — reubicar módem"}],
+  tr:[{en:"No cloud: verify Ethernet → Wi-Fi → Cellular chain",es:"Sin nube: verificar Ethernet → Wi-Fi → Celular"},{en:"Re-commission: Q.OMMAND PRO → scan QR → verify production",es:"Re-comisionar: Q.OMMAND PRO → QR → verificar producción"},{en:"Grid Support needs utility approval; V2G per NEC 625",es:"Grid Support requiere aprobación; V2G NEC 625"}]},
+ enphase:{name:"Enphase IQ / Envoy",type:{en:"Microinverters / Gateway",es:"Microinversores / Gateway"},portal:"https://enlighten.enphaseenergy.com",
+  specs:[["Micros","IQ7 / IQ8 series"],["IQ8 output","240–384 VA per module"],["Gateway","Envoy-S / IQ Gateway"],["Comms","Power-line (PLC) to micros"],["Battery","IQ Battery 5P (5 kWh)"],["Monitoring","Enlighten / Enphase App"],["Grid profile","Set via Enlighten"],["Rapid shutdown","Module-level (NEC 690.12)"]],
+  leds:[{c:"#28A745",en:"Envoy comms LED solid green — all micros reporting",es:"LED de comunicaciones verde fijo — micros reportando"},{c:"#FFC107",en:"Flashing amber — micros not yet detected / partial comms",es:"Ámbar parpadeante — micros no detectados / comunicación parcial"},{c:"#DC3545",en:"Red network LED — no internet/Enlighten connection",es:"LED de red rojo — sin conexión a internet/Enlighten"}],
+  tr:[{en:"Micros not reporting: check PLC interference (UPS, surge strips on same circuit) — dedicated circuit for Envoy",es:"Micros sin reportar: interferencia PLC (UPS, regletas) — circuito dedicado para el Envoy"},{en:"Envoy offline: verify Wi-Fi/Ethernet, reboot Envoy, check Enlighten last report",es:"Envoy fuera de línea: verificar Wi-Fi/Ethernet, reiniciar Envoy, revisar último reporte"},{en:"Single micro down: verify DC connectors at module, check per-panel view in Enlighten",es:"Un micro caído: verificar conectores DC del módulo, revisar vista por panel"},{en:"Grid profile errors: re-push profile from Enlighten after utility changes",es:"Errores de perfil de red: re-enviar perfil desde Enlighten"}]}};
+const SVC_LIVE_TAG={solaredge:'<span class="pill" style="background:#1D429B;font-size:9px">LIVE</span>',enphase:'<span class="pill" style="background:#F59E0B;font-size:9px">API: OAUTH PENDING</span>'};
+const SVC_CODES=[
+ {s:"solaredge",id:"#10/#37/#38",m:{en:"Ground Current RCD",es:"Corriente a Tierra RCD"},f:{en:"⚠ ELECTROCUTION RISK — off, wait 5 min, 1 kΩ resistor test.",es:"⚠ RIESGO ELÉCTRICO — apagar, 5 min, prueba resistor 1 kΩ."},v:"err"},
+ {s:"solaredge",id:"#14/#31/#33",m:{en:"AC Voltage Too High",es:"Voltaje CA Alto"},f:{en:"Verify wire size vs distance to grid.",es:"Verificar calibre según distancia a la red."},v:"warn"},
+ {s:"solaredge",id:"#15",m:{en:"DC Overvoltage",es:"Sobrevoltaje CC"},f:{en:"OFF, 5 min, verify 1V × string length.",es:"Apagar, 5 min, verificar 1V × string."},v:"err"},
+ {s:"solaredge",id:"#17",m:{en:"Temp Too High",es:"Temperatura Alta"},f:{en:"Check 8 in. clearances, clean heatsink.",es:"Revisar 20 cm de espacio, limpiar disipador."},v:"warn"},
+ {s:"solaredge",id:"#25",m:{en:"Isolation Fault",es:"Falla de Aislamiento"},f:{en:"Megger strings; healthy >2 MΩ; divide & conquer.",es:"Megger por string; sano >2 MΩ."},v:"err"},
+ {s:"solaredge",id:"#29/#30",m:{en:"Phase Balance",es:"Balance de Fases"},f:{en:"Check L1/L2/N/GND torque.",es:"Revisar torque L1/L2/N/Tierra."},v:"warn"},
+ {s:"solaredge",id:"#40",m:{en:"Islanding",es:"Operación en Isla"},f:{en:"Grid lost — wait for AC return.",es:"Red perdida — esperar CA."},v:"warn"},
+ {s:"solaredge",id:"#44",m:{en:"No Country Set",es:"Sin País"},f:{en:"Set grid code in setup/SetApp.",es:"Configurar código de red en SetApp."},v:"warn"},
+ {s:"solaredge",id:"String V high",m:{en:"Voltage above 1V × count",es:"Voltaje mayor a 1V × cantidad"},f:{en:"⚠ Unsafe. Extra/missing optimizer. Isolate one by one.",es:"⚠ Riesgo. Optimizador extra/faltante. Aislar uno por uno."},v:"err"},
+ {s:"tesla",id:"Offline",m:{en:"Powerwall offline in app",es:"Powerwall sin conexión"},f:{en:"Check Cat5e (≤100 ft), gateway, Wi-Fi. Separate conduit (300.3(C)).",es:"Revisar Cat5e (≤30 m), gateway, Wi-Fi. Ducto separado."},v:"warn"},
+ {s:"tesla",id:"Temp lockout",m:{en:"No charge/commission in cold",es:"No carga/comisiona en frío"},f:{en:"Requires >32°F — reschedule.",es:"Requiere >0°C — reprogramar."},v:"warn"},
+ {s:"tesla",id:"No backup",m:{en:"No power on grid loss",es:"Sin respaldo al perder red"},f:{en:"ESS disconnect, 125% breaker, torque 40–80 in-lbs, reserve %.",es:"Desconectador, disyuntor 125%, torque, % reserva."},v:"err"},
+ {s:"generac",id:"No transfer",m:{en:"ATS won’t switch",es:"ATS no transfiere"},f:{en:"Cat5e ≤0.1 Ω, separate raceway 725.136(D), 6 in. separation.",es:"Cat5e ≤0.1 Ω, ducto separado, 6 pulg."},v:"err"},
+ {s:"generac",id:"Hot lugs",m:{en:"Heat at lugs",es:"Calor en terminales"},f:{en:"LOTOV, re-torque: 100A=50, 200A=275 in-lbs.",es:"LOTOV, re-torque: 100A=50, 200A=275 in-lbs."},v:"err"},
+ {s:"qcells",id:"LTE off",m:{en:"No cellular",es:"Sin celular"},f:{en:"SIM LED blue? Bars ≥2? Relocate or use Eth/Wi-Fi.",es:"¿SIM azul? ¿≥2 barras? Reubicar o Eth/Wi-Fi."},v:"warn"},
+ {s:"qcells",id:"GFDI trip",m:{en:"GFDI tripped",es:"GFDI disparado"},f:{en:"Inspect array ground fault before reset (690.5).",es:"Inspeccionar falla a tierra antes de reiniciar."},v:"err"},
+ {s:"enphase",id:"Envoy offline",m:{en:"Gateway not reporting",es:"Gateway sin reportar"},f:{en:"Check internet, reboot Envoy, verify Wi-Fi/cellular. Enlighten shows last report time.",es:"Revisar internet, reiniciar Envoy, verificar Wi-Fi/celular."},v:"warn"},
+ {s:"enphase",id:"Micro no report",m:{en:"Microinverter(s) not reporting",es:"Microinversor(es) sin reportar"},f:{en:"PLC interference — move UPS/power strips off circuit; check DC connectors at module.",es:"Interferencia PLC — retirar UPS/regletas; revisar conectores DC."},v:"warn"},
+ {s:"enphase",id:"GFI tripped",m:{en:"Ground fault indication",es:"Indicación de falla a tierra"},f:{en:"⚠ Inspect array wiring before clearing via Enlighten/Installer Toolkit.",es:"⚠ Inspeccionar cableado antes de borrar la falla."},v:"err"},
+ {s:"enphase",id:"AC freq/volt",m:{en:"Grid out-of-range trips",es:"Disparos por red fuera de rango"},f:{en:"Verify grid profile matches utility; check voltage at panel.",es:"Verificar perfil de red y voltaje en panel."},v:"warn"}];
+
+// ── Loaders (call the deployed service-app APIs; server-side keys, CORS enabled) ────────────────
+function svcLoadSites(){ const st=S.svcmon.sites; if(st.status==="loading")return; st.status="loading"; render(true);
+  (function page(start,acc){ fetch(SVC_API+"/api/solaredge?path=sites&start="+start,{cache:"no-store"}).then(r=>r.json()).then(j=>{
+    if(j&&j.configured===false){ st.status="unconfigured"; render(true); return; }
+    const box=(j.data&&j.data.sites)||{}, arr=(box.site||[]); acc=acc.concat(arr);
+    if(arr.length && box.count && acc.length<box.count){ page(start+100,acc); }
+    else { st.list=acc; st.status="live"; render(true); }
+  }).catch(()=>{ st.status="error"; render(true); }); })(0,[]);
+}
+function svcLoadEnphase(){ const st=S.svcmon.enph; if(st.status==="loading"||st.status==="live")return; st.status="loading";
+  fetch(SVC_API+"/api/enphase?path=systems",{cache:"no-store"}).then(r=>r.json()).then(j=>{
+    if(j&&(j.configured===false||j.needsOAuth)){ st.status="pending"; render(true); return; }
+    st.list=(j.data&&(j.data.systems||j.data.items))||[]; st.status="live"; render(true);
+  }).catch(()=>{ st.status="error"; render(true); });
+}
+function svcLoadOutages(){ const st=S.svcmon.out; if(st.status==="loading")return; st.status="loading"; render(true);
+  fetch(SVC_API+"/api/outages?b="+Date.now(),{cache:"no-store"}).then(r=>r.json()).then(j=>{
+    const c=(j&&j.data&&j.data.counties)||[]; st.counties=c.filter(x=>x&&x.county); st.status="live";
+    st.updated=c.reduce((mx,x)=>Math.max(mx,x.updated||0),0)||null; render(true);
+  }).catch(()=>{ st.status="error"; render(true); });
+}
+function svcLoadTickets(){ const st=S.svcmon.tk; if(st.status==="loading")return; st.status="loading"; render(true);
+  const now=new Date(), m=now.getMonth()+1, y=now.getFullYear();
+  Promise.all([
+    fetch(SVC_API+"/api/zoho-service-tickets?mode=backlog",{cache:"no-store"}).then(r=>r.json()).catch(()=>({})),
+    fetch(SVC_API+"/api/zoho-service-tickets?month="+m+"&year="+y,{cache:"no-store"}).then(r=>r.json()).catch(()=>({}))
+  ]).then(([b,mo])=>{ st.backlog=(b&&b.records)||[]; st.month=(mo&&mo.records)||[]; st.status="live"; render(true); })
+   .catch(()=>{ st.status="error"; render(true); });
+}
+
+// ── Site detail (Now/Today/Month/Lifetime + power flow + 7-day bars) ────────────────────────────
+function svcOpenSite(id){ const s=(S.svcmon.sites.list||[]).find(x=>String(x.id)===String(id)); if(!s)return;
+  S.svcmon.detail={id:s.id,name:s.name,loc:s.location||{},status:s.status,now:null,day:null,mo:null,life:null,flow:null,bars:null}; render(true);
+  const D=S.svcmon.detail;
+  fetch(SVC_API+"/api/solaredge?path=overview&site="+id,{cache:"no-store"}).then(r=>r.json()).then(j=>{ const o=(j.data&&j.data.overview)||{};
+    D.now=svcNum((o.currentPower||{}).power/1000)+" kW"; D.day=svcNum((o.lastDayData||{}).energy/1000)+" kWh";
+    D.mo=svcNum((o.lastMonthData||{}).energy/1000,0)+" kWh"; D.life=svcNum((o.lifeTimeData||{}).energy/1e6,2)+" MWh"; if(S.svcmon.detail&&S.svcmon.detail.id===id)render(true);
+  }).catch(()=>{});
+  fetch(SVC_API+"/api/solaredge?path=flow&site="+id,{cache:"no-store"}).then(r=>r.json()).then(j=>{ const f=(j.data&&j.data.siteCurrentPowerFlow)||{};
+    D.flow=["PV","STORAGE","LOAD","GRID"].filter(x=>f[x]).map(x=>({k:x,p:svcNum(f[x].currentPower),u:f.unit||"kW"})); if(S.svcmon.detail&&S.svcmon.detail.id===id)render(true);
+  }).catch(()=>{});
+  fetch(SVC_API+"/api/solaredge?path=energy&site="+id,{cache:"no-store"}).then(r=>r.json()).then(j=>{ const vals=((j.data&&j.data.energy)||{}).values||[];
+    const mx=Math.max.apply(null,vals.map(v=>v.value||0).concat([1]));
+    D.bars=vals.map(v=>({d:new Date(v.date).toLocaleDateString(S.lang==="es"?"es":"en-US",{weekday:"short"}),kwh:svcNum((v.value||0)/1000,0),h:Math.max(3,(v.value||0)/mx*100)}));
+    if(S.svcmon.detail&&S.svcmon.detail.id===id)render(true);
+  }).catch(()=>{});
+}
+function svcCloseSite(){ S.svcmon.detail=null; render(true); }
+
+// ── Equipment field-status + code filters ──────────────────────────────────────────────────────
+function svcSaveEq(k){ try{ const v=document.getElementById("svc-eq-st").value, note=document.getElementById("svc-eq-note").value;
+  S.svcmon.sysStatus[k]={s:v,note:note,ts:Date.now()}; localStorage.setItem("wm_sys_status",JSON.stringify(S.svcmon.sysStatus)); }catch(e){} render(true); }
+function svcSub(x){ S.svcmon.sub=x; render(true);
+  if(x==="sites"&&S.svcmon.sites.status==="idle"){ svcLoadSites(); svcLoadEnphase(); }
+  if(x==="outages"&&S.svcmon.out.status==="idle") svcLoadOutages();
+  if(x==="tickets"&&S.svcmon.tk.status==="idle") svcLoadTickets();
+}
+function svcSetSitesQ(v){ S.svcmon.sites.q=v; S.svcmon.sites.page=0; render(true); }
+function svcSetSiteFilter(f){ S.svcmon.sites.filter=f; S.svcmon.sites.page=0; render(true); }
+function svcSitePage(d){ S.svcmon.sites.page+=d; render(true); }
+function svcSetCodeF(f){ S.svcmon.codeF=f; render(true); }
+function svcSetCodeQ(v){ S.svcmon.codeQ=v; render(true); }
+
+// ── Render ──────────────────────────────────────────────────────────────────────────────────────
+function serviceMonHTML(){ svcInit(); const es=S.lang==="es", C=S.svcmon;
+  if(C.sub==="sites"&&C.sites.status==="idle"){ svcLoadSites(); svcLoadEnphase(); }
+  const subBtn=(id,lbl)=>`<button class="btn3d ${C.sub===id?'':'ghost'} sm" data-action="noop" onclick="svcSub('${id}')" style="${C.sub===id?'background:linear-gradient(135deg,var(--wh-blue),var(--wh-orange))':''}">${lbl}</button>`;
+  const nav=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+    ${subBtn("sites",es?"⚡ Producción":"⚡ Site Production")}${subBtn("outages",es?"🔌 Cortes":"🔌 Outages")}${subBtn("equip",es?"🧰 Equipo y Códigos":"🧰 Equipment & Codes")}${subBtn("tickets",es?"🔧 Tickets":"🔧 Service Tickets")}</div>`;
+  let body="";
+  if(C.sub==="sites") body=svcSitesHTML(es);
+  else if(C.sub==="outages") body=svcOutagesHTML(es);
+  else if(C.sub==="equip") body=svcEquipHTML(es);
+  else body=svcTicketsHTML(es);
+  const detail=C.detail?svcSiteDetailHTML(es):"";
+  return `<div class="fade"><div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <h2 style="margin:0;font-size:20px;font-weight:900">🛰 ${es?"Servicio y Monitoreo":"Service & Monitoring"}</h2>
+      <span style="font-size:12px;color:var(--text-dim)">${es?"Datos en vivo · SolarEdge · Enphase · FDEM · Zoho":"Live · SolarEdge · Enphase · FDEM · Zoho"}</span></div>
+    ${nav}${body}</div>${detail}`;
+}
+
+function svcSitesHTML(es){ const st=S.svcmon.sites, en=S.svcmon.enph;
+  if(st.status==="loading"&&!st.list.length) return `<div style="padding:30px;text-align:center;color:var(--text-dim)">⟳ ${es?"Cargando sitios…":"Loading sites…"}</div>`;
+  if(st.status==="unconfigured") return `<div class="card" style="padding:18px;color:var(--text-dim)">${es?"SolarEdge no está configurado.":"SolarEdge is not configured."}</div>`;
+  if(st.status==="error"&&!st.list.length) return `<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudo cargar SolarEdge.":"Couldn't load SolarEdge."}</div>`;
+  const total=st.list.length, active=st.list.filter(s=>s.status==="Active").length, pending=st.list.filter(s=>s.status==="Pending").length, alerts=st.list.filter(s=>(s.alertQuantity||0)>0).length;
+  const kpi=(v,l,c)=>`<div class="card" style="padding:12px 10px;text-align:center;border-top:3px solid ${c}"><div style="font-size:22px;font-weight:900">${v}</div><div style="font-size:11px;color:var(--text-dim);font-weight:700">${l}</div></div>`;
+  const kpis=`<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">${kpi(total,es?"Sitios":"Sites","#1D429B")}${kpi(active,es?"Activos":"Active","#22c55e")}${kpi(pending,es?"Pendientes":"Pending","#F59E0B")}${kpi(alerts,es?"Alertas":"Alerts","#ef4444")}</div>`;
+  const q=(st.q||"").toLowerCase();
+  let f=st.list.filter(s=>{ if(st.filter==="alerts"&&!(s.alertQuantity>0))return false; if(st.filter!=="all"&&st.filter!=="alerts"&&s.status!==st.filter)return false;
+    if(q){ const loc=s.location||{}; if((s.name+" "+(loc.city||"")+" "+(loc.address||"")+" "+s.id).toLowerCase().indexOf(q)===-1)return false; } return true; });
+  f.sort((a,b)=>(b.alertQuantity||0)-(a.alertQuantity||0)|| (a.name<b.name?-1:1));
+  const pages=Math.max(1,Math.ceil(f.length/SVC_PER)); let pg=st.page; if(pg<0)pg=0; if(pg>=pages)pg=pages-1;
+  const chip=(id,lbl)=>`<button class="btn3d ${st.filter===id?'':'ghost'} sm" onclick="svcSetSiteFilter('${id}')" style="font-size:11.5px;${st.filter===id?'background:var(--wh-blue)':''}">${lbl}</button>`;
+  const controls=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+    <input class="input" value="${esc(st.q||"")}" oninput="svcSetSitesQ(this.value)" placeholder="${es?"Buscar sitio / ciudad / #":"Search site / city / #"}" style="flex:1;min-width:160px;max-width:340px"/>
+    ${chip("all",es?"Todos":"All")}${chip("Active",es?"Activos":"Active")}${chip("Pending",es?"Pend.":"Pending")}${chip("alerts","⚠ "+(es?"Alertas":"Alerts"))}</div>`;
+  const rows=f.slice(pg*SVC_PER,(pg+1)*SVC_PER).map(s=>{ const loc=s.location||{}, al=(s.alertQuantity||0)>0, badge=al?`<span class="pill" style="background:#ef4444;font-size:10px">⚠ ${s.alertQuantity}</span>`:(s.status==="Active"?`<span class="pill" style="background:#22c55e;font-size:10px">${es?"Activo":"Active"}</span>`:`<span class="pill" style="background:#F59E0B;font-size:10px">${es?"Pend.":"Pending"}</span>`);
+    return `<div class="jobchip" onclick="svcOpenSite('${esc(String(s.id))}')" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--bg-2);border:1px solid var(--line);border-left:3px solid ${al?'#ef4444':'#1D429B'};border-radius:10px;margin-bottom:7px;cursor:pointer">
+      <div style="min-width:0"><div style="font-weight:800;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.name||"")}</div><div style="font-size:11.5px;color:var(--text-dim)">${esc(loc.city||"")} · #${esc(String(s.id))}</div></div>
+      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">${badge}${s.peakPower?`<span style="font-size:11px;color:var(--text-dim)">${svcNum(s.peakPower)} kWp</span>`:""}</div></div>`; }).join("")
+    ||`<div style="padding:20px;text-align:center;color:var(--text-dim)">${es?"Sin sitios":"No sites"}</div>`;
+  const pager=f.length>SVC_PER?`<div style="display:flex;align-items:center;justify-content:center;gap:12px;margin:10px 0"><button class="btn3d sm" onclick="svcSitePage(-1)" ${pg<=0?"disabled":""}>‹</button><span style="font-size:12px;color:var(--text-dim)">${pg+1} / ${pages} · ${f.length}</span><button class="btn3d sm" onclick="svcSitePage(1)" ${pg>=pages-1?"disabled":""}>›</button></div>`:"";
+  // Enphase secondary list
+  let enphBlock="";
+  if(en.status==="pending") enphBlock=`<div class="card" style="padding:12px;margin-top:14px;color:var(--text-dim);font-size:12.5px">Enphase — ${es?"OAuth pendiente (se activa al configurar las llaves).":"OAuth pending (activates once keys are set)."}</div>`;
+  else if(en.list&&en.list.length){ const er=en.list.slice(0,60).map(s=>{ const stat=String(s.status||"").toLowerCase(), col=stat==="normal"?"#22c55e":(stat.indexOf("comm")>-1?"#ef4444":"#F59E0B");
+      return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 12px;background:var(--bg-2);border:1px solid var(--line);border-left:3px solid ${col};border-radius:9px;margin-bottom:6px">
+        <div style="min-width:0"><div style="font-weight:700;font-size:12.5px">${esc(s.name||("#"+s.system_id))}</div><div style="font-size:11px;color:var(--text-dim)">#${esc(String(s.system_id||""))}${s.address&&s.address.city?" · "+esc(s.address.city+", "+(s.address.state||"")):""}</div></div>
+        <span class="pill" style="background:${col};font-size:9.5px">${esc((s.status||"—").toUpperCase())}</span></div>`; }).join("");
+    enphBlock=`<div style="margin-top:16px"><div style="font-weight:800;font-size:13px;margin-bottom:8px">🔆 Enphase <span style="color:var(--text-dim);font-weight:600">(${en.list.length})</span></div>${er}</div>`; }
+  return kpis+controls+`<div>${rows}</div>${pager}${enphBlock}`;
+}
+
+function svcSiteDetailHTML(es){ const D=S.svcmon.detail; if(!D)return "";
+  const kpi=(v,l)=>`<div style="flex:1;min-width:80px;text-align:center;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;padding:10px 6px"><div style="font-size:17px;font-weight:900">${v==null?"…":v}</div><div style="font-size:10.5px;color:var(--text-dim);font-weight:700">${l}</div></div>`;
+  const flow=D.flow==null?`<span style="color:var(--text-dim);font-size:12px">…</span>`:(D.flow.length?D.flow.map((x,i)=>`${i>0?'<span style="color:var(--wh-orange);font-weight:900;font-size:18px">→</span>':''}<div style="text-align:center"><div style="font-size:22px">${SVC_ICO[x.k]}</div><div style="font-weight:800;font-size:13px">${x.p} ${x.u}</div><div style="font-size:10px;color:var(--text-dim)">${x.k}</div></div>`).join(""):`<span style="color:var(--text-dim);font-size:12px">${es?"Sin datos de flujo":"No flow data"}</span>`);
+  const bars=D.bars==null?"":`<div style="display:flex;align-items:flex-end;gap:6px;height:90px;margin-top:14px">${D.bars.map(b=>`<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%"><div style="font-size:9px;color:var(--text-dim)">${b.kwh}</div><div style="width:100%;background:linear-gradient(180deg,var(--wh-orange),var(--wh-blue));border-radius:4px 4px 0 0;height:${b.h}%"></div><div style="font-size:9px;color:var(--text-dim);margin-top:3px">${b.d}</div></div>`).join("")}</div>`;
+  return `<div onclick="svcCloseSite()" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px">
+    <div onclick="event.stopPropagation()" class="card rise" style="border-radius:16px;max-width:560px;width:100%;max-height:88vh;overflow:auto;padding:22px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:14px"><div><div style="font-weight:900;font-size:17px">${esc(D.name||"")} · #${esc(String(D.id))}</div><div style="font-size:12px;color:var(--text-dim)">${esc((D.loc.address||"")+", "+(D.loc.city||""))} — ${esc(D.status||"")}</div></div><button class="btn3d grey sm" onclick="svcCloseSite()">✕</button></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">${kpi(D.now,es?"Ahora":"Now")}${kpi(D.day,es?"Hoy":"Today")}${kpi(D.mo,es?"Mes":"Month")}${kpi(D.life,es?"Total":"Lifetime")}</div>
+      <div class="card" style="padding:14px;background:var(--bg-2)"><div style="font-size:11px;font-weight:800;color:var(--text-dim);margin-bottom:10px">${es?"FLUJO DE ENERGÍA":"POWER FLOW"}</div><div style="display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap">${flow}</div></div>
+      ${D.bars&&D.bars.length?`<div class="card" style="padding:14px;margin-top:10px;background:var(--bg-2)"><div style="font-size:11px;font-weight:800;color:var(--text-dim)">${es?"PRODUCCIÓN 7 DÍAS (kWh)":"7-DAY PRODUCTION (kWh)"}</div>${bars}</div>`:""}
+      <a class="btn3d blue sm" href="https://monitoring.solaredge.com" target="_blank" rel="noopener" style="margin-top:14px;display:inline-flex">SolarEdge ↗</a></div></div>`;
+}
+
+function svcOutagesHTML(es){ const st=S.svcmon.out;
+  if(st.status==="loading"&&!st.counties.length) return `<div style="padding:30px;text-align:center;color:var(--text-dim)">⟳ ${es?"Cargando cortes…":"Loading outages…"}</div>`;
+  if(st.status==="error"&&!st.counties.length) return `<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudo cargar FDEM.":"Couldn't load FDEM outages."}</div>`;
+  const totalOut=st.counties.reduce((s,c)=>s+(c.outages||0),0), impacted=st.counties.filter(c=>c.outages>0).length, tracked=st.counties.reduce((s,c)=>s+(c.customersTracked||0),0);
+  const kpi=(v,l,c)=>`<div class="card" style="padding:12px 10px;text-align:center;border-top:3px solid ${c}"><div style="font-size:20px;font-weight:900">${v}</div><div style="font-size:11px;color:var(--text-dim);font-weight:700">${l}</div></div>`;
+  const kpis=`<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">
+    ${kpi(totalOut.toLocaleString(),es?"Clientes sin luz":"Customers out","#ef4444")}${kpi(impacted+" / "+(st.counties.length||67),es?"Condados":"Counties impacted","#F59E0B")}${kpi(tracked.toLocaleString(),es?"Rastreados":"Tracked statewide","#1D429B")}${kpi(st.updated?new Date(st.updated).toLocaleTimeString():"—",es?"Revisado":"Checked","#22c55e")}</div>`;
+  const rows=st.counties.slice().sort((a,b)=>(b.outages||0)-(a.outages||0)).filter(c=>c.outages>0).map(c=>{ const inArea=SVC_PO.some(x=>x.toLowerCase()===String(c.county).toLowerCase()); const pct=c.customersTracked?((c.outages/c.customersTracked)*100).toFixed(1):"0";
+    const col=c.outages>=1000?"#ef4444":c.outages>=100?"#F59E0B":"#F89B24";
+    return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--bg-2);border:1px solid var(--line);border-left:4px solid ${col};border-radius:10px;margin-bottom:7px">
+      <div><div style="font-weight:800;font-size:13.5px">${esc(svcTitle(c.county))} County ${inArea?`<span class="pill" style="background:#1D429B;font-size:9px">${es?"ÁREA":"SERVICE AREA"}</span>`:""}</div><div style="font-size:11px;color:var(--text-dim)">${(c.customersTracked||0).toLocaleString()} ${es?"rastreados":"tracked"} · ${pct}%</div></div>
+      <div style="font-weight:900;font-size:15px;color:${col}">${(c.outages||0).toLocaleString()}</div></div>`; }).join("")
+    ||`<div style="padding:20px;text-align:center;color:var(--text-dim)">${es?"Sin cortes reportados 🎉":"No outages reported 🎉"}</div>`;
+  return kpis+`<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">${es?"Fuente: FDEM (Florida) — actualiza cada 5 min.":"Source: FDEM (Florida) — refreshes every 5 min."}</div><div>${rows}</div>`;
+}
+
+function svcEquipHTML(es){ const C=S.svcmon;
+  const eqRows=Object.keys(SVC_EQ).map(k=>{ const s=SVC_EQ[k], fs=C.sysStatus[k]||{s:"ok"}, dot={ok:"#22c55e",warn:"#F59E0B",err:"#ef4444",off:"#8A93A6"}[fs.s||"ok"];
+    return `<div class="jobchip" onclick="S.svcmon.eqOpen='${k}';render(true)" style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;margin-bottom:7px;cursor:pointer">
+      <div><div style="font-weight:800;font-size:13.5px">${esc(s.name)} ${SVC_LIVE_TAG[k]||""}</div><div style="font-size:11.5px;color:var(--text-dim)">${esc(s.type[es?"es":"en"])}</div></div>
+      <span style="width:11px;height:11px;border-radius:50%;background:${dot};flex-shrink:0"></span></div>`; }).join("");
+  const codeChip=(id,lbl)=>`<button class="btn3d ${C.codeF===id?'':'ghost'} sm" onclick="svcSetCodeF('${id}')" style="font-size:11px;${C.codeF===id?'background:var(--wh-blue)':''}">${lbl}</button>`;
+  const q=(C.codeQ||"").toLowerCase();
+  const codes=SVC_CODES.filter(c=>{ if(C.codeF!=="all"&&c.s!==C.codeF)return false; if(q&&(c.id+" "+c.m.en+" "+c.m.es+" "+c.f.en+" "+c.f.es).toLowerCase().indexOf(q)===-1)return false; return true; })
+    .map(c=>`<div style="padding:10px 12px;background:var(--bg-2);border:1px solid var(--line);border-left:4px solid ${c.v==="err"?"#ef4444":"#F59E0B"};border-radius:10px;margin-bottom:7px">
+      <div style="display:flex;align-items:center;gap:8px"><span style="font-weight:900;font-size:12.5px">${esc(c.id)}</span><span class="pill" style="background:${c.v==="err"?"#ef4444":"#F59E0B"};font-size:9px">${c.v==="err"?(es?"CRÍTICO":"CRITICAL"):(es?"ATENCIÓN":"ATTN")}</span></div>
+      <div style="font-weight:600;font-size:12.5px;margin-top:3px">${esc(c.m[es?"es":"en"])} <span style="color:var(--text-dim)">· ${esc(SVC_EQ[c.s].name)}</span></div>
+      <div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">${esc(c.f[es?"es":"en"])}</div></div>`).join("")||`<div style="padding:16px;text-align:center;color:var(--text-dim)">—</div>`;
+  const detail=C.eqOpen?svcEqDetailHTML(es):"";
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:16px">
+    <div><div style="font-weight:800;font-size:13px;margin-bottom:8px">🧰 ${es?"Equipos":"Equipment"}</div>${eqRows}</div>
+    <div><div style="font-weight:800;font-size:13px;margin-bottom:8px">⚠ ${es?"Códigos de Error":"Error Codes"}</div>
+      <input class="input" value="${esc(C.codeQ||"")}" oninput="svcSetCodeQ(this.value)" placeholder="${es?"Buscar código…":"Search codes…"}" style="margin-bottom:8px"/>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${codeChip("all",es?"Todos":"All")}${codeChip("solaredge","SolarEdge")}${codeChip("enphase","Enphase")}${codeChip("tesla","Tesla")}${codeChip("generac","Generac")}${codeChip("qcells","Qcells")}</div>
+      ${codes}</div></div>${detail}`;
+}
+
+function svcEqDetailHTML(es){ const k=S.svcmon.eqOpen, s=SVC_EQ[k]; if(!s)return ""; const fs=S.svcmon.sysStatus[k]||{s:"ok",note:""};
+  const opt=(v,l)=>`<option value="${v}"${fs.s===v?" selected":""}>${l}</option>`;
+  return `<div onclick="S.svcmon.eqOpen=null;render(true)" style="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px">
+    <div onclick="event.stopPropagation()" class="card rise" style="border-radius:16px;max-width:560px;width:100%;max-height:88vh;overflow:auto;padding:22px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px"><div><div style="font-weight:900;font-size:17px">${esc(s.name)}</div><div style="font-size:12px;color:var(--text-dim)">${esc(s.type[es?"es":"en"])}</div></div><button class="btn3d grey sm" onclick="S.svcmon.eqOpen=null;render(true)">✕</button></div>
+      <a class="btn3d blue sm" href="${esc(s.portal)}" target="_blank" rel="noopener" style="margin-bottom:12px;display:inline-flex">${es?"Portal":"Portal"} ›</a>
+      <div class="card" style="padding:12px;background:var(--bg-2);margin-bottom:10px"><div style="font-size:11px;font-weight:800;color:var(--text-dim);margin-bottom:6px">${es?"ESTADO EN CAMPO":"FIELD STATUS"}</div>
+        <select class="input" id="svc-eq-st" style="margin-bottom:8px">${opt("ok",es?"🟢 OK":"🟢 OK")}${opt("warn",es?"🟡 Atención":"🟡 Attention")}${opt("err",es?"🔴 Falla":"🔴 Fault")}${opt("off",es?"⚪ Apagado":"⚪ Off")}</select>
+        <textarea class="input" id="svc-eq-note" rows="2" placeholder="${es?"Notas":"Notes"}">${esc(fs.note||"")}</textarea>
+        <button class="btn3d sm" onclick="svcSaveEq('${k}')" style="margin-top:8px">${es?"Guardar":"Save"}</button></div>
+      <div class="card" style="padding:12px;background:var(--bg-2);margin-bottom:10px"><div style="font-size:11px;font-weight:800;color:var(--text-dim);margin-bottom:6px">${es?"ESPECIFICACIONES":"SPECS"}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${s.specs.map(x=>`<div><div style="font-size:10px;color:var(--text-dim)">${esc(x[0])}</div><div style="font-size:12.5px;font-weight:700">${esc(x[1])}</div></div>`).join("")}</div></div>
+      <div class="card" style="padding:12px;background:var(--bg-2);margin-bottom:10px"><div style="font-size:11px;font-weight:800;color:var(--text-dim);margin-bottom:6px">${es?"GUÍA DE LEDS":"LED GUIDE"}</div>
+        ${s.leds.map(l=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px"><i style="width:12px;height:12px;border-radius:50%;background:${l.c};flex-shrink:0"></i><span style="font-size:12px">${esc(l[es?"es":"en"])}</span></div>`).join("")}</div>
+      <div class="card" style="padding:12px;background:var(--bg-2)"><div style="font-size:11px;font-weight:800;color:var(--text-dim);margin-bottom:6px">${es?"SOLUCIÓN DE PROBLEMAS":"TROUBLESHOOTING"}</div>
+        <ul style="margin:0;padding-left:18px">${s.tr.map(x=>`<li style="font-size:12px;margin-bottom:4px">${esc(x[es?"es":"en"])}</li>`).join("")}</ul></div></div></div>`;
+}
+
+function svcTicketsHTML(es){ const st=S.svcmon.tk;
+  if(st.status==="loading"&&!st.month.length&&!st.backlog.length) return `<div style="padding:30px;text-align:center;color:var(--text-dim)">⟳ ${es?"Cargando tickets…":"Loading tickets…"}</div>`;
+  if(st.status==="error") return `<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudo cargar los tickets.":"Couldn't load service tickets."}</div>`;
+  const tCol=(s)=>{ s=String(s||"").toLowerCase(); if(/complet|conclu|closed/.test(s))return "#22c55e"; if(/need|report|3\./.test(s))return "#ef4444"; if(/sched|program/.test(s))return "#1D429B"; if(/hold|pend/.test(s))return "#F59E0B"; return "#8B5CF6"; };
+  const row=(r)=>{ const v1=(r.visits&&r.visits[0])||{}; const when=r.startDate?(r.startDate+(r.startTime?" "+r.startTime:"")):(v1.date||"");
+    return `<div style="padding:10px 12px;background:var(--bg-2);border:1px solid var(--line);border-left:4px solid ${tCol(r.status)};border-radius:10px;margin-bottom:7px">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:center"><span style="font-weight:800;font-size:13px">${esc(r.ticketNo||"")} <span style="color:var(--wh-orange)">${esc(r.customer||"")}</span></span><span class="pill" style="background:${tCol(r.status)};font-size:9.5px">${esc(r.status||"")}</span></div>
+      <div style="font-size:11.5px;color:var(--text-dim);margin-top:2px">${esc([r.serviceType,r.city,r.team].filter(Boolean).join(" · "))}${when?" · "+esc(when):""}</div>
+      ${r.description?`<div style="font-size:11px;color:var(--text-dim);margin-top:4px;white-space:pre-wrap;word-break:break-word;max-height:54px;overflow:hidden">${esc(String(r.description).slice(0,180))}</div>`:""}</div>`; };
+  const backlog=st.backlog.length?st.backlog.map(row).join(""):`<div style="padding:14px;text-align:center;color:var(--text-dim)">${es?"Nada por programar 🎉":"Nothing to schedule 🎉"}</div>`;
+  const month=st.month.length?st.month.map(row).join(""):`<div style="padding:14px;text-align:center;color:var(--text-dim)">${es?"Sin tickets este mes":"No tickets this month"}</div>`;
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(340px,100%),1fr));gap:16px">
+    <div><div style="font-weight:800;font-size:13px;margin-bottom:8px">🗓 ${es?"Por Programar":"Needs Scheduling"} <span style="color:var(--text-dim);font-weight:600">(${st.backlog.length})</span></div>${backlog}</div>
+    <div><div style="font-weight:800;font-size:13px;margin-bottom:8px">📅 ${es?"Este Mes":"This Month"} <span style="color:var(--text-dim);font-weight:600">(${st.month.length})</span></div>${month}</div></div>`;
+}
+function svcTitle(s){ return String(s||"").toLowerCase().replace(/\b([a-z])/g,(m,c)=>c.toUpperCase()); }
+
 const TABS=[
   {id:"itinerary",key:"tab_itinerary",fn:itineraryHTML},
   {id:"coordinator",key:"tab_coordinator",fn:coordinatorHTML},
-  {id:"crews",key:"tab_crews",fn:crewsHTML},
-  {id:"projects",key:"tab_projects",fn:projectsHTML},
   {id:"calendar",key:"tab_calendar",fn:calendarTabHTML},
-  {id:"weather",key:"tab_weather",fn:weatherHTML},
+  {id:"svcmon",key:"tab_svcmon",fn:serviceMonHTML},
+  {id:"projects",key:"tab_projects",fn:projectsHTML},
   {id:"sitecapture",key:"tab_sitecapture",fn:siteCaptureHTML},
   {id:"records",key:"tab_records",fn:crewRecordsHTML},
   {id:"instmap",key:"tab_instmap",fn:instMapHTML},
@@ -4336,7 +4596,7 @@ setInterval(function(){ if(S.proj.ok) loadProjects(true); },75000);
 function liveRefreshNow(){
   if(document.hidden) return;
   try{
-    if(S.tab==="coordinator"){ loadCoordReady(true); }
+    if(S.tab==="coordinator"){ loadCoordReady(true); if(S.dispatch&&S.dispatch.open) loadFleet(true); }
     else if(S.tab==="crews"){ loadFleet(true); }
     else if(S.tab==="records"){ loadCrewRecords(true); }
     else if(S.tab==="itinerary"){ if(S.live&&S.live.ok) loadJobs(true); }
