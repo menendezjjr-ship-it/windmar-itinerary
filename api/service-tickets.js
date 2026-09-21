@@ -20,6 +20,7 @@ const FIELDS = [
   "Assigned_Technician","Assigned_Technician_Visit_2","Assigned_Technician_Visit_3","Ticket_Status","Field_Status",
   "Priority","Type_of_Service","Service_Type1","Service_Description","Area_of_Service","Number_of_Techs_Required",
   "Scheduled_Visit_1","Scheduled_Visit_2","Scheduled_Visit_3","Date_Complete","Created_Time","Modified_Time",
+  "Created_By","Modified_By","Issue_Reported_By","Last_Tech_to_Work_on_This_Ticket","Associated_Deal","Date_Scheduled",
 ].join(",");
 
 function splitDT(dt) {
@@ -61,6 +62,11 @@ function mapRow(r) {
     createdTime: r.Created_Time || "",
     modifiedTime: r.Modified_Time || "",
     closedTime: r.Date_Complete ? String(r.Date_Complete) : "",
+    createdBy: techName(r.Created_By),
+    modifiedBy: techName(r.Modified_By),
+    reportedBy: (r.Issue_Reported_By || "").toString().trim(),
+    lastTech: (r.Last_Tech_to_Work_on_This_Ticket || "").toString().trim(),
+    deal: (r.Associated_Deal && r.Associated_Deal.name) ? String(r.Associated_Deal.name) : "",
     startDate: sv1.date,
     startTime: sv1.time,
     visits,

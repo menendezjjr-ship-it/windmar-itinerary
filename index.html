@@ -3882,10 +3882,12 @@ function svcFindTicket(id){ id=String(id); var C=S.svcmon; var pools=[C.dash.new
 function svcOpenTicket(id){ var r=svcFindTicket(id); if(!r)return; S.svcmon.open=r; S.svcmon.ntNotes={status:"idle",list:[]}; S.svcmon.ntBusy=""; render(true); svcLoadTicketNotes(id); }
 function svcCloseTicket(){ S.svcmon.open=null; S.svcmon.ntBusy=""; render(true); }
 function svcLoadTicketNotes(id){ var nt=S.svcmon.ntNotes; nt.status="loading"; render(true);
+  var retry=function(){ if((nt._tries=(nt._tries||0)+1)<=5){ setTimeout(function(){ if(S.svcmon.open&&String(S.svcmon.open.id)===String(id)&&S.svcmon.ntNotes.status==="error") svcLoadTicketNotes(id); },2000); } };
   fetch("/api/zoho-notes?id="+encodeURIComponent(id)+"&module=Service_Ticket",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>{
     if(!S.svcmon.open||String(S.svcmon.open.id)!==String(id))return;
-    if(j&&j.ok){ nt.list=j.notes||[]; nt.status="live"; } else { nt.status="error"; } render(true);
-  }).catch(()=>{ if(S.svcmon.open&&String(S.svcmon.open.id)===String(id)){ nt.status="error"; render(true);} });
+    if(j&&j.ok){ nt.list=j.notes||[]; nt.status="live"; nt._tries=0; render(true); return; }
+    nt.status="error"; render(true); retry();   // ok:false = transient Zoho rate-limit → auto-retry
+  }).catch(()=>{ if(S.svcmon.open&&String(S.svcmon.open.id)===String(id)){ nt.status="error"; render(true); retry(); } });
 }
 function svcSaveStatus(id){ var r=S.svcmon.open; if(!r)return; var sel=document.getElementById("svc-tk-status"); if(!sel)return; var val=sel.value; if(val===r.status){ return; }
   S.svcmon.ntBusy="status"; render(true);
@@ -3910,6 +3912,22 @@ function svcTicketDetailHTML(es){ var r=S.svcmon.open; if(!r)return ""; var nt=S
   var opts=SVC_TICKET_STATUSES.slice(); if(r.status&&opts.indexOf(r.status)===-1) opts.unshift(r.status);
   var statusOpts=opts.map(function(v){return '<option value="'+esc(v)+'"'+(r.status===v?" selected":"")+'>'+esc(v)+'</option>';}).join("");
   var saved=r._saved&&(Date.now()-r._saved<3500);
+  var fmtDT=function(t){ if(!t)return ""; var d=new Date(t); return isNaN(d.getTime())?String(t):d.toLocaleString([],{month:"short",day:"numeric",year:"numeric",hour:"2-digit",minute:"2-digit"}); };
+  var fmtD=function(t){ if(!t)return ""; var d=new Date(/^\d{4}-\d{2}-\d{2}$/.test(t)?t+"T00:00:00":t); return isNaN(d.getTime())?String(t):d.toLocaleDateString([],{month:"short",day:"numeric",year:"numeric"}); };
+  var drow=function(lbl,val){ return val?`<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--line)"><span style="flex:0 0 43%;color:var(--text-dim);font-size:11.5px">${lbl}</span><span style="flex:1;min-width:0;font-size:12.5px;font-weight:600;word-wrap:break-word">${esc(val)}</span></div>`:""; };
+  var visitsStr=(r.visits||[]).map(function(v){return [v.date,v.time,v.tech].filter(Boolean).join(" ");}).filter(Boolean).join("  ·  ");
+  var detailsRows=drow(es?"Creado por":"Created by",[r.createdBy,fmtDT(r.createdTime)].filter(Boolean).join(" · "))
+    +drow(es?"Última acción":"Last updated",[r.modifiedBy,fmtDT(r.modifiedTime)].filter(Boolean).join(" · "))
+    +drow(es?"Cuadrilla / Técnico":"Crew / Tech",r.team||r.lastTech)
+    +drow(es?"Reportado por":"Reported by",r.reportedBy)
+    +drow(es?"Área de servicio":"Area of service",r.area)
+    +drow(es?"Tipo de sistema":"System type",r.systemType)
+    +drow(es?"Estado de campo":"Field status",r.fieldStatus)
+    +drow(es?"Técnicos req.":"Techs required",r.techsRequired)
+    +drow(es?"Visitas programadas":"Scheduled visits",visitsStr)
+    +drow(es?"Proyecto (Deal)":"Project (Deal)",r.deal)
+    +drow(es?"Completado":"Completed",fmtD(r.closedTime));
+  var details=detailsRows?`<div class="card" style="padding:12px 14px;background:var(--bg-2);margin:12px 0"><div style="font-size:11px;font-weight:800;color:var(--text-dim);margin-bottom:4px">${es?"DETALLES":"DETAILS"}</div>${detailsRows}</div>`:"";
   var notesBlock;
   if(nt.status==="loading") notesBlock=`<div style="padding:10px;text-align:center;color:var(--text-dim);font-size:12px">⟳ ${es?"Cargando notas…":"Loading notes…"}</div>`;
   else if(nt.status==="error") notesBlock=`<div style="padding:8px;color:var(--warn);font-size:12px">${es?"No se pudieron cargar las notas.":"Couldn't load notes."} <button class="btn3d ghost sm" onclick="svcLoadTicketNotes('${id}')" style="font-size:10px">↻</button></div>`;
@@ -3923,6 +3941,7 @@ function svcTicketDetailHTML(es){ var r=S.svcmon.open; if(!r)return ""; var nt=S
         <button class="btn3d grey sm" onclick="svcCloseTicket()" style="flex-shrink:0">✕</button></div>
       ${(addr||tel)?`<div style="font-size:12.5px;margin:8px 0 4px;display:flex;flex-wrap:wrap;gap:4px 14px">${addr?`<span>📍 ${addr}</span>`:""}${tel?`<span>📞 ${tel}</span>`:""}</div>`:""}
       <div style="display:flex;align-items:center;gap:8px;margin:6px 0 2px">${svcPrioBadge(r.priority)||""}</div>
+      ${details}
       <div class="card" style="padding:12px;background:var(--bg-2);margin:12px 0">
         <div style="font-size:11px;font-weight:800;color:var(--text-dim);margin-bottom:6px">${es?"ESTADO (se guarda en Zoho)":"STATUS (saves to Zoho)"}</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
