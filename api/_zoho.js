@@ -66,7 +66,7 @@ async function sharedRead(lax) {
     const r = await fetch(`${SB_URL}/rest/v1/zoho_token?id=eq.1&select=access_token,expires_at`, { headers: sbHeaders() });
     if (!r.ok) {
       sharedLastErr = `read ${r.status}: ${(await r.text().catch(() => "")).slice(0, 120)}`;
-      sharedOff = Date.now() + 10 * 60 * 1000; // e.g. table not created yet
+      sharedOff = Date.now() + 90 * 1000; // short back-off so the store starts working within ~90s of the table being created
       return null;
     }
     const rows = await r.json();
