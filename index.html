@@ -3664,7 +3664,7 @@ function svcLoadOutages(){ const st=S.svcmon.out; if(st.status==="loading")retur
 function svcLoadTickets(){ const st=S.svcmon.tk; if(st.status==="loading")return; st.status="loading"; render(true);
   const now=new Date(), m=now.getMonth()+1, y=now.getFullYear();
   // Same transient-token hardening as the dashboard: ok:false → failure (keep prior data + retry), not empty.
-  const grab=(qs)=>fetch(SVC_API+"/api/zoho-service-tickets?"+qs,{cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>(j&&j.ok!==false&&Array.isArray(j.records))?j:null).catch(()=>null);
+  const grab=(qs)=>fetch("/api/service-tickets?"+qs,{cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>(j&&j.ok!==false&&Array.isArray(j.records))?j:null).catch(()=>null);
   Promise.all([grab("mode=backlog"),grab("month="+m+"&year="+y)]).then(([b,mo])=>{
     st.blOk=!!b; st.moOk=!!mo;
     if(b) st.backlog=b.records;
@@ -3714,7 +3714,7 @@ function svcLoadDash(){ const st=S.svcmon.dash; if(st.status==="loading")return;
   // null = the request FAILED (network / non-200 / the service-app's Zoho token blipped, which returns
   // {ok:false,records:[]}). Treat ok:false as a failure — NOT as "0 tickets" — and auto-retry, because
   // the service-app shares a Zoho refresh token and its "Access Denied" blips are transient (recover in secs).
-  const grab=(mode)=>fetch(SVC_API+"/api/zoho-service-tickets?mode="+mode,{cache:"no-store"})
+  const grab=(mode)=>fetch("/api/service-tickets?mode="+mode,{cache:"no-store"})
     .then(r=>r.ok?r.json():null).then(j=>(j&&j.ok!==false&&Array.isArray(j.records))?j:null).catch(()=>null);
   Promise.all([grab("recent"),grab("closed")]).then(([nw,cl])=>{
     st.newOk=!!nw; st.closedOk=!!cl;
