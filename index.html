@@ -1318,6 +1318,10 @@ async function loadProjects(silent,fresh){
   // (coordItems + the Schedule Nearest Crew panel); without it the 75s silent refresh
   // updates S.proj.list but never repaints, leaving a stale list with no sign it's stale.
   if(!silent || S.tab==="projects" || S.tab==="itinerary" || S.tab==="coordinator") render(silent);
+  // Auto-heal a transient Zoho blip: re-fetch in a few seconds (escalating, capped) so the tab fills
+  // in on its own instead of sitting on "Reconnecting". Cleared on success.
+  if(S.proj.status==="error"){ S.proj._rt=(S.proj._rt||0)+1; if(S.proj._rt<=6){ clearTimeout(S.proj._rtT); S.proj._rtT=setTimeout(function(){ loadProjects(true,true); }, Math.min(2000*S.proj._rt,9000)); } }
+  else { S.proj._rt=0; }
 }
 // Notify when a project ENTERS Engineering. Seeds silently on first load so the
 // current backlog doesn't all fire; persists across reloads via localStorage.
@@ -1944,11 +1948,13 @@ const ZOHO_ORG="org666151142";
 function loadCoordReady(silent){
   const R=S.coord.ready;
   if(!silent && (R.status==="idle"||R.status==="error")) { S.coord.ready={status:"loading",list:R.list||[],err:""}; if(S.tab==="coordinator") render(); }
+  // Auto-heal a transient blip: keep last-good on screen and re-fetch in a few seconds until it succeeds.
+  const heal=function(){ if(S.coord.ready.status==="error"){ S.coord._rrt=(S.coord._rrt||0)+1; if(S.coord._rrt<=6){ clearTimeout(S.coord._rrtT); S.coord._rrtT=setTimeout(function(){ loadCoordReady(true); }, Math.min(2000*S.coord._rrt,9000)); } } else { S.coord._rrt=0; } };
   wmApiJson("/api/zoho-ready").then(j=>{
     const _rerr=(j&&j.error)||"error"; // transient → keep the last-good ready list rather than blanking the tab
     S.coord.ready=(j&&j.ok&&Array.isArray(j.jobs))?{status:"live",list:j.jobs,err:""}:{status:"error",list:(WM_TRANSIENT_RX.test(String(_rerr))?(R.list||[]):[]),err:_rerr};
-    if(S.tab==="coordinator") render(true);
-  }).catch(e=>{ S.coord.ready={status:"error",list:[],err:String(e)}; if(S.tab==="coordinator") render(true); });
+    if(S.tab==="coordinator") render(true); heal();
+  }).catch(e=>{ S.coord.ready={status:"error",list:R.list||[],err:String(e)}; if(S.tab==="coordinator") render(true); heal(); });
 }
 // Fetch the Installation Notes for one DL (cached per DL). A Ready-to-Schedule install may
 // have no start date yet, so it's not in the calendar window — look it up directly.
