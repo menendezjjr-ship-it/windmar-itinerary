@@ -3583,11 +3583,12 @@ function zohoHTML(){
    Self-contained: state under S.svcmon, inline handlers call the svc* globals below. ─────────────── */
 const SVC_API="https://windmar-service-app.vercel.app";
 function svcInit(){ if(S.svcmon) return; S.svcmon={ sub:"dash",
-  dash:{status:"idle",newT:[],closed:[]},
+  dash:{status:"idle",newT:[],closed:[],q:"",sort:"newest"},
   sites:{status:"idle",list:[],q:"",filter:"all",page:0}, enph:{status:"idle",list:[]},
   detail:null, out:{status:"idle",counties:[],updated:null},
   eqOpen:null, codeF:"all", codeQ:"", sysStatus:svcGetSysStatus(),
-  tk:{status:"idle",month:[],backlog:[],open:null,q:""} }; }
+  open:null, ntNotes:{status:"idle",list:[]}, ntBusy:"",
+  tk:{status:"idle",month:[],backlog:[],open:null,q:"",sort:"newest"} }; }
 function svcGetSysStatus(){ try{ return JSON.parse(localStorage.getItem("wm_sys_status")||"{}"); }catch(e){ return {}; } }
 const SVC_PER=25;
 function svcNum(v,dec){ if(v==null||isNaN(v))return "0"; dec=(dec==null?1:dec); return Number(v).toLocaleString(undefined,{minimumFractionDigits:dec,maximumFractionDigits:dec}); }
@@ -3739,12 +3740,13 @@ function serviceMonHTML(){ svcInit(); const es=S.lang==="es", C=S.svcmon;
   else if(C.sub==="saved") body=svcSavedShell(es);
   else body=svcTicketsHTML(es);
   const detail=C.detail?svcSiteDetailHTML(es):"";
+  const tkDetail=C.open?svcTicketDetailHTML(es):"";
   if(C.sub==="reports") setTimeout(function(){ if(S.svcmon.sub==="reports"&&document.getElementById("rf-chips")) rfInit(); },0);
   if(C.sub==="saved") setTimeout(function(){ if(S.svcmon.sub==="saved"&&document.getElementById("saved-list")) savedInit(); },0);
   return `<div class="fade"><div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <h2 style="margin:0;font-size:20px;font-weight:900">🛰 ${es?"Servicio y Monitoreo":"Service & Monitoring"}</h2>
       <span style="font-size:12px;color:var(--text-dim)">${es?"Datos en vivo · SolarEdge · Enphase · FDEM · Zoho":"Live · SolarEdge · Enphase · FDEM · Zoho"}</span></div>
-    ${nav}${body}</div>${detail}`;
+    ${nav}${body}</div>${detail}${tkDetail}`;
 }
 
 function svcSitesHTML(es){ const st=S.svcmon.sites, en=S.svcmon.enph;
@@ -3857,21 +3859,101 @@ function svcPrioBadge(p){ p=String(p||"").toLowerCase();
   return "";
 }
 // One frosted-glass row. tint = accent colour blended into the translucent card.
-function svcGlassRow(inner,tint){ return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 14px;margin-bottom:9px;border-radius:13px;background:linear-gradient(135deg,${tint}22,rgba(255,255,255,.05));backdrop-filter:blur(11px) saturate(150%);-webkit-backdrop-filter:blur(11px) saturate(150%);border:1px solid rgba(255,255,255,.13);box-shadow:0 6px 22px -10px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.16)">${inner}</div>`; }
+function svcGlassRow(inner,tint,id){ const clk=id?` onclick="svcOpenTicket('${esc(String(id))}')" style="cursor:pointer;`:` style="`; return `<div${clk}display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 14px;margin-bottom:9px;border-radius:13px;background:linear-gradient(135deg,${tint}22,rgba(255,255,255,.05));backdrop-filter:blur(11px) saturate(150%);-webkit-backdrop-filter:blur(11px) saturate(150%);border:1px solid rgba(255,255,255,.13);box-shadow:0 6px 22px -10px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.16);transition:transform .1s ease,box-shadow .12s ease" ${id?'onmouseover="this.style.transform=\'translateY(-1px)\'" onmouseout="this.style.transform=\'\'"':''}>${inner}</div>`; }
+
+// ── Ticket search / sort / detail (+ Zoho status + notes write) ──────────────────────────────
+var SVC_TICKET_STATUSES=["1. Reported","2. Under review","3. Need Schedule","4. Scheduled","5. Need Reschedule","6. Tier 3/RMA/Warranty","7. Complete","8. Complete/Contacted","9. Need more Info","10. Referred to Financing Company","11. Service Complete - Referred to Up-Sales Team","12. Quote Required - Pending","13. Service unable to complete (Refer ticket notes)","14. Permit Required (Refer to ticket notes)","Duplicate Ticket","Drywall Repair","Enphase Pending Update","Final Inspection/Utility/Install","Hold","In House Meeting/Training","Inbound Call","Monitoring Production","MSP Not Scheduled","MSP Scheduled","Need Re-Schedule","Needs More Information","Quote/Callback","Roof Repair","Service Dept SN Update","Tentative Scheduled","Third Party Assist Req","Utility Bill"];
+function svcPrioRank(p){ p=String(p||"").toLowerCase(); if(/very high|critical|urgent/.test(p))return 0; if(/\bhigh\b/.test(p))return 1; if(/normal|medium/.test(p))return 2; if(/low/.test(p))return 3; return 4; }
+function svcTicketTime(r){ var t=r&&(r.createdTime||r.modifiedTime||r.startDate||r.closedTime); var n=t?Date.parse(t):NaN; return isNaN(n)?0:n; }
+function svcSortRecs(arr,mode){ var a=arr.slice(); if(mode==="oldest") a.sort(function(x,y){return svcTicketTime(x)-svcTicketTime(y);}); else if(mode==="priority") a.sort(function(x,y){var d=svcPrioRank(x.priority)-svcPrioRank(y.priority); return d||(svcTicketTime(y)-svcTicketTime(x));}); else a.sort(function(x,y){return svcTicketTime(y)-svcTicketTime(x);}); return a; }
+function svcTicketMatch(r,q){ if(!q)return true; q=q.toLowerCase(); return [r.ticketNo,r.customer,r.city,r.county,r.address,r.serviceType,r.team,r.status,r.phone,r.systemType].filter(Boolean).join(" ").toLowerCase().indexOf(q)!==-1; }
+function svcSortSelect(val,fn){ var o=function(v,l){return '<option value="'+v+'"'+(val===v?" selected":"")+'>'+l+'</option>';}; var es=S.lang==="es"; return '<select onchange="'+fn+'(this.value)" class="input" style="max-width:170px;font-size:12px;padding:7px 9px">'+o("newest",es?"Más nuevos":"Newest")+o("oldest",es?"Más antiguos":"Oldest")+o("priority",es?"Prioridad":"Priority")+'</select>'; }
+function svcSetDashQ(v){ S.svcmon.dash.q=v; render(true); var el=document.getElementById("svc-dash-q"); if(el){el.focus();el.setSelectionRange(el.value.length,el.value.length);} }
+function svcSetDashSort(v){ S.svcmon.dash.sort=v; render(true); }
+function svcSetTkSort(v){ S.svcmon.tk.sort=v; render(true); }
+function svcFindTicket(id){ id=String(id); var C=S.svcmon; var pools=[C.dash.newT,C.dash.closed,C.tk.backlog,C.tk.month]; for(var i=0;i<pools.length;i++){ var p=pools[i]||[]; for(var j=0;j<p.length;j++){ if(String(p[j].id)===id) return p[j]; } } return null; }
+function svcOpenTicket(id){ var r=svcFindTicket(id); if(!r)return; S.svcmon.open=r; S.svcmon.ntNotes={status:"idle",list:[]}; S.svcmon.ntBusy=""; render(true); svcLoadTicketNotes(id); }
+function svcCloseTicket(){ S.svcmon.open=null; S.svcmon.ntBusy=""; render(true); }
+function svcLoadTicketNotes(id){ var nt=S.svcmon.ntNotes; nt.status="loading"; render(true);
+  fetch("/api/zoho-notes?id="+encodeURIComponent(id)+"&module=Service_Ticket",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(j=>{
+    if(!S.svcmon.open||String(S.svcmon.open.id)!==String(id))return;
+    if(j&&j.ok){ nt.list=j.notes||[]; nt.status="live"; } else { nt.status="error"; } render(true);
+  }).catch(()=>{ if(S.svcmon.open&&String(S.svcmon.open.id)===String(id)){ nt.status="error"; render(true);} });
+}
+function svcSaveStatus(id){ var r=S.svcmon.open; if(!r)return; var sel=document.getElementById("svc-tk-status"); if(!sel)return; var val=sel.value; if(val===r.status){ return; }
+  S.svcmon.ntBusy="status"; render(true);
+  fetch("/api/zoho-update",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({recordId:String(id),module:"Service_Ticket",fields:{Ticket_Status:val}})})
+    .then(r=>r.json()).then(j=>{ S.svcmon.ntBusy="";
+      if(j&&j.ok){ r.status=val; r._saved=Date.now(); render(true); } else { S.svcmon.ntErr=(j&&j.error)||"save failed"; render(true); setTimeout(()=>{S.svcmon.ntErr="";},4000); }
+    }).catch(()=>{ S.svcmon.ntBusy=""; S.svcmon.ntErr="network error"; render(true); setTimeout(()=>{S.svcmon.ntErr="";},4000); });
+}
+function svcAddNote(id){ var r=S.svcmon.open; if(!r)return; var ta=document.getElementById("svc-tk-note"); if(!ta)return; var txt=(ta.value||"").trim(); if(!txt)return;
+  S.svcmon.ntBusy="note"; render(true);
+  fetch("/api/zoho-add-note",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({recordId:String(id),module:"Service_Ticket",title:"Note from Itinerary",content:txt})})
+    .then(r=>r.json()).then(j=>{ S.svcmon.ntBusy="";
+      if(j&&j.ok){ render(true); svcLoadTicketNotes(id); } else { S.svcmon.ntErr=(j&&j.error)||"note failed"; render(true); setTimeout(()=>{S.svcmon.ntErr="";},4000); }
+    }).catch(()=>{ S.svcmon.ntBusy=""; S.svcmon.ntErr="network error"; render(true); setTimeout(()=>{S.svcmon.ntErr="";},4000); });
+}
+function svcTicketDetailHTML(es){ var r=S.svcmon.open; if(!r)return ""; var nt=S.svcmon.ntNotes, busy=S.svcmon.ntBusy, err=S.svcmon.ntErr;
+  var id=String(r.id||"");
+  var meta=[r.city,r.county,r.serviceType,r.systemType].filter(Boolean).join(" · ");
+  var addr=r.address?`<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.address)}" target="_blank" rel="noopener" style="color:var(--wh-blue)">${esc(r.address)}</a>`:"";
+  var tel=r.phone?`<a href="tel:${esc(String(r.phone).replace(/[^0-9+]/g,''))}" style="color:var(--wh-blue)">${esc(r.phone)}</a>`:"";
+  var desc=r.description?String(r.description).trim():"";
+  var opts=SVC_TICKET_STATUSES.slice(); if(r.status&&opts.indexOf(r.status)===-1) opts.unshift(r.status);
+  var statusOpts=opts.map(function(v){return '<option value="'+esc(v)+'"'+(r.status===v?" selected":"")+'>'+esc(v)+'</option>';}).join("");
+  var saved=r._saved&&(Date.now()-r._saved<3500);
+  var notesBlock;
+  if(nt.status==="loading") notesBlock=`<div style="padding:10px;text-align:center;color:var(--text-dim);font-size:12px">⟳ ${es?"Cargando notas…":"Loading notes…"}</div>`;
+  else if(nt.status==="error") notesBlock=`<div style="padding:8px;color:var(--warn);font-size:12px">${es?"No se pudieron cargar las notas.":"Couldn't load notes."} <button class="btn3d ghost sm" onclick="svcLoadTicketNotes('${id}')" style="font-size:10px">↻</button></div>`;
+  else if(!nt.list.length) notesBlock=`<div style="padding:8px;color:var(--text-dim);font-size:12px">${es?"Sin notas todavía.":"No notes yet."}</div>`;
+  else notesBlock=nt.list.map(function(n){return `<div style="padding:9px 11px;background:var(--bg-2);border:1px solid var(--line);border-radius:9px;margin-bottom:6px"><div style="font-size:12.5px;white-space:pre-wrap;word-wrap:break-word">${esc(n.content||n.title||"")}</div><div style="font-size:10px;color:var(--text-dim);margin-top:4px">${esc(n.author||"")}${n.time?" · "+esc(new Date(n.time).toLocaleString()):""}</div></div>`;}).join("");
+  return `<div onclick="svcCloseTicket()" style="position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:1700;display:flex;align-items:flex-end;justify-content:center;padding:0" class="wmTkScrim">
+    <div onclick="event.stopPropagation()" class="card rise wmTkCard" style="border-radius:18px 18px 0 0;max-width:600px;width:100%;max-height:92vh;overflow:auto;padding:20px 18px calc(20px + env(safe-area-inset-bottom,0px))">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:6px">
+        <div style="min-width:0"><div style="font-weight:900;font-size:17px"><span style="color:var(--wh-orange)">#${esc(r.ticketNo||"")}</span> ${esc(r.customer||"")}</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:2px">${esc(meta)}</div></div>
+        <button class="btn3d grey sm" onclick="svcCloseTicket()" style="flex-shrink:0">✕</button></div>
+      ${(addr||tel)?`<div style="font-size:12.5px;margin:8px 0 4px;display:flex;flex-wrap:wrap;gap:4px 14px">${addr?`<span>📍 ${addr}</span>`:""}${tel?`<span>📞 ${tel}</span>`:""}</div>`:""}
+      <div style="display:flex;align-items:center;gap:8px;margin:6px 0 2px">${svcPrioBadge(r.priority)||""}</div>
+      <div class="card" style="padding:12px;background:var(--bg-2);margin:12px 0">
+        <div style="font-size:11px;font-weight:800;color:var(--text-dim);margin-bottom:6px">${es?"ESTADO (se guarda en Zoho)":"STATUS (saves to Zoho)"}</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="svc-tk-status" class="input" style="flex:1;min-width:180px;font-size:13px">${statusOpts}</select>
+          <button class="btn3d blue sm" onclick="svcSaveStatus('${id}')" ${busy==="status"?"disabled":""}>${busy==="status"?"⟳ "+(es?"Guardando…":"Saving…"):(es?"Guardar":"Save")}</button>
+        </div>
+        ${saved?`<div style="font-size:11.5px;color:#22c55e;margin-top:6px">✓ ${es?"Estado actualizado en Zoho":"Status updated in Zoho"}</div>`:""}
+        ${err?`<div style="font-size:11.5px;color:var(--warn);margin-top:6px">⚠ ${esc(err)}</div>`:""}
+      </div>
+      ${desc?`<div style="margin:12px 0"><div style="font-size:11px;font-weight:800;color:var(--text-dim);margin-bottom:6px">${es?"DESCRIPCIÓN DEL SERVICIO":"SERVICE DESCRIPTION"}</div><div class="card" style="padding:12px;background:var(--bg-2);font-size:12.5px;white-space:pre-wrap;word-wrap:break-word;line-height:1.5">${esc(desc)}</div></div>`:""}
+      <div style="margin:12px 0 4px"><div style="font-size:11px;font-weight:800;color:var(--text-dim);margin-bottom:6px">${es?"NOTAS":"NOTES"}</div>${notesBlock}</div>
+      <div class="card" style="padding:12px;background:var(--bg-2);margin-top:6px">
+        <textarea id="svc-tk-note" class="input" rows="2" placeholder="${es?"Agregar una nota (se guarda en Zoho)…":"Add a note (saves to Zoho)…"}" style="font-size:13px"></textarea>
+        <button class="btn3d sm" onclick="svcAddNote('${id}')" ${busy==="note"?"disabled":""} style="margin-top:8px">${busy==="note"?"⟳ "+(es?"Guardando…":"Saving…"):"＋ "+(es?"Agregar nota":"Add note")}</button>
+      </div>
+    </div></div>`;
+}
 function svcDashHTML(es){ const st=S.svcmon.dash;
   if(st.status==="loading"&&!st.newT.length&&!st.closed.length) return `<div style="padding:30px;text-align:center;color:var(--text-dim)">⟳ ${es?"Cargando panel…":"Loading dashboard…"}</div>`;
   if(st.status==="error"&&!st.newT.length&&!st.closed.length) return `<div class="card" style="padding:18px;text-align:center"><div style="color:var(--warn);font-weight:700;margin-bottom:4px">⚠ ${es?"No se pudo cargar el panel.":"Couldn't load the dashboard."}</div><div style="font-size:12px;color:var(--text-dim);margin-bottom:12px">${es?"El servicio puede estar despertando. Reintentando…":"The service may be waking up. Retrying…"}</div><button class="btn3d blue sm" onclick="svcLoadDash()">↻ ${es?"Reintentar":"Retry"}</button></div>`;
   const panel=(accent,head,rows)=>`<div style="border-radius:20px;padding:16px 16px 8px;margin-bottom:16px;background:linear-gradient(160deg,${accent}20,rgba(255,255,255,.05));backdrop-filter:blur(18px) saturate(170%);-webkit-backdrop-filter:blur(18px) saturate(170%);border:1px solid ${accent}66;box-shadow:0 16px 46px -14px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.2)">${head}${rows}</div>`;
-  const newRow=(r)=>svcGlassRow(`<div style="min-width:0"><div style="font-weight:800;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--wh-orange)">#${esc(r.ticketNo||"")}</span> · ${esc(r.customer||"")}</div><div style="font-size:11.5px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc([r.city,r.serviceType].filter(Boolean).join(" · "))}</div></div><div style="display:flex;align-items:center;gap:6px;flex-shrink:0">${svcPrioBadge(r.priority)}<span class="pill" style="background:#1D429B;font-size:9px">NEW</span></div>`,"#F89B24");
-  const closedRow=(r)=>svcGlassRow(`<div style="min-width:0"><div style="font-weight:800;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--wh-orange)">#${esc(r.ticketNo||"")}</span> · ${esc(r.customer||"")}</div><div style="font-size:11.5px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc([r.team,r.city].filter(Boolean).join(" · "))}</div></div><div style="display:flex;align-items:center;gap:6px;flex-shrink:0">${svcPrioBadge(r.priority)}<span class="pill" style="background:#22c55e;font-size:9px">CLOSED</span></div>`,"#22c55e");
+  const newRow=(r)=>svcGlassRow(`<div style="min-width:0"><div style="font-weight:800;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--wh-orange)">#${esc(r.ticketNo||"")}</span> · ${esc(r.customer||"")}</div><div style="font-size:11.5px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc([r.city,r.serviceType].filter(Boolean).join(" · "))}</div></div><div style="display:flex;align-items:center;gap:6px;flex-shrink:0">${svcPrioBadge(r.priority)}<span class="pill" style="background:#1D429B;font-size:9px">NEW</span></div>`,"#F89B24",r.id);
+  const closedRow=(r)=>svcGlassRow(`<div style="min-width:0"><div style="font-weight:800;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--wh-orange)">#${esc(r.ticketNo||"")}</span> · ${esc(r.customer||"")}</div><div style="font-size:11.5px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc([r.team,r.city].filter(Boolean).join(" · "))}</div></div><div style="display:flex;align-items:center;gap:6px;flex-shrink:0">${svcPrioBadge(r.priority)}<span class="pill" style="background:#22c55e;font-size:9px">CLOSED</span></div>`,"#22c55e",r.id);
   const head=(icon,txt)=>`<div style="display:flex;align-items:center;gap:9px;margin-bottom:13px"><span style="font-size:17px">${icon}</span><span style="font-weight:900;font-size:15.5px">${txt}</span></div>`;
-  const nRows=st.newT.length?st.newT.map(newRow).join(""):`<div style="padding:12px;text-align:center;color:var(--text-dim);font-size:12.5px">${es?"Sin tickets nuevos":"No new tickets"}</div>`;
-  const cRows=st.closed.length?st.closed.map(closedRow).join(""):`<div style="padding:12px;text-align:center;color:var(--text-dim);font-size:12.5px">${es?"Nada cerrado recientemente":"Nothing closed recently"}</div>`;
+  const q=st.q||"", sort=st.sort||"newest";
+  const fNew=svcSortRecs(st.newT.filter(r=>svcTicketMatch(r,q)),sort);
+  const fClosed=svcSortRecs(st.closed.filter(r=>svcTicketMatch(r,q)),sort);
+  const nRows=fNew.length?fNew.map(newRow).join(""):`<div style="padding:12px;text-align:center;color:var(--text-dim);font-size:12.5px">${q?(es?"Sin coincidencias":"No matches"):(es?"Sin tickets nuevos":"No new tickets")}</div>`;
+  const cRows=fClosed.length?fClosed.map(closedRow).join(""):`<div style="padding:12px;text-align:center;color:var(--text-dim);font-size:12.5px">${q?(es?"Sin coincidencias":"No matches"):(es?"Nada cerrado recientemente":"Nothing closed recently")}</div>`;
   const loading=st.status==="loading";
   const upd=st.updated?`<span style="font-size:11px;color:var(--text-dim)">${es?"Actualizado":"Updated"} ${new Date(st.updated).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</span>`:"";
-  const bar=`<div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-bottom:10px">${upd}<button class="btn3d ghost sm" onclick="svcLoadDash()" ${loading?"disabled":""} style="font-size:11px">${loading?"⟳ "+(es?"Cargando…":"Loading…"):"↻ "+(es?"Actualizar":"Refresh")}</button></div>`;
-  return bar+panel("#F89B24",head("🔔",st.newT.length+" "+(es?"ticket(s) de servicio nuevos":"new service ticket(s)")),nRows)
-        +panel("#22c55e",head("✅",st.closed.length+" "+(es?"ticket(s) cerrados":"ticket(s) just closed")),cRows);
+  const tools=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <div style="position:relative;flex:1;min-width:180px"><input id="svc-dash-q" value="${esc(q)}" oninput="svcSetDashQ(this.value)" placeholder="${es?"Buscar # · nombre · ciudad · tipo…":"Search # · name · city · type…"}" class="input" style="width:100%;font-size:13px;padding-left:32px"/><span style="position:absolute;left:11px;top:50%;transform:translateY(-50%);opacity:.6;font-size:13px">🔍</span></div>
+      ${svcSortSelect(sort,"svcSetDashSort")}</div>`;
+  const bar=`<div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-bottom:8px">${upd}<button class="btn3d ghost sm" onclick="svcLoadDash()" ${loading?"disabled":""} style="font-size:11px">${loading?"⟳ "+(es?"Cargando…":"Loading…"):"↻ "+(es?"Actualizar":"Refresh")}</button></div>`;
+  const hint=`<div style="font-size:11px;color:var(--text-dim);margin:-4px 2px 12px">👆 ${es?"Toca un ticket para ver detalles, notas y cambiar el estado.":"Tap a ticket to view details, notes & change status."}</div>`;
+  return bar+tools+hint+panel("#F89B24",head("🔔",fNew.length+" "+(es?"ticket(s) de servicio nuevos":"new service ticket(s)")+(q&&fNew.length!==st.newT.length?" / "+st.newT.length:"")),nRows)
+        +panel("#22c55e",head("✅",fClosed.length+" "+(es?"ticket(s) cerrados":"ticket(s) just closed")+(q&&fClosed.length!==st.closed.length?" / "+st.closed.length:"")),cRows);
 }
 
 function svcTicketsHTML(es){ const st=S.svcmon.tk;
@@ -3883,15 +3965,15 @@ function svcTicketsHTML(es){ const st=S.svcmon.tk;
   const row=(r)=>{ const v1=(r.visits&&r.visits[0])||{}; const when=r.startDate?(r.startDate+(r.startTime?" "+r.startTime:"")):(v1.date||"");
     const meta=[r.serviceType,r.city,r.team].filter(Boolean).join(" · ")+(when?" · "+when:"");
     const desc=r.description?String(r.description).replace(/\s+/g," ").trim():"";
-    return `<div title="${esc(desc)}" style="padding:8px 11px;background:var(--bg-2);border:1px solid var(--line);border-left:4px solid ${tCol(r.status)};border-radius:9px;margin-bottom:6px">
+    return `<div title="${esc(desc)}"${r.id?` onclick="svcOpenTicket('${esc(String(r.id))}')"`:""} style="padding:8px 11px;background:var(--bg-2);border:1px solid var(--line);border-left:4px solid ${tCol(r.status)};border-radius:9px;margin-bottom:6px${r.id?";cursor:pointer":""}">
       <div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline"><span style="font-weight:800;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--wh-orange)">${esc(r.ticketNo||"")}</span> ${esc(r.customer||"")}</span><span class="pill" style="background:${tCol(r.status)};font-size:9px;flex-shrink:0">${esc(r.status||"")}</span></div>
       <div style="font-size:11px;color:var(--text-dim);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(meta)}</div>
       ${desc?`<div style="font-size:10.5px;color:var(--text-dim);opacity:.8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(desc)}</div>`:""}</div>`; };
   const q=(st.q||"").toLowerCase();
   const match=(r)=> !q || ((r.ticketNo||"")+" "+(r.customer||"")+" "+(r.city||"")+" "+(r.serviceType||"")+" "+(r.team||"")+" "+(r.status||"")).toLowerCase().indexOf(q)>-1;
-  const byDate=(a,b)=>String(a.startDate||"").localeCompare(String(b.startDate||""));
-  const bl=st.backlog.filter(match), mo=st.month.filter(match).sort(byDate);
-  const search=`<input class="input" value="${esc(st.q||"")}" oninput="svcSetTkQ(this.value)" placeholder="${es?"🔎 Buscar ticket / cliente / ciudad / técnico / estado":"🔎 Search ticket / customer / city / tech / status"}" style="margin-bottom:12px;max-width:460px"/>`;
+  const sort=st.sort||"newest";
+  const bl=svcSortRecs(st.backlog.filter(match),sort), mo=svcSortRecs(st.month.filter(match),sort);
+  const search=`<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px"><input class="input" value="${esc(st.q||"")}" oninput="svcSetTkQ(this.value)" placeholder="${es?"🔎 Buscar ticket / cliente / ciudad / técnico / estado":"🔎 Search ticket / customer / city / tech / status"}" style="flex:1;min-width:200px;max-width:460px"/>${svcSortSelect(sort,"svcSetTkSort")}</div><div style="font-size:11px;color:var(--text-dim);margin:-6px 2px 12px">👆 ${es?"Toca un ticket para ver detalles, notas y cambiar el estado.":"Tap a ticket to view details, notes & change status."}</div>`;
   const cnt=(shown,total)=>q?`${shown} / ${total}`:`${total}`;
   const secHead=(icon,label,shown,total,col)=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid ${col}"><span style="font-weight:900;font-size:14px">${icon} ${label}</span><span class="pill" style="background:${col};font-size:10px;margin-left:auto">${cnt(shown,total)}</span></div>`;
   const empty=(m)=>`<div style="padding:14px;text-align:center;color:var(--text-dim);font-size:12.5px">${m}</div>`;
