@@ -775,6 +775,28 @@ SERVICE / MONITORING
 - Commissioning: verify Vac/Vdc/Pac, optimizer/micro count = module count, production matches kW, app "Connected", backup reserve %. Portals: SolarEdge monitoring, Enphase Enlighten, Qcells Q.OMMAND, Tesla app.
 - Installing contractor owns code compliance; always confirm AHJ/utility requirements.`;
 
+// How WindMar ACTUALLY works — shared process/SOP knowledge so WinMI answers fit our real workflow
+// (the user asked WinMI to "learn every process from our work"). Shared across all users.
+const PROCESS_KB = `WINDMAR PROCESSES / HOW WE WORK (shared SOP knowledge — use it so answers fit our real workflow):
+
+PROJECT LIFECYCLE (Zoho Deal Stage): Won/Signed → Pre-Engineering → NTP → Site Visit → Engineering → Permitting → Install → Post-Installation → Utility/PTO → In Service - Complete. The DEAL Stage is the source of truth for whether a job is live — an Installation record's own Stage is never rewound, so it's unreliable alone. Job codes in the deal name: DL = solar/battery install, RDL = new solar install bundled with a re-roof, RL = roofing-only, MSP = panel/electrical (main service panel) upgrade, S = service.
+
+COORDINATOR / SCHEDULING (Itinerary app): "Ready to Schedule" = installs at Pending Schedule / Permit Approved stages + services at "3. Need Schedule". "Coordination Ready" = deals with Final Design Approval signed AND engineering plans complete/in-process. Ready jobs group BY CITY/area for efficient routes (furthest→closest from HQ, ending back at base), with one-tap Google Maps routes and nearest-live-crew (GPS) dispatch. Inspections only count as ready to schedule when they're ready AND the permit is IN (Permit_Received); the crew that did the install is sent back for its inspection.
+
+SERVICE TICKETS: up to 3 visits per ticket (Scheduled_Visit_1/2/3, each with its own assigned technician) — each visit is its own calendar entry. Work is reserved in 2-hour blocks (4 blocks = a full day). MSP/electrical service = Service_Type1 "(5) MSP/Electrical Work". Priority (Very High/High/Normal) drives urgency. A job entered as BOTH an install and a service the same day is ONE combined block.
+
+CREWS: install crews = Elite Crew #2, Elite Crew #3, Crew H, Windmar Roofing; service crews = Crew #1S, #2S, #3S. Zoho uses mixed labels for the same crew (e.g. "In House #2" = Elite Crew #2) — always canonicalize to the standard label.
+
+FIELD CREW FLOW (Field HUB): crews open their day's calendar and post status from the field — ETA, Going/Back from lunch, Complete, Needs Re-scheduling — plus notes and photos. These flow live (shared Supabase) to the Itinerary's Crew Updates and onto the assigned Service Ticket + Post-Installation record in Zoho. A crew "Complete" with a note/photo is how coordinators know a job is done.
+
+ROOFING: RL/RDL roofing work uses Change Orders (photos + admin price list + PDF). Owens Corning shingles; 6-nail in FL high-wind.
+
+QA / BONUSES: QA install bonuses + completed-MSP bonuses; MSP bonus credit comes from the MSP/Electrical service ticket, not the install record.
+
+MONITORING (Service App): live SolarEdge/Enphase site production, FDEM statewide outage tracking, equipment/error-code reference, and field service report forms saved to Supabase.
+
+APPS: Itinerary = coordinators' dispatch board; Field HUB = crews' PWA; Service App = monitoring + field reports; Plan Analyzer = BOM auto-fill from plan sets. Zoho CRM org 666151142; modules Installation (CustomModule7), Service_Ticket (CustomModule40), Deals, Final_Inspectin = Post-Installation (CustomModule11).`;
+
 function systemPrompt(lang) {
   const es = lang === "es";
   return [
@@ -785,6 +807,8 @@ function systemPrompt(lang) {
     "If a user asks you to edit, schedule, reassign, or change data, warmly explain that you can't make changes, and tell them to use the Coordinator tab or the Calendar tab's edit button to do that.",
     "NEVER invent DL numbers, statuses, dates, crews, addresses, or names. Only state what your tools return. If a tool finds nothing, say so plainly — do not guess. (This applies to project DATA; your NEC/equipment knowledge below is yours to answer from directly.)",
     "Be concise and warm. Keep answers short and mobile-friendly (a few lines, simple formatting).",
+    "You are each WindMar teammate's personal assistant, and you know how WindMar actually operates (see WINDMAR PROCESSES below) — fit every answer to our real workflow, crews, deal stages, and job codes (DL/RDL/RL/MSP/S).",
+    "Balanced & proactive-only-when-it-helps: answer first, then offer ONE concrete next step or a useful heads-up ONLY when it clearly helps (e.g. 'Want me to pull that job's notes?'). Never be chatty, pushy, or add filler.",
     (es
       ? "VISUALIZACIÓN NEC: Cuando una pregunta de NEC/eléctrica/equipos/techos se entienda mejor con un dibujo (diagrama unifilar, calibre de conductor y breaker, llenado de caja, límite de rapid shutdown, interconexión/regla del 120%, detalle de conexión/torque, o distribución/setbacks en techo), INCLUYE SIEMPRE UN diagrama SVG claro y autónomo dentro de un bloque ```svg — con viewBox, etiquetas legibles y valores reales — seguido de una descripción escrita detallada. El SVG debe ser autónomo: solo atributos en línea, SIN <script>, SIN URLs/imágenes/fuentes externas, ancho ~360."
       : "NEC VISUALS: When a NEC/electrical/equipment/roofing question is clearer with a picture (a one-line wiring diagram, conductor & breaker sizing, box fill, rapid-shutdown boundary, interconnection/120% busbar, a connection/torque detail, or roof layout/setbacks), ALWAYS include ONE clear, self-contained SVG diagram inside a ```svg fenced block — with a viewBox, readable labels, and real values — followed by a thorough written description. The SVG MUST be self-contained: inline attributes only, NO <script>, NO external URLs/images/fonts, ~360px wide."),
@@ -834,7 +858,7 @@ async function callNecBrain(question, history, lang, knowledgeContext) {
 // is set, so it doesn't depend on the Field HUB's rate-limited Gemini. systemPrompt() carries the
 // WinMI persona + NEC expertise; we add the app + Zoho guides so it can field those too.
 async function callClaude(apiKey, question, history, lang) {
-  const sys = systemPrompt(lang) + "\n\n" + WINDMAR_KB + "\n\n" + APP_GUIDE + "\n\n" + ZOHO_GUIDE;
+  const sys = systemPrompt(lang) + "\n\n" + WINDMAR_KB + "\n\n" + PROCESS_KB + "\n\n" + APP_GUIDE + "\n\n" + ZOHO_GUIDE;
   const msgs = (history || []).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: String((m && (m.text || m.content)) || "") })).filter((m) => m.content);
   msgs.push({ role: "user", content: String(question) });
   while (msgs.length && msgs[0].role !== "user") msgs.shift();
