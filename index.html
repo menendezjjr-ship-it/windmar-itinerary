@@ -3704,11 +3704,20 @@ function svcSetCodeF(f){ S.svcmon.codeF=f; render(true); }
 function svcSetCodeQ(v){ S.svcmon.codeQ=v; render(true); }
 function svcSetTkQ(v){ S.svcmon.tk.q=v; render(true); }
 function svcLoadDash(){ const st=S.svcmon.dash; if(st.status==="loading")return; st.status="loading"; render(true);
-  Promise.all([
-    fetch(SVC_API+"/api/zoho-service-tickets?mode=recent",{cache:"no-store"}).then(r=>r.json()).catch(()=>({})),
-    fetch(SVC_API+"/api/zoho-service-tickets?mode=closed",{cache:"no-store"}).then(r=>r.json()).catch(()=>({}))
-  ]).then(([nw,cl])=>{ st.newT=(nw&&nw.records)||[]; st.closed=(cl&&cl.records)||[]; st.status="live"; render(true); })
-   .catch(()=>{ st.status="error"; render(true); });
+  // null = the request actually FAILED (network/cold-start/non-200). An empty records[] = genuinely none.
+  // Swallowing failures as [] used to make a transient error look identical to "0 tickets".
+  const grab=(mode)=>fetch(SVC_API+"/api/zoho-service-tickets?mode="+mode,{cache:"no-store"})
+    .then(r=>r.ok?r.json():null).then(j=>(j&&Array.isArray(j.records))?j:null).catch(()=>null);
+  Promise.all([grab("recent"),grab("closed")]).then(([nw,cl])=>{
+    if(!nw&&!cl){ // both failed → real error, not empty
+      st.status="error";
+      if((st._tries=(st._tries||0)+1)<=2){ setTimeout(()=>{ if(S.svcmon.dash.status==="error") svcLoadDash(); },2500); } // auto-retry twice
+      render(true); return;
+    }
+    if(nw) st.newT=nw.records;   // only overwrite the side that succeeded
+    if(cl) st.closed=cl.records;
+    st._tries=0; st.status="live"; st.updated=Date.now(); render(true);
+  }).catch(()=>{ st.status="error"; render(true); });
 }
 
 // ── Render ──────────────────────────────────────────────────────────────────────────────────────
@@ -3851,14 +3860,17 @@ function svcPrioBadge(p){ p=String(p||"").toLowerCase();
 function svcGlassRow(inner,tint){ return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 14px;margin-bottom:9px;border-radius:13px;background:linear-gradient(135deg,${tint}22,rgba(255,255,255,.05));backdrop-filter:blur(11px) saturate(150%);-webkit-backdrop-filter:blur(11px) saturate(150%);border:1px solid rgba(255,255,255,.13);box-shadow:0 6px 22px -10px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.16)">${inner}</div>`; }
 function svcDashHTML(es){ const st=S.svcmon.dash;
   if(st.status==="loading"&&!st.newT.length&&!st.closed.length) return `<div style="padding:30px;text-align:center;color:var(--text-dim)">⟳ ${es?"Cargando panel…":"Loading dashboard…"}</div>`;
-  if(st.status==="error"&&!st.newT.length&&!st.closed.length) return `<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudo cargar el panel.":"Couldn't load the dashboard."}</div>`;
+  if(st.status==="error"&&!st.newT.length&&!st.closed.length) return `<div class="card" style="padding:18px;text-align:center"><div style="color:var(--warn);font-weight:700;margin-bottom:4px">⚠ ${es?"No se pudo cargar el panel.":"Couldn't load the dashboard."}</div><div style="font-size:12px;color:var(--text-dim);margin-bottom:12px">${es?"El servicio puede estar despertando. Reintentando…":"The service may be waking up. Retrying…"}</div><button class="btn3d blue sm" onclick="svcLoadDash()">↻ ${es?"Reintentar":"Retry"}</button></div>`;
   const panel=(accent,head,rows)=>`<div style="border-radius:20px;padding:16px 16px 8px;margin-bottom:16px;background:linear-gradient(160deg,${accent}20,rgba(255,255,255,.05));backdrop-filter:blur(18px) saturate(170%);-webkit-backdrop-filter:blur(18px) saturate(170%);border:1px solid ${accent}66;box-shadow:0 16px 46px -14px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.2)">${head}${rows}</div>`;
   const newRow=(r)=>svcGlassRow(`<div style="min-width:0"><div style="font-weight:800;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--wh-orange)">#${esc(r.ticketNo||"")}</span> · ${esc(r.customer||"")}</div><div style="font-size:11.5px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc([r.city,r.serviceType].filter(Boolean).join(" · "))}</div></div><div style="display:flex;align-items:center;gap:6px;flex-shrink:0">${svcPrioBadge(r.priority)}<span class="pill" style="background:#1D429B;font-size:9px">NEW</span></div>`,"#F89B24");
   const closedRow=(r)=>svcGlassRow(`<div style="min-width:0"><div style="font-weight:800;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:var(--wh-orange)">#${esc(r.ticketNo||"")}</span> · ${esc(r.customer||"")}</div><div style="font-size:11.5px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc([r.team,r.city].filter(Boolean).join(" · "))}</div></div><div style="display:flex;align-items:center;gap:6px;flex-shrink:0">${svcPrioBadge(r.priority)}<span class="pill" style="background:#22c55e;font-size:9px">CLOSED</span></div>`,"#22c55e");
   const head=(icon,txt)=>`<div style="display:flex;align-items:center;gap:9px;margin-bottom:13px"><span style="font-size:17px">${icon}</span><span style="font-weight:900;font-size:15.5px">${txt}</span></div>`;
   const nRows=st.newT.length?st.newT.map(newRow).join(""):`<div style="padding:12px;text-align:center;color:var(--text-dim);font-size:12.5px">${es?"Sin tickets nuevos":"No new tickets"}</div>`;
   const cRows=st.closed.length?st.closed.map(closedRow).join(""):`<div style="padding:12px;text-align:center;color:var(--text-dim);font-size:12.5px">${es?"Nada cerrado recientemente":"Nothing closed recently"}</div>`;
-  return panel("#F89B24",head("🔔",st.newT.length+" "+(es?"ticket(s) de servicio nuevos":"new service ticket(s)")),nRows)
+  const loading=st.status==="loading";
+  const upd=st.updated?`<span style="font-size:11px;color:var(--text-dim)">${es?"Actualizado":"Updated"} ${new Date(st.updated).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</span>`:"";
+  const bar=`<div style="display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-bottom:10px">${upd}<button class="btn3d ghost sm" onclick="svcLoadDash()" ${loading?"disabled":""} style="font-size:11px">${loading?"⟳ "+(es?"Cargando…":"Loading…"):"↻ "+(es?"Actualizar":"Refresh")}</button></div>`;
+  return bar+panel("#F89B24",head("🔔",st.newT.length+" "+(es?"ticket(s) de servicio nuevos":"new service ticket(s)")),nRows)
         +panel("#22c55e",head("✅",st.closed.length+" "+(es?"ticket(s) cerrados":"ticket(s) just closed")),cRows);
 }
 
