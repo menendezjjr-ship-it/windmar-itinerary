@@ -3,6 +3,8 @@
 (function(){
   if(window.__wmSunny) return; window.__wmSunny=true;
   var WINMI_API=(window.WINMI_API||"https://windmar-itinerary.vercel.app/api/assistant");
+  var WINMI_INLINE=!!window.WINMI_INLINE, WINMI_HOST=null; // inline mode: render inside a container (e.g. the Field HUB NEC tab) instead of floating
+  function wmHost(){ var t=window.WINMI_MOUNT; if(typeof t==="string") t=document.querySelector(t); return t||null; }
   function es(){ try{ if(window.WINMI_LANG) return String(window.WINMI_LANG).toLowerCase().indexOf("es")===0; if(typeof S!=="undefined"&&S&&S.lang) return S.lang==="es"; var hl=(document.documentElement.lang||navigator.language||"").toLowerCase(); return hl.indexOf("es")===0; }catch(e){ return false; } }
   function T(a,b){ return es()?b:a; }
   var reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -12,28 +14,7 @@
   // ---- WinMI the sun-bot (SVG): a SUN for a head (friendly face) + a small body with the WindMar "W" chest ----
   function rays(){ var s="",cx=60,cy=44,n=12,r0=26,r1=39; for(var i=0;i<n;i++){ var a=(i*(360/n))*Math.PI/180,ux=Math.cos(a),uy=Math.sin(a);
     s+='<line x1="'+(cx+ux*r0).toFixed(1)+'" y1="'+(cy+uy*r0).toFixed(1)+'" x2="'+(cx+ux*r1).toFixed(1)+'" y2="'+(cy+uy*r1).toFixed(1)+'" stroke="url(#wmSunG)" stroke-width="4" stroke-linecap="round"/>'; } return s; }
-  function droid(px){ return '<svg viewBox="0 0 120 152" width="'+px+'" height="'+Math.round(px*1.27)+'" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="display:block;overflow:visible">'
-    +'<defs>'
-    +'<linearGradient id="wmMetal" x1="0.15" y1="0" x2="0.7" y2="1"><stop offset="0" stop-color="#4f77cf"/><stop offset="0.5" stop-color="#274a91"/><stop offset="1" stop-color="#15357c"/></linearGradient>'
-    +'<radialGradient id="wmSunDisc" cx="40%" cy="34%" r="72%"><stop offset="0" stop-color="#FFF0B8"/><stop offset="45%" stop-color="#FDBE3C"/><stop offset="100%" stop-color="#F0850F"/></radialGradient>'
-    +'<linearGradient id="wmSunG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD54A"/><stop offset="1" stop-color="#F89B24"/></linearGradient>'
-    +'</defs>'
-    +'<ellipse cx="60" cy="143" rx="27" ry="5" fill="#000" opacity="0.28"/>'  // ground shadow (3D depth)
-    +'<g class="wmSunRays">'+rays()+'</g>'                                    // spinning sun rays
-    +'<rect x="15" y="90" width="11" height="27" rx="5.5" fill="url(#wmMetal)"/><rect x="94" y="90" width="11" height="27" rx="5.5" fill="url(#wmMetal)"/>' // arms
-    +'<rect x="54" y="63" width="12" height="24" fill="#20407e"/>'            // neck
-    +'<rect x="39" y="79" width="42" height="46" rx="14" fill="url(#wmMetal)" stroke="#9cc0ff" stroke-width="1.5"/>' // body
-    +'<rect x="44" y="82" width="32" height="10" rx="5" fill="#ffffff" opacity="0.14"/>'  // body sheen highlight
-    +'<circle class="wmSunGlowC" cx="60" cy="104" r="14" fill="#F89B24" opacity="0"/>'
-    +'<rect x="46" y="90" width="28" height="27" rx="7" fill="#0a1526"/>'     // chest panel
-    +'<rect x="46" y="90" width="28" height="9" rx="7" fill="#ffffff" opacity="0.06"/>'  // chest glass glare
-    +'<text class="wmSunW" x="60" y="111" text-anchor="middle" font-family="Montserrat,Arial,sans-serif" font-weight="900" font-size="20" fill="url(#wmSunG)">W</text>'
-    +'<circle cx="60" cy="44" r="25.5" fill="url(#wmSunDisc)" stroke="#F0850F" stroke-width="1.5"/>' // SUN head
-    +'<ellipse cx="51" cy="33" rx="11" ry="6.5" fill="#fff" opacity="0.42"/>'  // glossy specular highlight
-    +'<circle class="wmSunEye" cx="51" cy="44" r="4.8" fill="#0a1526"/><circle class="wmSunEye" cx="69" cy="44" r="4.8" fill="#0a1526"/>' // eyes
-    +'<circle cx="52.6" cy="42.3" r="1.5" fill="#fff"/><circle cx="70.6" cy="42.3" r="1.5" fill="#fff"/>' // eye sparkles
-    +'<path class="wmSunMouth" d="M50 53 Q60 61 70 53" fill="none" stroke="#0a1526" stroke-width="3" stroke-linecap="round"/>' // mouth (animates when talking)
-    +'</svg>'; }
+  function droid(px){ return '<svg viewBox="0 0 120 152" width="'+px+'" height="'+Math.round(px*1.27)+'" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style="display:block;overflow:visible">'+'<defs>'+'<linearGradient id="wmNovaFace" x1="0" y1="0" x2="0.25" y2="1"><stop offset="0" stop-color="#243a63"/><stop offset="1" stop-color="#0b1630"/></linearGradient>'+'<radialGradient id="wmNovaEye" cx="45%" cy="38%" r="65%"><stop offset="0" stop-color="#d3f7ff"/><stop offset="55%" stop-color="#33e1ff"/><stop offset="100%" stop-color="#159ccb"/></radialGradient>'+'<radialGradient id="wmNovaAura" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#38e1ff"/><stop offset="55%" stop-color="#1D429B"/><stop offset="100%" stop-color="#1D429B" stop-opacity="0"/></radialGradient>'+'<linearGradient id="wmSunG" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFD54A"/><stop offset="1" stop-color="#F89B24"/></linearGradient>'+'</defs>'+'<ellipse cx="60" cy="141" rx="26" ry="5" fill="#000" opacity="0.24"/>'+'<ellipse class="wmSunGlowC" cx="60" cy="72" rx="55" ry="57" fill="url(#wmNovaAura)" opacity="0.5"/>'+'<line x1="60" y1="25" x2="60" y2="13" stroke="#F89B24" stroke-width="3" stroke-linecap="round"/>'+'<circle cx="60" cy="10" r="4.2" fill="url(#wmSunG)"/>'+'<rect x="23" y="25" width="74" height="86" rx="26" fill="url(#wmNovaFace)" stroke="#33e1ff" stroke-width="2"/>'+'<rect x="30" y="30" width="60" height="18" rx="10" fill="#ffffff" opacity="0.08"/>'+'<rect class="wmSunEye" x="40" y="56" width="13" height="18" rx="6.5" fill="url(#wmNovaEye)"/>'+'<rect class="wmSunEye" x="67" y="56" width="13" height="18" rx="6.5" fill="url(#wmNovaEye)"/>'+'<path class="wmSunMouth" d="M47 90 Q60 100 73 90" fill="none" stroke="#F89B24" stroke-width="4" stroke-linecap="round"/>'+'</svg>'; }
 
   var st=document.createElement("style");
   st.textContent=[
@@ -237,7 +218,7 @@
     return wrap; }
 
   function openPanel(){ if(panel){ return; } if(hi){ hi.remove(); hi=null; }
-    panel=document.createElement("div"); panel.className="wmSunPanel";
+    panel=document.createElement("div"); panel.className="wmSunPanel"+((WINMI_INLINE&&WINMI_HOST)?" wmi-inline":"");
     panel.innerHTML='<div class="wmSunHdr"><span style="flex-shrink:0;display:inline-flex;filter:drop-shadow(0 0 8px rgba(248,155,36,.6))">'+droid(44)+'</span>'
       +'<div style="flex:1;min-width:0"><div style="font:800 14px Montserrat,system-ui,sans-serif;color:#fff">WinMI</div><div style="font-size:11px;color:#8fb0e6">'+T("WindMar Assistant · Zoho + SiteCapture","Asistente WindMar · Zoho + SiteCapture")+'</div></div>'
       +'<button id="wmSunMute" title="'+T("Voice replies","Respuestas por voz")+'" style="background:transparent;border:none;color:#8fb0e6;font-size:18px;cursor:pointer;width:34px;height:34px">'+(muted?"🔇":"🔊")+'</button>'
@@ -248,7 +229,7 @@
       +'<button id="wmSunCam" class="wmSunBtn" title="'+T("Add a photo or PDF","Agregar foto o PDF")+'" style="background:#16294f;color:#8fb0e6">📎</button>'
       +(SR?'<button id="wmSunMic" class="wmSunBtn" title="'+T("Talk to me","Háblame")+'" style="background:#16294f;color:#8fb0e6">🎤</button>':"")
       +'<button id="wmSunSend" class="wmSunBtn" style="background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff">➤</button></div>';
-    document.body.appendChild(panel);
+    (WINMI_INLINE&&WINMI_HOST?WINMI_HOST:document.body).appendChild(panel);
     (function(){ var cam=document.getElementById("wmSunCam"), file=document.getElementById("wmSunFile"); if(cam&&file){ cam.onclick=function(){ file.click(); }; file.onchange=function(){ var f=file.files&&file.files[0]; if(f) sendFile(f); file.value=""; }; } })();
     var greet=addBubble("b",T("Hi, I'm WinMI 🤖 your WindMar assistant! Ask me about any project by DL#, name, or address (Zoho + SiteCapture), or anything about solar, roofing & service. Type, tap 🎤 to talk, or 📎 attach a photo or PDF and I'll read it.","¡Hola! Soy WinMI 🤖 tu asistente WindMar. Pregúntame por cualquier proyecto por DL#, nombre o dirección (Zoho + SiteCapture), o lo que sea de solar, techos y servicio. Escribe, toca 🎤 para hablar, o 📎 adjunta una foto o PDF y lo leo."));
     document.getElementById("wmSunMsgs").appendChild(quickChips());
@@ -323,7 +304,9 @@
   }
 
   launch.onclick=openPanel;
-  (function mount(){ if(!document.body){ setTimeout(mount,40); return; } document.body.appendChild(launch);
+  function mountInline(){ if(!document.getElementById("wmiInlineCss")){ var s=document.createElement("style"); s.id="wmiInlineCss"; s.textContent=".wmSunPanel.wmi-inline{position:relative!important;right:auto!important;left:auto!important;bottom:auto!important;top:auto!important;width:100%!important;max-width:100%!important;height:100%!important;max-height:none!important;border-radius:14px!important;animation:none!important;box-shadow:none!important;border:none}.wmi-inline #wmSunClose{display:none}"; document.head.appendChild(s); } var host=wmHost(); if(!host){ setTimeout(mountInline,120); return; } WINMI_INLINE=true; WINMI_HOST=host; if(panel){ try{panel.remove();}catch(e){} panel=null; } try{host.innerHTML="";}catch(e){} openPanel(); }
+  window.WinMI={ open:openPanel, mountInline:function(el){ if(el){ window.WINMI_MOUNT=el; } WINMI_INLINE=true; mountInline(); } };
+  (function mount(){ if(!document.body){ setTimeout(mount,40); return; } if(WINMI_INLINE){ mountInline(); return; } document.body.appendChild(launch);
     // First visit: a friendly nudge + offer the tour.
     var seen=true; try{ seen=localStorage.getItem("wm_tour_done")==="1"; }catch(e){}
     if(!seen){ setTimeout(function(){ if(panel) return; hi=document.createElement("div"); hi.className="wmSunHi";
