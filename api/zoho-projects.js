@@ -249,9 +249,10 @@ export default async function handler(req, res) {
   // HEAVIEST route in the app: the paginated Deal search PLUS two Deal-id lookups chunked by 10
   // (Final_Inspectin and Installation) — roughly 40 Zoho calls per invocation for ~200 deals.
   // Pipeline stages move over HOURS, so a 45s cache was spending thousands of Zoho calls an hour
-  // to re-derive data that had not changed. 5 minutes fresh + 15 minutes stale-while-revalidate:
+  // to re-derive data that had not changed. 2 minutes fresh + 10 minutes stale-while-revalidate
+  // (was 5/15 — tightened so pipeline / inspection / stuck counts track Zoho more closely):
   // a reader still gets an instant response, the refresh happens behind them.
-  res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=900");
+  res.setHeader("Cache-Control", "s-maxage=120, stale-while-revalidate=600");
   if (!hasCreds()) return res.status(200).json({ configured: false, ok: false, stages: STAGES, projects: [] });
   try {
     const token = await getAccessToken();

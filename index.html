@@ -3242,10 +3242,16 @@ async function loadCrewRecords(silent){
   try{
     const SB="https://lmlixmzmzpzgeggvywwb.supabase.co", K="sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
     const r=await fetch(SB+"/rest/v1/job_status_events?source=in.(field-hub,plan-analyzer)&order=created_at.desc&limit=1000",{headers:{apikey:K,Authorization:"Bearer "+K},cache:"no-store"});
+    if(!r.ok) throw new Error("http "+r.status);
     const rows=await r.json();
-    S.crewRec.status="live"; S.crewRec.list=Array.isArray(rows)?rows.filter(x=>!isVoided(x)):[]; // hide reverted rows
-    S.crewRec.voided=Array.isArray(rows)?rows.filter(isVoided):[]; // reverted rows → shown only in the admin Revert log
-  }catch(e){ S.crewRec.status="error"; S.crewRec.list=[]; S.crewRec.voided=[]; }
+    if(!Array.isArray(rows)) throw new Error("bad payload");
+    S.crewRec.status="live"; S.crewRec.list=rows.filter(x=>!isVoided(x)); // hide reverted rows
+    S.crewRec.voided=rows.filter(isVoided); S.crewRec._rt=0; // reverted rows → shown only in the admin Revert log
+  }catch(e){
+    // Keep the last-good feed on screen (do NOT blank counts to 0) and auto-retry the blip.
+    S.crewRec.status="error";
+    if((S.crewRec._rt=(S.crewRec._rt||0)+1)<=4){ clearTimeout(S.crewRec._rtT); S.crewRec._rtT=setTimeout(function(){ loadCrewRecords(true); }, Math.min(2000*S.crewRec._rt,8000)); }
+  }
   render(!!silent); // silent on auto-refresh so the log does not flash or replay animations
 }
 function photoStrip(e){
@@ -4467,14 +4473,20 @@ async function loadInstallMap(){
     // appended &t=Date.now() (a cache-buster) and fired all 5 windows at once, so every open of
     // this tab cold-started 5 lambdas and minted 5 Zoho tokens for data that was already cached.
     // No buster, and at most 2 in flight.
+    // A failed window used to silently contribute 0 installs → the all-time total under-counted with
+    // no signal. Retry each window up to 3× on a transient blip; if one still fails, flag `partial` so
+    // the UI warns instead of showing a wrong (low) total.
+    let anyFail=false;
+    const fetchWin=async ([a,b])=>{ for(let t=0;t<3;t++){ try{ const r=await fetch("/api/zoho-jobs?from="+a+"&to="+b+"&only=install"); if(r.ok){ const j=await r.json(); if(j&&Array.isArray(j.jobs)&&j.ok!==false) return j; } }catch(e){} await new Promise(rs=>setTimeout(rs,1200*(t+1))); } anyFail=true; return {jobs:[]}; };
     const results=[];
-    for(let i=0;i<wins.length;i+=2){
-      const batch=wins.slice(i,i+2).map(([a,b])=>fetch("/api/zoho-jobs?from="+a+"&to="+b+"&only=install").then(r=>r.json()).catch(()=>({jobs:[]})));
-      results.push(...await Promise.all(batch));
-    };
+    for(let i=0;i<wins.length;i+=2){ results.push(...await Promise.all(wins.slice(i,i+2).map(fetchWin))); }
     const seen={}, items=[];
     results.forEach(j=>(j.jobs||[]).filter(x=>x.kind==="install"&&x.cat==="completed"&&x.address).forEach(x=>{ const k=x.num||x.id; if(seen[k])return; seen[k]=1; items.push({address:x.address,dlNumber:x.num,customerName:x.project,team:x.crewLabel,date:x.date,id:x.id,scope:x.scope}); }));
     items.sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))); // most-recent first
+    // If a window failed and we'd show FEWER than last time, keep the last-good total on screen (a
+    // transient blip must never make the all-time count drop) and retry the whole load shortly.
+    S.instMap.partial=anyFail;
+    if(anyFail && S.instMap.total && items.length < S.instMap.total){ setTimeout(function(){ if(S.tab==="instmap") loadInstallMap(); }, 6000); render(); return; }
     S.instMap.total=items.length; S.instMap.items=items.slice(0,2600); S.instMap.status="live"; S.instMap.pinState={status:"geocoding",done:0,total:S.instMap.items.length,pins:[]}; render();
     geocodeInto(S.instMap.pinState, S.instMap.items, ()=>{ if(S.tab==="instmap") render(true); }, {bulk:true});
   }catch(e){ S.instMap.status="error"; render(); }
@@ -4484,7 +4496,7 @@ function instMapHTML(){
   const head=`<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:10px">
     <div><div style="font-weight:900;font-size:22px">🗺 ${es?"Mapa de Instalaciones":"Install Map"}</div>
       <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Todas las instalaciones completadas en un mapa en vivo.":"Every completed install on a live map."}</div></div>
-    <div style="display:flex;gap:8px;align-items:center"><span class="pill" style="background:var(--jc-DL)">${(pm.pins||[]).length} ${es?"ubicadas":"mapped"}</span><button class="btn3d sm" data-action="instMapRefresh">⟳</button></div></div>`;
+    <div style="display:flex;gap:8px;align-items:center">${M.partial?`<span class="pill" title="${es?'Algunos registros no cargaron — reintentando':'Some records did not load — retrying'}" style="background:#F59E0B">⚠ ${es?"parcial":"partial"}</span>`:""}<span class="pill" style="background:var(--jc-DL)">${(pm.pins||[]).length} ${es?"ubicadas":"mapped"}</span><button class="btn3d sm" data-action="instMapRefresh">⟳</button></div></div>`;
   let body;
   if(M.status==="loading") body=`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">⟳ ${es?"Cargando instalaciones…":"Loading installs…"}</div>`;
   else if(M.status==="error") body=`<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudo cargar.":"Couldn't load."}</div>`;

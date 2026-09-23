@@ -14,49 +14,26 @@
 // jobType(), the Coordinator card, and coordDetailModal (editable Installation detail).
 // Self-contained (CommonJS-safe: only export default + global fetch — no import.meta).
 import { rememberGood, failoverBody } from "./_lastgood.js";
+// Use the SHARED, resilient Zoho token (shared-store + single-flight mint + force-refresh-on-401 +
+// circuit breaker) — same as zoho-projects / zoho-jobs / service-tickets. This endpoint used to run
+// its own local token with only a one-shot 401 retry, which made the Coordinator the weakest feed
+// during a Zoho refresh blip. zohoFetch handles auth + retry transparently.
+import { zohoFetch, hasZohoCreds, ZOHO_API_DOMAIN, ZOHO_API_VERSION } from "./_zoho.js";
 
-const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
-const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
-const API_VERSION = process.env.ZOHO_API_VERSION || "v8";
-
-let cachedToken = null;
-let tokenExpiry = 0;
-
-function hasCreds() {
-  return !!(process.env.ZOHO_CLIENT_ID && process.env.ZOHO_CLIENT_SECRET && process.env.ZOHO_REFRESH_TOKEN);
-}
-
-async function getAccessToken(force) {
-  if (!force && cachedToken && Date.now() < tokenExpiry) return cachedToken;
-  const res = await fetch(`${ACCOUNTS_HOST}/oauth/v2/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      client_id: process.env.ZOHO_CLIENT_ID,
-      client_secret: process.env.ZOHO_CLIENT_SECRET,
-      refresh_token: process.env.ZOHO_REFRESH_TOKEN,
-    }),
-  });
-  const data = await res.json();
-  if (!data.access_token) throw new Error(`token refresh failed: ${data.error || JSON.stringify(data)}`);
-  cachedToken = data.access_token;
-  tokenExpiry = Date.now() + (data.expires_in - 60) * 1000;
-  return cachedToken;
-}
+const API_DOMAIN = ZOHO_API_DOMAIN;
+const API_VERSION = ZOHO_API_VERSION;
 
 // Fetch { dealId: Stage } for a set of Deal ids (chunked ≤100/call via the bulk-by-ids GET).
 // Used to drop installs whose SALE is dead (Deal Stage "Closed Lost") even though the
 // Installation is still "Pending Schedule". Never throws — on error returns what it has.
-async function fetchDealStages(ids, token) {
+async function fetchDealStages(ids) {
   const out = {};
   const uniq = [...new Set((ids || []).filter(Boolean).map(String))];
   for (let i = 0; i < uniq.length; i += 100) {
     const chunk = uniq.slice(i, i + 100);
     try {
       const url = `${API_DOMAIN}/crm/${API_VERSION}/Deals?ids=${encodeURIComponent(chunk.join(","))}&fields=Stage`;
-      let res = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
-      if (res.status === 401) { token = await getAccessToken(true); res = await fetch(url, { headers: { Authorization: `Zoho-oauthtoken ${token}` } }); }
+      const res = await zohoFetch(url); // shared token + auto 401-retry + circuit breaker
       if (res.status === 204 || !res.ok) continue;
       const data = await res.json();
       (data.data || []).forEach((d) => { if (d && d.id) out[String(d.id)] = (d.Stage || "").trim(); });
@@ -88,19 +65,13 @@ const READY_INSTALL_STAGES = [
 const READY_INSTALL_CRITERIA = "(" + READY_INSTALL_STAGES.map((s) => `(Stage:equals:${s})`).join("or") + ")";
 
 // Run a paginated CRM search and return ALL matches (criteria/fields URL-encoded).
-async function searchAll(module, criteria, fields, token) {
+async function searchAll(module, criteria, fields) {
   const all = [];
   for (let page = 1; page <= 25; page++) {
     const path =
       `${encodeURIComponent(module)}/search?criteria=${encodeURIComponent(criteria)}` +
       `&fields=${encodeURIComponent(fields)}&per_page=200&page=${page}`;
-    let res = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, {
-      headers: { Authorization: `Zoho-oauthtoken ${token}` },
-    });
-    if (res.status === 401) { // cached token was invalidated by Zoho → force-refresh + retry once
-      token = await getAccessToken(true);
-      res = await fetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`, { headers: { Authorization: `Zoho-oauthtoken ${token}` } });
-    }
+    const res = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/${path}`); // shared token + auto 401-retry + circuit breaker
     if (res.status === 204) break; // no records
     if (!res.ok) throw new Error(`Zoho ${module} ${res.status}: ${(await res.text()).slice(0, 200)}`);
     const data = await res.json();
@@ -365,20 +336,19 @@ export default async function handler(req, res) {
   // plus Deal-stage lookups. What it reports — "ready to schedule" — changes when someone edits a
   // stage, which is minutes-to-hours, not seconds. 2 minutes fresh, 10 stale-while-revalidate.
   res.setHeader("Cache-Control", "s-maxage=120, stale-while-revalidate=600");
-  if (!hasCreds()) return res.status(200).json({ configured: false, ok: false, jobs: [] });
+  if (!hasZohoCreds()) return res.status(200).json({ configured: false, ok: false, jobs: [] });
 
   const todayISO = new Date().toISOString().slice(0, 10);
   try {
-    const token = await getAccessToken();
     const [installs, services, coordDeals, preEngDeals] = await Promise.all([
-      searchAll("Installation", READY_INSTALL_CRITERIA, INSTALL_FIELDS, token),
+      searchAll("Installation", READY_INSTALL_CRITERIA, INSTALL_FIELDS),
       // starts_with:3 captures "3. Need Schedule" (+ any 3.x variant); mapper keeps only needs_schedule.
-      searchAll("Service_Ticket", "(Ticket_Status:starts_with:3)", SERVICE_FIELDS, token),
+      searchAll("Service_Ticket", "(Ticket_Status:starts_with:3)", SERVICE_FIELDS),
       // Coordination-ready = Deals at Engineering/Permitting with plans complete / engineering in process.
-      searchAll("Deals", COORD_CRITERIA, COORD_FIELDS, token),
+      searchAll("Deals", COORD_CRITERIA, COORD_FIELDS),
       // Pre-Engineering = the queue one step earlier. No FDA/engineering-stage filter: at this
       // point the design has not been produced yet, so those fields are legitimately empty.
-      searchAll("Deals", PREENG_CRITERIA, COORD_FIELDS, token),
+      searchAll("Deals", PREENG_CRITERIA, COORD_FIELDS),
     ]);
 
     const instJobsRaw = installs.map(mapReadyInstall);
@@ -386,7 +356,7 @@ export default async function handler(req, res) {
     // Keep only installs whose associated Deal is a LIVE, not-yet-completed project.
     // Batch-resolve the Deal Stages, then filter. An install whose Deal can't be resolved
     // (empty stage) is KEPT (fail-open) so a transient deal-fetch hiccup never hides real jobs.
-    const dealStages = await fetchDealStages(instJobsRaw.map((j) => j.dealId), token);
+    const dealStages = await fetchDealStages(instJobsRaw.map((j) => j.dealId));
     const instJobs = [];
     let filteredStale = 0;
     for (const j of instJobsRaw) {
