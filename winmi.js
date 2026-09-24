@@ -3,6 +3,7 @@
 (function(){
   if(window.__wmSunny) return; window.__wmSunny=true;
   var WINMI_API=(window.WINMI_API||"https://windmar-itinerary.vercel.app/api/assistant");
+var WINMI_KEY="39a049e816c01c2e9dc908307212ff08e0cdf5327469161980d29df454b78cf9"; // app-key gate  mismo valor que APP_API_KEY en Vercel
   var WINMI_INLINE=!!window.WINMI_INLINE, WINMI_HOST=null; // inline mode: render inside a container (e.g. the Field HUB NEC tab) instead of floating
   function wmHost(){ var t=window.WINMI_MOUNT; if(typeof t==="string") t=document.querySelector(t); return t||null; }
   function es(){ try{ if(window.WINMI_LANG) return String(window.WINMI_LANG).toLowerCase().indexOf("es")===0; if(typeof S!=="undefined"&&S&&S.lang) return S.lang==="es"; var hl=(document.documentElement.lang||navigator.language||"").toLowerCase(); return hl.indexOf("es")===0; }catch(e){ return false; } }
@@ -120,7 +121,7 @@
     if(WM_TTS===false){ speakWeb(spoken); return; } // no neural key → device voice
     winmiState("talking");
     try{
-      fetch(wmTtsUrl(),{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({text:spoken.slice(0,900),lang:es()?"es":"en"})})
+      fetch(wmTtsUrl(),{method:"POST",headers:{"content-type":"application/json","x-app-key":WINMI_KEY},body:JSON.stringify({text:spoken.slice(0,900),lang:es()?"es":"en"})})
         .then(function(r){ var ct=(r.headers.get("content-type")||""); if(r.ok&&ct.indexOf("audio")>=0){ WM_TTS=true; return r.blob(); } if(ct.indexOf("json")>=0) WM_TTS=false; throw 0; })
         .then(function(b){ try{if(wmAudio){wmAudio.pause();}}catch(e){} var url=URL.createObjectURL(b); wmAudio=new Audio(url); wmAudio.onended=function(){ winmiState("idle"); try{URL.revokeObjectURL(url);}catch(e){} }; wmAudio.onerror=function(){ speakWeb(spoken); };
           var pr=wmAudio.play(); if(pr&&pr.catch) pr.catch(function(){ speakWeb(spoken); }); })
@@ -165,7 +166,7 @@
     addBubble("u",text); history.push({role:"user",content:text}); if(history.length>16) history=history.slice(-16);
     var inp=document.getElementById("wmSunInput"); if(inp){ inp.value=""; inp.style.height="42px"; }
     typing(true); winmiState("thinking");
-    fetch(WINMI_API,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({messages:history,lang:es()?"es":"en"})})
+    fetch(WINMI_API,{method:"POST",headers:{"content-type":"application/json","x-app-key":WINMI_KEY},body:JSON.stringify({messages:history,lang:es()?"es":"en"})})
       .then(function(r){return r.json();}).then(function(j){ typing(false);
         if(j&&j.ok&&j.answer){ addBubble("b",j.answer); addChips(j.suggestions); addPhotos(j.photos); history.push({role:"assistant",content:j.answer}); winmiState("idle"); speak(j.answer); }
         else if(j&&j.configured===false){ winmiState("idle"); addBubble("b",T("I'm almost ready! An admin just needs to add my AI key (ANTHROPIC_API_KEY) in the app settings, then I can answer anything about your projects.","¡Casi listo! Un administrador debe agregar mi clave de IA (ANTHROPIC_API_KEY) en la configuración y podré responder sobre tus proyectos.")); }
@@ -180,7 +181,7 @@
     history.push({role:"user",content:cap}); if(history.length>16) history=history.slice(-16);
     typing(true); winmiState("thinking");
     var payload={messages:history,lang:es()?"es":"en"}; if(isPdf) payload.file=att; else payload.image=att;
-    fetch(WINMI_API,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)})
+    fetch(WINMI_API,{method:"POST",headers:{"content-type":"application/json","x-app-key":WINMI_KEY},body:JSON.stringify(payload)})
       .then(function(r){return r.json();}).then(function(j){ typing(false);
         if(j&&j.ok&&j.answer){ addBubble("b",j.answer); history.push({role:"assistant",content:j.answer}); winmiState("idle"); speak(j.answer); }
         else{ winmiState("idle"); addBubble("b",T("I couldn't read that file just now — please try again.","No pude leer el archivo ahora mismo — inténtalo de nuevo.")); }

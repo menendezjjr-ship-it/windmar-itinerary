@@ -843,7 +843,7 @@ const NEC_AI_URL = process.env.NEC_AI_URL || "https://project-g7v0r.vercel.app/a
 
 async function callNecBrain(question, history, lang, knowledgeContext) {
   const r = await fetchT(NEC_AI_URL, {
-    method: "POST", headers: { "content-type": "application/json" },
+    method: "POST", headers: { "content-type": "application/json", "x-app-key": (process.env.APP_API_KEY || "") },
     body: JSON.stringify({ question, history, lang, knowledgeContext }),
   }, 42000);
   if (!r) throw new Error("assistant brain timed out");
@@ -1121,11 +1121,21 @@ const ZOHO_GUIDE = [
 
 // ---- handler ----------------------------------------------------------------
 
+// ── App-key gate: el header x-app-key debe coincidir con APP_API_KEY (env).
+// Si APP_API_KEY no está configurada, el gate queda abierto (deploy-safe).
+const APP_API_KEY = (process.env.APP_API_KEY || "").trim();
+function hasValidAppKey(req) {
+  if (!APP_API_KEY) return true;
+  const h = (req.headers || {});
+  const got = h["x-app-key"] || h["X-App-Key"] || "";
+  return got === APP_API_KEY;
+}
+
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-app-key");
   if (req.method === "OPTIONS") return res.status(200).end();
   // GET diagnostic — confirms the Field HUB brain is reachable + Zoho wired (no secret exposed).
   if (req.method === "GET") {
@@ -1137,6 +1147,7 @@ export default async function handler(req, res) {
       primaryBrain: /^sk-ant-/.test(k) ? "claude" : "gemini" });
   }
   if (req.method !== "POST") return res.status(200).json({ ok: false, error: "POST only" });
+  if (!hasValidAppKey(req)) return res.status(401).json({ ok: false, error: "unauthorized" });
 
   try {
     // Parse the body safely — Vercel may hand us a string or an already-parsed object.
@@ -1160,7 +1171,7 @@ export default async function handler(req, res) {
       let answer = null, brain = "";
       if (/^sk-ant-/.test(apiKey)) { try { answer = await callClaudeVision(apiKey, question, att, history, lang); if (answer) brain = isDoc ? "claude-doc" : "claude-vision"; } catch (e) {} }
       if (!answer) { // Gemini fallback (nec-ai handles image + pdf via inline_data)
-        try { const r = await fetchT(NEC_AI_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ image: { data: att.data, mimeType: att.mediaType || (isDoc ? "application/pdf" : "image/jpeg") }, question, lang }) }, 45000);
+        try { const r = await fetchT(NEC_AI_URL, { method: "POST", headers: { "content-type": "application/json", "x-app-key": (process.env.APP_API_KEY || "") }, body: JSON.stringify({ image: { data: att.data, mimeType: att.mediaType || (isDoc ? "application/pdf" : "image/jpeg") }, question, lang }) }, 45000);
           if (r && r.ok) { const d = await r.json().catch(() => ({})); if (d && d.answer) { answer = stripFollowups(d.answer); brain = "gemini-vision"; } } } catch (e) {}
       }
       if (answer) return res.status(200).json({ ok: true, answer, used: ["file"], source: brain });

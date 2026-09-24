@@ -15,12 +15,22 @@
 
 export const config = { maxDuration: 30 };
 
+// ── App-key gate: el header x-app-key debe coincidir con APP_API_KEY (env).
+// Si APP_API_KEY no está configurada, el gate queda abierto (deploy-safe).
+const APP_API_KEY = (process.env.APP_API_KEY || "").trim();
+function hasValidAppKey(req) {
+  if (!APP_API_KEY) return true;
+  const h = (req.headers || {});
+  const got = h["x-app-key"] || h["X-App-Key"] || "";
+  return got === APP_API_KEY;
+}
+
 const CARTESIA_VERSION = "2024-11-13"; // required Cartesia API version header
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-app-key");
   if (req.method === "OPTIONS") return res.status(200).end();
 
   const cartKey = (process.env.CARTESIA_API_KEY || "").trim();
@@ -40,6 +50,7 @@ export default async function handler(req, res) {
     });
   }
   if (req.method !== "POST") return res.status(200).json({ ok: false, error: "POST only" });
+  if (!hasValidAppKey(req)) return res.status(401).json({ ok: false, error: "unauthorized" });
   if (!provider) return res.status(200).json({ ok: false, configured: false, error: "no TTS key set" });
 
   try {
