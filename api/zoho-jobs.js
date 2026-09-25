@@ -10,6 +10,7 @@
 //   (optional) ZOHO_API_VERSION     default v8   (v2 rejects between: on dates)
 import { rememberGood, failoverBody } from "./_lastgood.js";
 import { zohoFetch } from "./_zoho.js";
+import { readMirror, monthsBetween } from "./_zoho-mirror.js";
 
 const ACCOUNTS_HOST = process.env.ZOHO_ACCOUNTS_HOST || "https://accounts.zoho.com";
 const API_DOMAIN = process.env.ZOHO_API_DOMAIN || "https://www.zohoapis.com";
@@ -366,7 +367,7 @@ export default async function handler(req, res) {
   const histWin = req.query.only === "install" && req.query.to && String(req.query.to) < new Date().toISOString().slice(0, 10);
   res.setHeader("Cache-Control", histWin
     ? "s-maxage=3600, stale-while-revalidate=86400"
-    : "s-maxage=30, stale-while-revalidate=300");
+    : "s-maxage=60, stale-while-revalidate=300"); // mirror-fed now; freshness comes from the 10-min sync, not the client poll
   if (!hasCreds()) return res.status(200).json({ configured: false, ok: false, jobs: [] });
 
   // Single Service_Ticket editable-record lookup (Calendar/Coordinator service editor): ?svc=<recordId>
@@ -402,10 +403,47 @@ export default async function handler(req, res) {
   // Florida wall-clock date (handles EDT/EST) — the server runs in UTC, so iso(today) would
   // flip to "tomorrow" after ~8 PM local and mislabel today's jobs as past-due. Use FL time.
   const todayISO = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const only = String(req.query.only || ""); // only=install → skip service tickets (Install Map's all-time pull)
+
+  // ── Mirror-first: for a recent, narrow window the Field HUB cron already has the RAW records in
+  // Supabase (install_raw/service_raw). Read + map them here = ZERO live Zoho calls. Falls through to
+  // live Zoho for wide/historical windows (Install Map) or any month outside the sync's coverage.
+  const months = monthsBetween(from, to);
+  // Months the sync is KNOWN to cover (prev..+2 from today) — a null read for one of these just means
+  // "genuinely 0 jobs that month", not "missing". Only trust the mirror when EVERY requested month is
+  // inside this set (else a not-yet-synced month would silently show 0 jobs).
+  const covered = new Set();
+  { const n = new Date(); for (let off = -1; off <= 2; off++) { const d = new Date(n.getFullYear(), n.getMonth() + off, 1); covered.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`); } }
+  if (months.length && months.length <= 5 && months.every((mk) => covered.has(mk))) {
+    try {
+      let instRaw = [], svcRaw = [];
+      for (const mk of months) {
+        if (only !== "service") { const r = await readMirror("install_raw", mk); if (r) instRaw = instRaw.concat(r); }
+        if (only !== "install") { const r = await readMirror("service_raw", mk); if (r) svcRaw = svcRaw.concat(r); }
+      }
+      // At least SOME data → trust the mirror (an all-empty read could be a mirror outage → fall to live).
+      if (instRaw.length || svcRaw.length) {
+        // Pre-filter installs by Installation_Start_Date in [from,to] to EXACTLY mirror Zoho's own
+        // filter, then run the SAME mappers the live path uses below.
+        const instInWin = instRaw.filter((r) => { const d = String(r.Installation_Start_Date || "").slice(0, 10); return d && d >= from && d <= to; });
+        const jobs = [
+          ...instInWin.map((r) => mapInstall(r, todayISO)),
+          ...svcRaw.flatMap((r) => expandServiceVisits(r, todayISO)).filter((j) => j.date && j.date >= from && j.date <= to),
+        ].filter((j) => j.date);
+        const payload = {
+          configured: true, ok: true, source: "mirror",
+          updated: new Date().toISOString(), range: { from, to },
+          counts: { installs: instInWin.length, services: svcRaw.length, jobs: jobs.length },
+          jobs,
+        };
+        rememberGood(lgKey, payload);
+        return res.status(200).json(payload);
+      }
+    } catch (e) { /* mirror hiccup → fall through to live Zoho below */ }
+  }
 
   try {
     const token = await getAccessToken();
-    const only = String(req.query.only || ""); // only=install → skip service tickets (Install Map's all-time pull)
     const [installs, services] = await Promise.all([
       only === "service" ? Promise.resolve([]) : searchAll("Installation", `(Installation_Start_Date:between:${from},${to})`, INSTALL_FIELDS, token),
       only === "install" ? Promise.resolve([]) : searchAll("Service_Ticket", `((Scheduled_Visit_1:between:${from}T00:00:00${TZ},${to}T23:59:59${TZ})or(Scheduled_Visit_2:between:${from}T00:00:00${TZ},${to}T23:59:59${TZ})or(Scheduled_Visit_3:between:${from}T00:00:00${TZ},${to}T23:59:59${TZ}))`, SERVICE_FIELDS, token),
