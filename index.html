@@ -348,7 +348,7 @@ const LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAoAAAAGNCAYAAACBu8BgAADG8ElEQVR42uz9fX
 const I18N = {
  en:{
   appName:"Itinerary", appTagline:"Dispatch & Field Operations", lang:"Español",
-  tab_itinerary:"Dashboard", tab_coordinator:"Coordinator", tab_projects:"Projects", tab_crews:"Dispatch", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_records:"Field Status Record", tab_instmap:"Install Map", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar", tab_svcmon:"Service & Monitoring",
+  tab_itinerary:"Dashboard", tab_coordinator:"Coordinator", tab_projects:"Projects", tab_crews:"Dispatch", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_records:"Field Status Record", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar", tab_svcmon:"Service & Monitoring",
   // job codes
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Solar / Battery Install", jc_RDL_long:"Re-Roof + Solar", jc_RL_long:"Roofing", jc_S_long:"Service Call", jc_MSP_long:"Main Service Panel Upgrade",
@@ -398,7 +398,7 @@ const I18N = {
  },
  es:{
   appName:"Itinerario", appTagline:"Despacho y Operaciones de Campo", lang:"English",
-  tab_itinerary:"Panel", tab_coordinator:"Coordinador", tab_projects:"Proyectos", tab_crews:"Despacho", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_records:"Registro de Estado de Campo", tab_instmap:"Mapa de Instalaciones", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario", tab_svcmon:"Servicio y Monitoreo",
+  tab_itinerary:"Panel", tab_coordinator:"Coordinador", tab_projects:"Proyectos", tab_crews:"Despacho", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_records:"Registro de Estado de Campo", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario", tab_svcmon:"Servicio y Monitoreo",
   jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
   jc_DL_long:"Instalación Solar / Batería", jc_RDL_long:"Re-Techado + Solar", jc_RL_long:"Techado", jc_S_long:"Llamada de Servicio", jc_MSP_long:"Mejora del Panel Principal",
   legend:"Leyenda de Códigos", crew:"Cuadrilla", today:"Hoy", prevDay:"Anterior", nextDay:"Siguiente",
@@ -597,7 +597,6 @@ const S={
                // auto-refresh (which replaces #root.innerHTML) can't snap them shut mid-triage
   cal:{status:"idle",records:[],y:new Date().getFullYear(),m:new Date().getMonth()+1,view:"grid",typeFilter:"all",teamFilter:[],q:"",selected:null,dayPanel:null,weekStartISO:null,err:"",bomNotes:{}},
   crewRec:{status:"idle",list:[],voided:[],revlogOpen:false,crew:"all",user:"all",q:""},
-  instMap:{status:"idle",items:[],pinState:{status:"idle"}},
   crews:{ showDist:true, q:"", dispatchResult:null, fleet:[], fleetState:"sample" },
   dispatch:{ open:false, updated:null, sig:null, geo:{status:"idle"}, filter:"all" }, // filter: all | service | insp
   coord:{ q:"", tile:"", route:(function(){try{var v=localStorage.getItem("wm_coord_route");return (v==="near"||v==="short")?v:"far";}catch(e){return "far";}})(), /* route: how each area is ordered — far (default, unchanged) | near | short */ pick:(function(){try{var v=JSON.parse(localStorage.getItem("wm_coord_pick")||"[]");return Array.isArray(v)?v.filter(x=>typeof x==="string").slice(0,60):[];}catch(e){return [];}})(), /* pick: hand-built route — item keys IN CLICK ORDER */ origin:(function(){try{var v=JSON.parse(localStorage.getItem("wm_coord_origin")||"null");return (v&&v.lat!=null&&v.lon!=null&&v.addr)?{mode:"custom",addr:String(v.addr),lat:+v.lat,lon:+v.lon,status:"ok",err:""}:{mode:"hq",addr:"",lat:null,lon:null,status:"idle",err:""};}catch(e){return {mode:"hq",addr:"",lat:null,lon:null,status:"idle",err:""};}})(), /* origin: where the route STARTS — HQ by default, or a typed address */ selected:null, collapsed:{}, notes:{}, fields:{status:"idle",map:{},team:[]}, edit:null, savedMsg:null, addNote:{text:"",sending:false,err:"",okDl:""}, ready:{status:"idle",list:[],err:""}, view:"type", geo:{status:"idle"}, geoSig:"" }, // view: "type" (by job type) | "area" (by geographic proximity for route scheduling) // Coordinator tab: search, open detail key, per-section collapsed state, per-DL record cache, field metadata, active editor, /api/zoho-ready feed (Pending-Schedule installs + Need-Schedule services)
@@ -4327,7 +4326,6 @@ const TABS=[
   {id:"projects",key:"tab_projects",fn:projectsHTML},
   {id:"sitecapture",key:"tab_sitecapture",fn:siteCaptureHTML},
   {id:"records",key:"tab_records",fn:crewRecordsHTML},
-  {id:"instmap",key:"tab_instmap",fn:instMapHTML},
   {id:"zoho",key:"tab_zoho",fn:zohoHTML},
 ];
 /* ── Per-user tab access ───────────────────────────────────────────────────────────
@@ -4510,47 +4508,6 @@ function cityFromAddr(a){
 function dirLink(p){ if(p==null||p.lat==null) return ""; const dest=p.lat+","+p.lon; const es=S.lang==="es";
   return `<a href="https://www.google.com/maps/dir/?api=1&destination=${dest}" target="_blank" rel="noopener" style="display:inline-block;margin-top:7px;padding:5px 10px;border-radius:8px;background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff;font-weight:800;font-size:12px;text-decoration:none">🧭 ${es?"Cómo llegar":"Get Directions"}</a>`; }
 /* ── TAB: INSTALL MAP (all completed installs pinned) ── */
-async function loadInstallMap(){
-  S.instMap.status="loading"; S.instMap.pinState={status:"idle"}; render();
-  try{
-    const to=new Date(), f=(d)=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
-    // 2-year windows keep each Zoho query under its 2000-record pagination cap; merged for true all-time coverage.
-    const yNow=to.getFullYear(), wins=[]; for(let y=yNow;y>=yNow-8;y-=2){ wins.push([(y-1)+"-01-01",(y===yNow?f(to):y+"-12-31")]); }
-    // These windows are historical completed installs — 2018-2024 does not change. The old code
-    // appended &t=Date.now() (a cache-buster) and fired all 5 windows at once, so every open of
-    // this tab cold-started 5 lambdas and minted 5 Zoho tokens for data that was already cached.
-    // No buster, and at most 2 in flight.
-    // A failed window used to silently contribute 0 installs → the all-time total under-counted with
-    // no signal. Retry each window up to 3× on a transient blip; if one still fails, flag `partial` so
-    // the UI warns instead of showing a wrong (low) total.
-    let anyFail=false;
-    const fetchWin=async ([a,b])=>{ for(let t=0;t<3;t++){ try{ const r=await fetch("/api/zoho-jobs?from="+a+"&to="+b+"&only=install"); if(r.ok){ const j=await r.json(); if(j&&Array.isArray(j.jobs)&&j.ok!==false) return j; } }catch(e){} await new Promise(rs=>setTimeout(rs,1200*(t+1))); } anyFail=true; return {jobs:[]}; };
-    const results=[];
-    for(let i=0;i<wins.length;i+=2){ results.push(...await Promise.all(wins.slice(i,i+2).map(fetchWin))); }
-    const seen={}, items=[];
-    results.forEach(j=>(j.jobs||[]).filter(x=>x.kind==="install"&&x.cat==="completed"&&x.address).forEach(x=>{ const k=x.num||x.id; if(seen[k])return; seen[k]=1; items.push({address:x.address,dlNumber:x.num,customerName:x.project,team:x.crewLabel,date:x.date,id:x.id,scope:x.scope}); }));
-    items.sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))); // most-recent first
-    // If a window failed and we'd show FEWER than last time, keep the last-good total on screen (a
-    // transient blip must never make the all-time count drop) and retry the whole load shortly.
-    S.instMap.partial=anyFail;
-    if(anyFail && S.instMap.total && items.length < S.instMap.total){ setTimeout(function(){ if(S.tab==="instmap") loadInstallMap(); }, 6000); render(); return; }
-    S.instMap.total=items.length; S.instMap.items=items.slice(0,2600); S.instMap.status="live"; S.instMap.pinState={status:"geocoding",done:0,total:S.instMap.items.length,pins:[]}; render();
-    geocodeInto(S.instMap.pinState, S.instMap.items, ()=>{ if(S.tab==="instmap") render(true); }, {bulk:true});
-  }catch(e){ S.instMap.status="error"; render(); }
-}
-function instMapHTML(){
-  const es=S.lang==="es", M=S.instMap, pm=M.pinState||{status:"idle"};
-  const head=`<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:10px">
-    <div><div style="font-weight:900;font-size:22px">🗺 ${es?"Mapa de Instalaciones":"Install Map"}</div>
-      <div style="color:var(--text-dim);font-size:13px;margin-top:2px">${es?"Todas las instalaciones completadas en un mapa en vivo.":"Every completed install on a live map."}</div></div>
-    <div style="display:flex;gap:8px;align-items:center">${M.partial?`<span class="pill" title="${es?'Algunos registros no cargaron — reintentando':'Some records did not load — retrying'}" style="background:#F59E0B">⚠ ${es?"parcial":"partial"}</span>`:""}<span class="pill" style="background:var(--jc-DL)">${(pm.pins||[]).length} ${es?"ubicadas":"mapped"}</span><button class="btn3d sm" data-action="instMapRefresh">⟳</button></div></div>`;
-  let body;
-  if(M.status==="loading") body=`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">⟳ ${es?"Cargando instalaciones…":"Loading installs…"}</div>`;
-  else if(M.status==="error") body=`<div class="card" style="padding:18px;color:var(--warn)">${es?"No se pudo cargar.":"Couldn't load."}</div>`;
-  else if(pm.status==="geocoding") body=`<div class="card" style="padding:40px;text-align:center;color:var(--text-dim)">🗺 ${es?"Ubicando direcciones":"Locating addresses"} ${pm.done||0}/${pm.total||0}…<div style="font-size:11px;margin-top:6px">${es?"(se guarda en caché — la próxima vez es instantáneo)":"(cached — instant next time)"}</div></div>`;
-  else body=`<div class="card" style="border-radius:12px;overflow:hidden"><div id="instPinMap" style="height:600px"></div></div><div style="font-size:11.5px;color:var(--text-dim);margin-top:6px">${(pm.pins||[]).length} ${es?"instalaciones ubicadas de":"installs mapped of"} ${M.items.length} · ${es?"verde = instalado":"green = installed"}</div>`;
-  return `<div class="fade">${head}${body}</div>`;
-}
 // Crash guard — a fatal render error shows a recovery card + Reload instead of a blank page.
 function wmCrash(){ if(document.getElementById("__wmc"))return; try{ var d=document.createElement("div"); d.id="__wmc"; d.style.cssText="position:fixed;inset:0;z-index:99999;background:#0a1024;color:#f1f5f9;display:flex;align-items:center;justify-content:center;padding:24px;font-family:system-ui,sans-serif"; d.innerHTML='<div style="max-width:420px;text-align:center;background:#122042;border:1px solid #1D429B30;border-radius:16px;padding:28px"><div style="font-size:40px;margin-bottom:8px">🔧</div><div style="font-size:18px;font-weight:800;margin-bottom:8px">Something hiccuped</div><div style="font-size:13.5px;color:#A6C3E6;margin-bottom:20px;line-height:1.5">The app hit a snag but your work was saved. Tap reload to pick up where you left off.</div><button onclick="location.reload()" style="padding:12px 22px;border-radius:10px;border:none;cursor:pointer;background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff;font-weight:800;font-size:14px">Reload</button></div>'; document.body.appendChild(d);}catch(e){} }
 // Scroll-idle guard: a background (silent) repaint replaces #root.innerHTML, which interrupts an
@@ -4606,7 +4563,7 @@ function _render(noAnim){
   // and wmCrash() shows a reload button that reloads straight back into the same crash.
   // NOTE if you add another USER_TABS entry: this fallback sets the tab without running
   // setTab's lazy loaders. Safe while the first allowed tab is "itinerary" (boot loads it);
-  // a set starting with crews/calendar/records/instmap would land on an empty tab.
+  // a set starting with crews/calendar/records would land on an empty tab.
   let active=VTABS.find(x=>x.id===S.tab);
   if(!active){ active=VTABS[0]; S.tab=active.id; try{localStorage.setItem("wm_itin_tab",S.tab);}catch(e){} }
   const rootEl=document.getElementById("root");
@@ -4682,8 +4639,6 @@ function _render(noAnim){
       }),0);
     }
   }
-  // Install Map tab
-  if(S.tab==="instmap"){ const pm=S.instMap.pinState; if(pm&&pm.status==="ready"){ const es=S.lang==="es"; setTimeout(()=>initPinMap("instPinMap",pm.pins,"_instPinMap",{showHQ:true,radius:6,color:()=>"#22c55e",tooltip:(p)=>`<b>${esc(p.dlNumber||"")}</b> ${esc(p.customerName||"")}<br>${esc(cityFromAddr(p.address)||p.address||"")}${p.date?" · "+esc(p.date):""}`,popup:(p)=>`<b>${esc(p.dlNumber||"")}</b> ${esc(p.customerName||"")}<br>${esc(p.address||"")}${p.scope?"<br><span style=\"color:#555\">"+esc(p.scope)+"</span>":""}<br><span style="color:#888">${(es?"Instalado":"Installed")}${p.date?": "+esc(p.date):""}${p.team?" · "+esc(p.team):""}</span>${dirLink(p)}`}),0); } }
 }
 
 /* ---------- EVENTS ---------- */
@@ -4747,7 +4702,7 @@ document.addEventListener("click",e=>{
     case "toggleLang": S.lang=S.lang==="en"?"es":"en"; render(); break;
     case "toggleTheme": S.theme=S.theme==="dark"?"light":"dark"; render(); break;
     case "setTab": window.WM_JUMP_TOP=true; // a real navigation: start at the top
- if(!tabAllowed(id)) break; S.tab=id; try{if(window.wmReportView)wmReportView();}catch(e){} try{localStorage.setItem("wm_itin_tab",id);}catch(e){} if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="coordinator"){ loadProjects(S.proj.status!=="idle",true); loadCoordReady(S.coord.ready.status!=="idle"&&S.coord.ready.status!=="error"); } if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); if(id==="instmap"&&S.instMap.status==="idle") loadInstallMap(); render(); break;
+ if(!tabAllowed(id)) break; S.tab=id; try{if(window.wmReportView)wmReportView();}catch(e){} try{localStorage.setItem("wm_itin_tab",id);}catch(e){} if(id==="itinerary"&&S.live.status==="idle") loadJobs(); if(id==="coordinator"){ loadProjects(S.proj.status!=="idle",true); loadCoordReady(S.coord.ready.status!=="idle"&&S.coord.ready.status!=="error"); } if(id==="projects") loadProjects(S.proj.status!=="idle",true); if(id==="weather"&&!S.wx.live) loadWeather(); if(id==="crews"&&S.crews.fleetState!=="live") loadFleet(); if(id==="sitecapture"&&S.sc.scState!=="live") loadSiteCapture(""); if(id==="calendar"&&S.cal.status==="idle") loadOpsCal(); if(id==="records"&&S.crewRec.status==="idle") loadCrewRecords(); render(); break;
     case "jobsRefresh": loadJobs(); break;
     case "projRefresh": loadProjects(false,true); break;
     case "selectProject": { S.proj.selected=id; S.proj.noteFrom=null; loadProjectNotes(id); loadProjectAttachments(id);
@@ -4990,7 +4945,6 @@ document.addEventListener("click",e=>{
     case "scLiveSearch": { const inp=document.getElementById("scSearch"); S.sc.q=inp?inp.value:""; loadSiteCapture(S.sc.q.trim()); break; }
     case "recRefresh": loadCrewRecords(); break;
     case "revlogToggle": S.crewRec.revlogOpen=!S.crewRec.revlogOpen; render(); break;
-    case "instMapRefresh": loadInstallMap(); break;
     case "recCrew": S.crewRec.crew=id; render(); break;
     case "recUser": S.crewRec.user=id; render(); break;
     case "scToggleNew": S.sc.showNew=!S.sc.showNew; S.sc.createMsg=""; if(S.sc.showNew&&!(S.sc.scTemplates||[]).length) loadSCTemplates(); render(); break;
@@ -5580,8 +5534,6 @@ document.addEventListener("visibilitychange",function(){ if(!document.hidden) li
       T("7-day forecast and safety alerts before rooftop work — plus LOTO steps and bilingual site phrases.","Pronóstico de 7 días y alertas de seguridad antes de trabajar en techo — además pasos LOTO y frases bilingües."));
     add(/sitecapture|site capture/i, T("📷 SiteCapture — photos","📷 SiteCapture — fotos"),
       T("Search a project's photos and details, or create a new SiteCapture project right here.","Busca fotos y detalles de un proyecto, o crea uno nuevo de SiteCapture aquí mismo."));
-    add(/install map|mapa de inst/i, T("🗺 Install Map","🗺 Mapa de Instalaciones"),
-      T("Every completed install on one map — great for spotting customers near a new job.","Cada instalación completada en un mapa — ideal para ver clientes cerca de un trabajo nuevo."));
     steps.push({ sel:null, title:T("That's the tour! 🎉","¡Ese es el tour! 🎉"),
       body:T("Anytime you need a project status, an NEC code answer, or directions — just tap me and ask, by text or 🎤 voice. Let's power Florida! ⚡","Cuando necesites el estado de un proyecto, una respuesta de código NEC o direcciones — tócame y pregúntame, por texto o 🎤 voz. ¡A energizar Florida! ⚡") });
     return steps;
