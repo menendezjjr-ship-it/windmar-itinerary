@@ -91,7 +91,10 @@ async function loadVehicles() {
 
 export default async function handler(req, res) {
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    // Florida wall-clock date (not UTC) — toISOString() rolls to "tomorrow" after ~8pm ET, which made
+    // onsite-cron look for tomorrow's jobs and log sessions under the wrong day. (zoho-jobs, now
+    // mirror-fed, already serves today's window with 0 live Zoho calls.)
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
     const now = new Date().toISOString();
 
     const sites = await loadSites(today);

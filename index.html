@@ -1190,7 +1190,7 @@ function calendarTabHTML(){ return opsCalHTML(); }
 // Calendar stays fresh: poll every 30s while it's the visible tab, AND refetch INSTANTLY when the
 // coordinator returns to the tab (e.g. right after changing a status in Zoho) — no waiting.
 function calIsActive(){ return ((S.tab==="itinerary"&&S.itinView==="brigada")||S.tab==="calendar"); }
-setInterval(function(){ if(!document.hidden && calIsActive() && S.cal.status==="live") loadOpsCal(true); }, 30000);
+setInterval(function(){ if(!document.hidden && calIsActive() && S.cal.status==="live") loadOpsCal(true); }, 60000);
 (function(){ var refreshOnReturn=function(){ if(!document.hidden && calIsActive() && S.cal.status!=="loading") loadOpsCal(true); };
   document.addEventListener("visibilitychange",refreshOnReturn); window.addEventListener("focus",refreshOnReturn); })();
 
@@ -1216,7 +1216,7 @@ async function loadJobs(silent){
 // seeing their own work in the Field HUB.
 function activeJobs(){ const src=(S.live&&S.live.ok&&S.live.jobs&&S.live.jobs.length)?S.live.jobs:JOBS; return src.filter(j=>String((j&&j.code)||"").toUpperCase()!=="RL"); }
 // Auto-refresh the live feed while viewing the board (every 90s).
-setInterval(function(){ if(S.live&&S.live.ok&&S.tab==="itinerary"&&S.itinView==="board") loadJobs(true); },90000);
+setInterval(function(){ if(S.live&&S.live.ok&&S.tab==="itinerary"&&S.itinView==="board") loadJobs(true); },120000);
 
 const CREW_PALETTE=["#3B82F6","#F89B24","#16A34A","#06B6D4","#A855F7","#EC4899","#DC2626","#0EA5E9","#65A30D","#D97706","#0891B2","#7C3AED"];
 function crewColor(id){ let h=0; for(let i=0;i<id.length;i++) h=(h*31+id.charCodeAt(i))>>>0; return CREW_PALETTE[h%CREW_PALETTE.length]; }
