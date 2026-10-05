@@ -3459,12 +3459,17 @@ function crewRecordsHTML(){
   const crews=[...new Set(list.map(crewOf))].sort((a,b)=>a.localeCompare(b));
   const people=[...new Set(list.map(personOf).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
   const q=(R.q||"").trim().toLowerCase();
-  const filtered=list.filter(e=>{
+  let filtered=list.filter(e=>{
     if(R.crew!=="all"&&crewOf(e)!==R.crew) return false;
     if(R.user!=="all"&&personOf(e)!==R.user) return false;
     if(q){ const hay=[e.dl_number,e.customer,e.team,e.status,e.note,e.created_by].filter(Boolean).join(" ").toLowerCase(); if(hay.indexOf(q)<0) return false; }
     return true;
   });
+  // Collapse duplicate submits of the SAME update (same job + status + person within 10 min). The
+  // Field HUB occasionally double/triple-posted when a side-effect errored after the row was already
+  // inserted (fixed at source too). List is newest-first, so the first occurrence is the richest
+  // (most photos) — keep it, drop the rest.
+  (function(){ const DEDUP_MS=10*60*1000, seen={}, out=[]; for(const e of filtered){ const k=[String(e.dl_number||e.job_id||e.customer||"").toUpperCase().replace(/\s+/g,""),String(e.status||"").toLowerCase().trim(),personOf(e)].join("|"); const t=new Date(e.created_at).getTime()||0; if(seen[k]!=null && Math.abs(seen[k]-t)<=DEDUP_MS) continue; seen[k]=t; out.push(e); } filtered=out; })();
   const dealByDL={}; (S.proj.list||[]).forEach(p=>{ if(p.num) dealByDL[String(p.num).toUpperCase().replace(/\s+/g,"")]=p.id; });
   const zohoFor=(e)=>{ const k=String(e.dl_number||"").toUpperCase().replace(/\s+/g,""); const id=dealByDL[k]||dealByDL["DL"+k.replace(/^DL/,"")]; return id?("https://crm.zoho.com/crm/org666151142/tab/Potentials/"+id):("https://crm.zoho.com/crm/org666151142/search?searchword="+encodeURIComponent(e.dl_number||e.customer||"")); };
   // Date grouping (Today / Yesterday / date) for an at-a-glance log.
