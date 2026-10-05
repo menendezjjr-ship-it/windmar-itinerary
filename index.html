@@ -3040,16 +3040,15 @@ async function loadFleet(silent){
     if(j&&j.configured&&j.ok&&j.crews&&j.crews.length){
       const pal=["#3B82F6","#F89B24","#16A34A","#06B6D4","#A855F7","#EC4899","#DC2626","#10B981","#EAB308","#14B8A6"];
       const norm=x=>(x||"").toUpperCase().replace(/\s+/g," ").trim();
-      const ALLOW=["SITE SURVEY (CODY JONES)","ROOFING (PEDRO SANCHEZ RAMIREZ)","SERVICE (LUIS MORALES)","SERVICE (LUIS ORTIZ RODRIGUEZ)","SERVICE (DAVID RADKE)","IN HOUSE 2 (TAILOR HERRERA)","INSTALACION (CARLOS ACEVEDO)","IN HOUSE 3 (WILLIAM SIERRA)","ROOFING (ROBERT RUIZ)","SITE SURVEY (DANIEL LAIZ)","SERVICE (JOALISMAR WILLIM)","INSTALACION (GEORGE RIVERA)","CAMION DE PRUEBA","IN HOUSE 3 (PREVIOUS TRUCK)"].map(norm);
-      // Crew #1S is George Rivera (took over Sept 2026). Leonardo Torres is deliberately NOT an alias: a job still assigned to him in Zoho must surface under his own name so a coordinator sees it needs reassigning, not silently counted as George's work.
-      // if the Samsara vehicle is still named after Leonardo.
-      const mapped=j.crews.map((v,i)=>{ const nm=String(v.name||"").replace(/leonardo\s+torres/ig,"George Rivera"); return {id:"veh-"+v.id,name:nm,type:null,lead:nm,color:pal[i%pal.length],
+      // Trust the Samsara vehicle labels as the single source of truth for who is on each crew. The old
+      // hardcoded allowlist + Leonardo→George remap kept going stale — it hid the current George Rivera
+      // service truck and mislabeled William Sierra. Show every install/service crew by its real label;
+      // to hide a truck or correct a name, update it in Samsara (no code change needed).
+      const mapped=j.crews.map((v,i)=>{ const nm=String(v.name||""); return {id:"veh-"+v.id,name:nm,type:null,lead:nm,color:pal[i%pal.length],
         gps:v.gps,mph:v.mph||0,addr:v.addr||"—",precision:v.addr?"GEOCODED":"APPROX",
         ping:v.time?new Date(v.time).toLocaleTimeString():"—"}; });
-      let filt=mapped.filter(c=>ALLOW.indexOf(norm(c.name))>=0);
-      if(!filt.length) filt=mapped.filter(c=>/^(SERVICE|ROOFING|SITE SURVEY|INSTALACION|IN HOUSE|CAMION DE PRUEBA)\b/.test(norm(c.name)));
-      // keep the allowlist display order
-      filt.sort((a,b)=>ALLOW.indexOf(norm(a.name))-ALLOW.indexOf(norm(b.name)));
+      const filt=mapped.filter(c=>/^(SERVICE|INSTALACION|IN HOUSE)\b/.test(norm(c.name)))
+        .sort((a,b)=>norm(a.name).localeCompare(norm(b.name)));
       S.crews.fleet=filt;
       S.crews.fleetState="live";
     } else if(j&&j.configured){ S.crews.fleet=[]; S.crews.fleetState="error"; }

@@ -7,7 +7,7 @@
 // drops DISPONIBLE, ALMACEN, VENTAS, CANVASSING, SITE SURVEY, ROOFING subs, Marketing/Tesla vans,
 // and code-only names (e.g. GNUE-SW9-U8V).
 // Edit this one regex to add crews (e.g. add ROOFING): /\b(INSTALACION|IN\s*HOUSE|SERVICE|ROOFING)\b/i
-const CREW_RX = /\b(INSTALACION|IN\s*HOUSE|SERVICE|CAMION\s*DE\s*PRUEBA)\b/i;
+const CREW_RX = /\b(INSTALACION|IN\s*HOUSE|SERVICE)\b/i; // CAMION DE PRUEBA removed — it is the test truck, not a crew. William Sierra's truck is now correctly labeled "IN HOUSE 3 (WILLIAM SIERRA)" in Samsara, so no remap is needed.
 
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "s-maxage=20, stale-while-revalidate=40");
@@ -25,16 +25,12 @@ export default async function handler(req, res) {
     }
     const body = await r.json();
     const crews = (body.data || []).filter((v) => CREW_RX.test(v.name || "")).map((v) => {
-      // Vehicle reassignment. "CAMION DE PRUEBA" is now William Sierra's truck, so it carries
-      // his identity (and therefore the Elite Crew #3 colour, since teamColor matches on the
-      // name). Its Samsara label was never updated. The truck he used to drive is relabelled
-      // so two vehicles can't both claim to be him — it stays visible because it is still a
-      // real vehicle reporting GPS, just no longer his.
+      // Trust the Samsara vehicle label as the single source of truth for who is on each crew. The
+      // old CAMION-DE-PRUEBA → William Sierra remap is obsolete (his truck is relabeled correctly now)
+      // and was mislabeling his real truck as "PREVIOUS TRUCK". To fix a driver/crew name, update it
+      // in Samsara — no code change needed.
       const rawName = v.name || ("Vehicle " + v.id);
-      const nm = rawName.toUpperCase().replace(/\s+/g, " ").trim();
-      const name = /CAMION DE PRUEBA/.test(nm) ? "IN HOUSE 3 (WILLIAM SIERRA)"
-                 : /IN ?HOUSE ?3/.test(nm)     ? "IN HOUSE 3 (PREVIOUS TRUCK)"
-                 : rawName;
+      const name = rawName;
       const g = v.gps || {};
       const lat = g.latitude, lon = g.longitude;
       return {
