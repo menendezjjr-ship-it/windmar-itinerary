@@ -8,6 +8,9 @@
 // and code-only names (e.g. GNUE-SW9-U8V).
 // Edit this one regex to add crews (e.g. add ROOFING): /\b(INSTALACION|IN\s*HOUSE|SERVICE|ROOFING)\b/i
 const CREW_RX = /\b(INSTALACION|IN\s*HOUSE|SERVICE)\b/i; // CAMION DE PRUEBA removed — it is the test truck, not a crew. William Sierra's truck is now correctly labeled "IN HOUSE 3 (WILLIAM SIERRA)" in Samsara, so no remap is needed.
+// Trucks that MATCH the crew filter above but should NOT appear as a dispatch crew. Add a name here to
+// hide a vehicle (e.g. the owner's truck). Edit this one list — no other code change needed.
+const EXCLUDE_RX = /JOSE\s+MENENDEZ/i; // owner's truck — not a dispatch crew
 
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "s-maxage=20, stale-while-revalidate=40");
@@ -24,7 +27,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ configured: true, ok: false, status: r.status, error: txt.slice(0, 300), crews: [] });
     }
     const body = await r.json();
-    const crews = (body.data || []).filter((v) => CREW_RX.test(v.name || "")).map((v) => {
+    const crews = (body.data || []).filter((v) => CREW_RX.test(v.name || "") && !EXCLUDE_RX.test(v.name || "")).map((v) => {
       // Trust the Samsara vehicle label as the single source of truth for who is on each crew. The
       // old CAMION-DE-PRUEBA → William Sierra remap is obsolete (his truck is relabeled correctly now)
       // and was mislabeling his real truck as "PREVIOUS TRUCK". To fix a driver/crew name, update it
