@@ -211,6 +211,29 @@ function mapReadyInstall(r) {
   };
 }
 
+// ── READY TO INSTALL (driven off the Deal stage, the authoritative signal) ──────────────────────
+// WindMar never rewinds an Installation's own Stage, and once a sale reaches the Install stage the
+// Installation record's Stage is often left BLANK — so a Stage-only query (READY_INSTALL_CRITERIA)
+// silently misses most genuinely-ready jobs (only ~1 survived). The sale's Deal Stage = "Install"
+// means permit approved + design signed = ready for a crew, so we drive this set off the Deal and
+// pull each one's Installation record for crew / MSP / the editable fields.
+const INSTALL_DEAL_CRITERIA = "(Stage:equals:Install)";
+// A candidate is NOT ready to schedule if it is already on the calendar (has a real install or
+// confirmed date) or parked ("On Hold Possible Cancellation" / "Cancelled").
+const installScheduled = (r) => !!(r.Installation_Start_Date || r.Installation_Confirmed_Date);
+const installParked = (r) => /on hold|cancel/i.test(r.Stage || "");
+// Fetch Installation records for a set of Deal ids. Zoho caps a criteria at 15 conditions, so chunk
+// the ids by 10 and merge.
+async function fetchInstallsByDeal(dealIds) {
+  const uniq = [...new Set((dealIds || []).filter(Boolean))];
+  const out = [];
+  for (let i = 0; i < uniq.length; i += 10) {
+    const crit = "(" + uniq.slice(i, i + 10).map((id) => `(Deal:equals:${id})`).join("or") + ")";
+    out.push(...await searchAll("Installation", crit, INSTALL_FIELDS));
+  }
+  return out;
+}
+
 // Map a needs-to-schedule Service_Ticket -> the shared job shape (kind:"service").
 // Returns cat so the handler can keep only genuine needs_schedule tickets.
 function mapReadyService(r, todayISO) {
@@ -271,7 +294,10 @@ function mapReadyService(r, todayISO) {
 // Complete (digital plans uploaded / printed & mailed) or In Process. These are the jobs a
 // coordinator should act on next (push permit → schedule). Engineering_Stage is free-text, so we
 // fetch the two stages and filter it in code. Shown as its own Coordinator section.
-const COORD_CRITERIA = "((Stage:equals:NTP)or(Stage:equals:Engineering)or(Stage:equals:Permitting)or(Stage:equals:Install))";
+// NOTE: "Install"-stage deals are intentionally NOT here — they are the "Ready to Install" set
+// (handled off the Deal stage below, INSTALL_DEAL_CRITERIA) so a permit-approved job the coordinator
+// still has to schedule lands in the Install tile, not doubled into Coordination.
+const COORD_CRITERIA = "((Stage:equals:NTP)or(Stage:equals:Engineering)or(Stage:equals:Permitting))";
 const COORD_FIELDS = "Deal_Name,Stage,Engineering_Stage,FDA_Status,Address,City,State,Zip,Client_Phone,Client_Mobile,System_Size_kW1,Authority_Having_Jurisdiction_AHJ,County1,Post_Install_QA_Stage,Project_Coordinator,Module_Count";
 // EXACT report filter (Zoho "Coordination Trigger" report): the Final Design is APPROVED —
 // FDA_Status = "Signed and Approved - Complete" OR "No response in 24 hrs, approved" — and the job
@@ -340,29 +366,53 @@ export default async function handler(req, res) {
 
   const todayISO = new Date().toISOString().slice(0, 10);
   try {
-    const [installs, services, coordDeals, preEngDeals] = await Promise.all([
+    const [permitInstalls, services, coordDeals, preEngDeals, installStageDeals] = await Promise.all([
+      // Installation "Permit Approved - Pending *" / "Pending Schedule" pool. Near-ready: permit
+      // approved, pending one blocker. Mostly STALE (dead sale) — the Deal-Stage filter drops those.
       searchAll("Installation", READY_INSTALL_CRITERIA, INSTALL_FIELDS),
       // starts_with:3 captures "3. Need Schedule" (+ any 3.x variant); mapper keeps only needs_schedule.
       searchAll("Service_Ticket", "(Ticket_Status:starts_with:3)", SERVICE_FIELDS),
-      // Coordination-ready = Deals at Engineering/Permitting with plans complete / engineering in process.
+      // Coordination-ready = Deals at NTP/Engineering/Permitting with plans complete / engineering in process.
       searchAll("Deals", COORD_CRITERIA, COORD_FIELDS),
       // Pre-Engineering = the queue one step earlier. No FDA/engineering-stage filter: at this
       // point the design has not been produced yet, so those fields are legitimately empty.
       searchAll("Deals", PREENG_CRITERIA, COORD_FIELDS),
+      // Ready-to-Install = Deals that reached the Install stage (permit approved + design signed).
+      searchAll("Deals", INSTALL_DEAL_CRITERIA, COORD_FIELDS),
     ]);
 
-    const instJobsRaw = installs.map(mapReadyInstall);
+    // Install-stage deals worth scheduling: DL/RDL (not roofing RL), design signed (FDA approved),
+    // not a Closed-Lost "(CL)" leftover. Pull each one's Installation record (crew / MSP / edit fields).
+    const installDealIds = installStageDeals
+      .filter((d) => {
+        const p = parseDeal(d.Deal_Name);
+        return (p.code === "DL" || p.code === "RDL")
+          && COORD_FDA_RX.test(cclean(d.FDA_Status))
+          && !/\(CL\)/i.test(d.Deal_Name || "");
+      })
+      .map((d) => d.id);
+    const dealInstalls = await fetchInstallsByDeal(installDealIds);
 
-    // Keep only installs whose associated Deal is a LIVE, not-yet-completed project.
-    // Batch-resolve the Deal Stages, then filter. An install whose Deal can't be resolved
-    // (empty stage) is KEPT (fail-open) so a transient deal-fetch hiccup never hides real jobs.
-    const dealStages = await fetchDealStages(instJobsRaw.map((j) => j.dealId));
+    // Merge the two Installation sources (permit-approved pool + Install-stage deals), de-duped by
+    // record id so a DL present in both is processed once.
+    const instById = new Map();
+    for (const r of [...permitInstalls, ...dealInstalls]) instById.set(String(r.id), r);
+    const instRows = [...instById.values()];
+
+    // Keep an install only if its sale is LIVE (Deal Stage), it is not already on the calendar, and
+    // it is not parked (On Hold / Cancel). Deal Stage is batch-resolved; an unresolved deal (empty
+    // stage) is KEPT (fail-open) so a transient deal-fetch hiccup never hides real jobs.
+    const dealStages = await fetchDealStages(instRows.map((r) => (r.Deal && r.Deal.id) || ""));
     const instJobs = [];
     let filteredStale = 0;
-    for (const j of instJobsRaw) {
-      const st = j.dealId ? (dealStages[j.dealId] || "") : "";
+    for (const r of instRows) {
+      const dealId = (r.Deal && r.Deal.id) || "";
+      const st = dealId ? (dealStages[dealId] || "") : "";
+      if (st && !LIVE_DEAL_STAGES.has(st)) { filteredStale++; continue; } // dead/finished sale
+      if (installScheduled(r) || installParked(r)) { filteredStale++; continue; } // on the calendar or on hold
+      const j = mapReadyInstall(r);
+      if (j.code === "RL") { filteredStale++; continue; } // roofing — hidden on the itinerary board
       j.dealStage = st;
-      if (st && !LIVE_DEAL_STAGES.has(st)) { filteredStale++; continue; }
       instJobs.push(j);
     }
 
