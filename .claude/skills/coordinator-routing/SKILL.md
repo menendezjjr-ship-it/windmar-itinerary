@@ -94,6 +94,16 @@ and when **one** feed fails the tab shows a partial-data warning instead of a co
 (`dispFeeds()`). Tapping a tile narrows the list to that bucket and switches it to the by-area
 (proximity) grouping so a whole zone can be routed at once.
 
+**Ready-to-Install is Deal-Stage-driven, not Installation-Stage-driven** (`api/zoho-ready.js`).
+WindMar leaves an Installation's own `Stage` blank once the sale reaches the Install phase, so a
+Stage-only query misses almost every ready job (the tile used to show ~1). The install set is built
+from **Deals at Stage "Install"** (`INSTALL_DEAL_CRITERIA`), DL/RDL, FDA approved, not `(CL)` — each
+deal's Installation record is pulled via `fetchInstallsByDeal` — merged with the live Permit-Approved
+pool, then excluding already-scheduled (`installScheduled`: has install/confirmed date), parked
+(`installParked`: On Hold / Cancel), and roofing (RL). `Install` is deliberately absent from
+`COORD_CRITERIA` so these jobs show in the Install tile, not doubled into Coordination. Do NOT revert
+to a Stage-only install query — most Installation records at the ready stages are stale (dead Deal).
+
 ## Deploy / verify
 
 Standard Itinerary flow: commit as `menendezjjr-ship-it <menendezjjr@gmail.com>`, push `main`,
