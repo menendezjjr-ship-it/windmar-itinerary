@@ -101,7 +101,7 @@ export function crewNoteContent(ev) {
   const head = [ev.dl_number, ev.customer].filter(Boolean).join(" ");
   return [
     who ? `${who} · ${ev.status}` : String(ev.status || ""),
-    "@Jose Menendez @Maria Robles @Ronald Guiza @Harry Irizarry",
+    "@Jose Menendez @Ronald Guiza @Harry Irizarry",
     head ? `Job: ${head}` : "",
     ev.note ? `\n${ev.note}` : "",
     photos.length ? `\n📷 ${photos.length} crew photo${photos.length === 1 ? "" : "s"} attached to this record:` : "",
