@@ -462,7 +462,7 @@ const todayISO=iso(new Date());
 const dShift=n=>{const d=new Date();d.setDate(d.getDate()+n);return iso(d);};
 
 /* ---- crews (live GPS, like the service-app Crew Tracker) ---- */
-const HQ={name:"WindMar Home Base — 6753 Kingspointe Pkwy, Ste 111, Orlando, FL 32819",lat:28.4576767,lon:-81.4387948};
+const HQ={name:"WindMar Home Base — 6753 Kingspointe Pkwy, Ste 111, Orlando, FL 32819",lat:28.457575,lon:-81.438957}; // exact US Census geocode of 6753 Kingspointe Pkwy, Orlando FL 32819
 const CREWS=[
   {id:"crew-morales",type:"SERVICE",lead:"Luis Morales",phone:"863-555-1101",color:"#3B82F6",gps:{lat:28.4626,lon:-81.3853},addr:"1100 Arrowsmith Ave, Pine Castle, FL 32809",precision:"GEOCODED",ping:"11:45:04 AM",mph:0,state:"avail"},
   {id:"crew-radke",type:"SERVICE",lead:"David Radke",phone:"863-555-1102",color:"#F89B24",gps:{lat:27.7470,lon:-80.8900},addr:"Florida's Turnpike, Okeechobee County, FL",precision:"CITY-LEVEL",ping:"11:48:19 AM",mph:79,state:"enroute"},
@@ -2390,7 +2390,8 @@ function coordPickPanel(){
   if(!list.length) return "";
   const mi=coordPickMiles(list), url=coordPickMapsUrl(list);
   const noGeo=list.filter(p=>p.lat==null).length;
-  const stops=list.map((p,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;margin-bottom:4px">
+  const stops=list.map((p,i)=>`<div class="coordStopRow" data-rowkey="${esc(p.key)}" style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;margin-bottom:4px">
+      <span class="coordDragHandle" data-coorddrag="${esc(p.key)}" title="${es?"Arrastra para reordenar":"Drag to reorder"}" style="cursor:grab;touch-action:none;user-select:none;color:var(--text-dim);font-weight:900;flex-shrink:0;padding:0 1px;font-size:13px">⠿</span>
       <span style="flex-shrink:0;width:20px;height:20px;border-radius:50%;background:#F59E0B;color:#1a1a1a;font-size:11px;font-weight:900;display:inline-flex;align-items:center;justify-content:center">${i+1}</span>
       <span style="font-weight:800;font-size:12.5px;flex-shrink:0">${esc(p.num||"")}</span>
       <span style="font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name||"")}</span>
@@ -2407,6 +2408,8 @@ function coordPickPanel(){
         ${url?`<a class="btn3d sm" href="${url}" target="_blank" rel="noopener" style="font-size:11.5px;text-decoration:none">🗺 ${es?"Abrir en Maps":"Open in Maps"}</a>`:""}
         <button class="btn3d sm ghost" data-action="coordPickClear" style="font-size:11.5px">✕ ${es?"Vaciar":"Clear"}</button>
       </span></div>
+    <div id="coordRouteMap" style="height:300px;border-radius:10px;overflow:hidden;border:1px solid var(--line);margin:0 0 8px;background:var(--bg-2)"></div>
+    ${list.length>1?`<div style="font-size:11px;color:var(--text-dim);margin:-2px 0 8px">⠿ ${es?"Arrastra las paradas para reordenar la ruta — el mapa y las millas se actualizan solos.":"Drag the stops to reorder the route — the map and miles update live."}</div>`:""}
     ${stops}
     ${noGeo?`<div style="font-size:11px;color:var(--warn);margin-top:4px">${noGeo} ${es?"parada(s) aún sin ubicar — no cuentan en las millas ni en Maps.":"stop(s) not located yet — they are not counted in the miles or sent to Maps."}</div>`:""}
     ${list.filter(p=>p.lat!=null).length>10?`<div style="font-size:11px;color:var(--text-dim);margin-top:4px">${es?"Maps solo acepta 10 paradas — se enviarán las primeras 10.":"Maps accepts 10 stops — the first 10 are sent."}</div>`:""}
@@ -4506,6 +4509,61 @@ function initPinMap(elId, pins, mapVar, opts){
   if(pts.length>1){ try{ m.fitBounds(pts,{padding:[36,36]}); }catch(e){} } else if(pts.length===1){ m.setView(pts[0],11); }
   setTimeout(function(){ try{m.invalidateSize();}catch(e){} },150);
 }
+// ── Coordinator "My route" — live map (base + numbered stops + straight-line route) ──────────────
+function coordInitRouteMap(){
+  if(typeof L==="undefined") return; const el=document.getElementById("coordRouteMap"); if(!el) return;
+  if(window._coordRouteMap){ try{window._coordRouteMap.remove();}catch(e){} window._coordRouteMap=null; }
+  const RO=routeOrigin(), list=coordPickedItems().filter(p=>p.lat!=null);
+  const m=L.map(el,{zoomControl:true,attributionControl:false}).setView([RO.lat,RO.lon],9); window._coordRouteMap=m;
+  wmBaseLayer().addTo(m);
+  const pts=[[RO.lat,RO.lon]];
+  L.marker([RO.lat,RO.lon],{icon:L.divIcon({className:"",html:'<div style="font-size:20px;transform:translate(-50%,-90%)">🏠</div>',iconSize:[0,0]})}).addTo(m).bindTooltip("🏠 "+esc(RO.name||"Base"),{direction:"top"});
+  list.forEach((p,i)=>{ pts.push([p.lat,p.lon]);
+    L.marker([p.lat,p.lon],{icon:L.divIcon({className:"",html:'<div style="width:26px;height:26px;border-radius:50%;background:#F59E0B;color:#1a1a1a;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.55);font-weight:900;font-size:13px;display:flex;align-items:center;justify-content:center;transform:translate(-50%,-50%)">'+(i+1)+'</div>',iconSize:[0,0]})}).addTo(m)
+      .bindTooltip((i+1)+". "+esc(p.num||"")+" "+esc(p.name||""),{direction:"top",offset:[0,-10]});
+  });
+  if(list.length){ const line=[[RO.lat,RO.lon]].concat(list.map(p=>[p.lat,p.lon])).concat([[RO.lat,RO.lon]]); L.polyline(line,{color:"#F59E0B",weight:3,opacity:.85}).addTo(m); }
+  if(pts.length>1){ try{ m.fitBounds(pts,{padding:[40,40]}); }catch(e){} } else { m.setView(pts[0],11); }
+  setTimeout(function(){ try{m.invalidateSize();}catch(e){} },160);
+}
+// Move a picked stop before/after another (drag-to-reorder). Order lives in S.coord.pick.
+function coordPickMove(fromKey,toKey){
+  const orig=S.coord.pick||[]; if(fromKey===toKey) return; const a=orig.slice(); const fi=a.indexOf(fromKey); if(fi<0) return;
+  const origFi=orig.indexOf(fromKey), origTi=orig.indexOf(toKey); a.splice(fi,1);
+  let ti=a.indexOf(toKey); if(ti<0){ a.push(fromKey); } else { a.splice(origFi<origTi?ti+1:ti,0,fromKey); }
+  S.coord.pick=a; coordPickSave(); render();
+}
+// Pointer-based drag (mouse + touch) for the route stops. Attached ONCE on document (survives render()).
+function coordDragSetup(){
+  if(window._coordDragInit) return; window._coordDragInit=true;
+  try{ var st=document.createElement("style"); st.textContent=".coordStopRow.dragOver{outline:2px dashed #F59E0B;outline-offset:-2px}.coordStopRow.dragGhost{opacity:.45}"; document.head.appendChild(st); }catch(e){}
+  var dragKey=null, dragEl=null;
+  function clearHi(){ try{ document.querySelectorAll(".coordStopRow.dragOver").forEach(function(x){x.classList.remove("dragOver");}); }catch(e){} }
+  document.addEventListener("pointerdown", function(e){
+    var h=e.target&&e.target.closest&&e.target.closest("[data-coorddrag]"); if(!h) return;
+    dragEl=h.closest(".coordStopRow"); if(!dragEl) return;
+    dragKey=h.getAttribute("data-coorddrag"); e.preventDefault();
+    try{ dragEl.setPointerCapture(e.pointerId); }catch(e2){}
+    dragEl.classList.add("dragGhost");
+  });
+  document.addEventListener("pointermove", function(e){
+    if(!dragKey) return; e.preventDefault();
+    var over=document.elementFromPoint(e.clientX,e.clientY);
+    var row=over&&over.closest&&over.closest(".coordStopRow");
+    clearHi(); if(row&&row!==dragEl) row.classList.add("dragOver");
+  });
+  function end(e){
+    if(!dragKey) return;
+    var over=document.elementFromPoint(e.clientX,e.clientY);
+    var row=over&&over.closest&&over.closest(".coordStopRow");
+    var toKey=row&&row.getAttribute("data-rowkey");
+    if(dragEl) dragEl.classList.remove("dragGhost"); clearHi();
+    var fk=dragKey; dragKey=null; dragEl=null;
+    if(toKey&&toKey!==fk) coordPickMove(fk,toKey);
+  }
+  document.addEventListener("pointerup", end);
+  document.addEventListener("pointercancel", function(){ if(dragEl)dragEl.classList.remove("dragGhost"); clearHi(); dragKey=null; dragEl=null; });
+}
 // City from a free-form address (global; opsCalHTML has its own local copy for the grid).
 // Multi-word cities in WindMar's FL service area — a comma-less address ends with one of these as a
 // whole city name, so we can't just grab the last word (that would split "Winter Haven" → "Haven").
@@ -4643,6 +4701,17 @@ function _render(noAnim){
       S.coord.geoSig=sig; S.coord.geo={status:"geocoding",done:0,total:citems.length,pins:[]};
       setTimeout(()=>geocodeInto(S.coord.geo, citems, ()=>{ if(S.tab==="coordinator"&&S.coord.tile) render(true); }),0);
     }
+  }
+  // Coordinator "My route" live map — works in ANY view. Geocode the picked stops (the flat view
+  // doesn't run the tile-geocode above), then (re)draw the base + numbered stops + route line.
+  if(S.tab==="coordinator" && S.coord.pick && S.coord.pick.length){
+    coordDragSetup();
+    const picked=coordPickedItems(), need=picked.filter(p=>p.lat==null && p.address);
+    const nsig=need.map(p=>geoKey(p.address)).join("|");
+    if(need.length && S.coord._routeGeoSig!==nsig){ S.coord._routeGeoSig=nsig;
+      setTimeout(()=>geocodeInto({status:"idle",done:0,total:need.length,pins:[]}, need, ()=>{ if(S.tab==="coordinator") render(true); }),0);
+    }
+    if(document.getElementById("coordRouteMap")) setTimeout(coordInitRouteMap,0);
   }
   // Schedule Nearest Crew dispatch (Projects → Inspections)
   if(S.tab==="coordinator" && S.dispatch.open){
