@@ -2503,6 +2503,11 @@ function coordAreaClusters(items,sortFn){
   const norm=(c)=>String(c||"").toLowerCase().replace(/\./g,"").replace(/\bst\b/g,"saint").replace(/\s+/g," ").trim();
   const titleCity=(s)=>String(s||"").toLowerCase().replace(/\b([a-z])/g,(m,ch)=>ch.toUpperCase());
   const geoOf=(it)=>{ const g=GEO_CACHE[geoKey(it.address)]; return (g&&g.lat!=null&&g.lon!=null)?g:null; };
+  // Re-schedules are the most urgent — pull them OUT of the city grouping into their own section that
+  // always sits FIRST (a visit already fell through; re-book it before fresh work). Oldest fallen-
+  // through visit first. The rest cluster by city below as usual.
+  const reschedItems=(items||[]).filter(it=>it&&it.cat==="reschedule");
+  items=(items||[]).filter(it=>!(it&&it.cat==="reschedule"));
   const buckets=new Map(), noCity=[];
   items.forEach(it=>{
     const g=geoOf(it); const rec=g?Object.assign({},it,{lat:g.lat,lon:g.lon}):Object.assign({},it);
@@ -2545,6 +2550,10 @@ function coordAreaClusters(items,sortFn){
   out.sort((a,z)=>(a.hqMi-z.hqMi)||String(a.label).localeCompare(String(z.label))); // nearest city to base first
   if(noCity.length){ const ordered=routeOrder(noCity);
     out.push({ items:ordered, label:(es?"Ubicación desconocida":"Location unknown"), count:noCity.length, spread:0, roundTrip:0, returnMi:0, clat:null, clon:null, unmapped:true }); }
+  if(reschedItems.length){
+    const ordered=reschedItems.slice().sort((a,b)=>String((a.job&&a.job.date)||"").localeCompare(String((b.job&&b.job.date)||""))||String(a.name||"").localeCompare(String(b.name||"")));
+    out.unshift({ items:ordered, label:(es?"Reprogramar — Prioridad":"Reschedule — Priority"), count:reschedItems.length, spread:0, roundTrip:0, returnMi:null, clat:null, clon:null, unmapped:false, resched:true });
+  }
   return out;
 }
 // Google Maps loop route: HQ → each job (furthest→closest) → back to HQ. All stops are waypoints
@@ -2559,12 +2568,14 @@ function coordRouteLink(ordered){
 function coordAreaSectionHTML(cl, idx, searching){
   const es=S.lang==="es", key="area:"+idx;
   const collapsed=!searching&&!!(S.coord.collapsed&&S.coord.collapsed[key]);
-  const col=cl.unmapped?"var(--wh-grey)":"#F59E0B";
-  const spreadTxt=(!cl.unmapped&&cl.roundTrip>=1)?`↺ ~${Math.round(cl.roundTrip)} mi ${es?"ida y vuelta":"round trip"}`:"";
-  const route=(!cl.unmapped&&cl.count>1)?`<a href="${coordRouteLink(cl.items)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="padding:4px 9px;border-radius:7px;background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff;font-weight:800;font-size:11px;text-decoration:none;white-space:nowrap">🧭 ${es?"Ruta":"Route"}</a>`:"";
+  const col=cl.resched?"#A855F7":(cl.unmapped?"var(--wh-grey)":"#F59E0B");
+  const icon=cl.resched?"↻":"📍";
+  // The reschedule section is priority-grouped, not geographic — no round-trip number, no route link.
+  const spreadTxt=(!cl.unmapped&&!cl.resched&&cl.roundTrip>=1)?`↺ ~${Math.round(cl.roundTrip)} mi ${es?"ida y vuelta":"round trip"}`:"";
+  const route=(!cl.unmapped&&!cl.resched&&cl.count>1)?`<a href="${coordRouteLink(cl.items)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="padding:4px 9px;border-radius:7px;background:linear-gradient(135deg,#1D429B,#F89B24);color:#fff;font-weight:800;font-size:11px;text-decoration:none;white-space:nowrap">🧭 ${es?"Ruta":"Route"}</a>`:"";
   const hdr=`<div data-action="coordToggle" data-bucket="${esc(key)}" style="display:flex;align-items:center;gap:9px;margin-top:14px;padding:9px 12px;cursor:pointer;border-radius:10px;background:var(--panel);border:1px solid var(--line);border-left:4px solid ${col};user-select:none">
     <span style="font-size:13px;color:var(--text-dim);width:12px;flex-shrink:0">${collapsed?"▸":"▾"}</span>
-    <span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:${col};color:${textOn(col)};font-size:13px;flex-shrink:0">📍</span>
+    <span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:${col};color:${textOn(col)};font-size:13px;flex-shrink:0">${icon}</span>
     <span style="font-weight:900;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(cl.label)}</span>
     ${spreadTxt?`<span style="color:var(--text-dim);font-size:11.5px;flex-shrink:0">${spreadTxt}</span>`:""}
     <span style="margin-left:auto;display:flex;align-items:center;gap:8px;flex-shrink:0">${route}<span class="pill" style="background:${col};color:${textOn(col)};font-size:11px">${cl.count}</span></span></div>`;
@@ -2573,7 +2584,7 @@ function coordAreaSectionHTML(cl, idx, searching){
   const mi=(m)=> m==null?"":(m<1?"<1":Math.round(m))+" mi";
   const leg=(m,label)=>`<div style="display:flex;align-items:center;gap:7px;padding:3px 12px;font-size:10.5px;font-weight:700;color:var(--text-dim);background:var(--panel);border-top:1px dashed var(--line)"><span style="opacity:.55">↓</span><span>${label} · ${mi(m)}</span></div>`;
   let rows="";
-  if(cl.unmapped){ rows=cl.items.map((it,i)=>coordItemRow(it,i)).join(""); }
+  if(cl.unmapped||cl.resched){ rows=cl.items.map((it,i)=>coordItemRow(it,i)).join(""); }
   else {
     if(cl.items[0]&&cl.items[0]._legMi!=null) rows+=leg(cl.items[0]._legMi, es?"desde HQ":"from HQ");
     cl.items.forEach((it,i)=>{ rows+=coordItemRow(it,i); const nx=cl.items[i+1]; if(nx&&nx._legMi!=null) rows+=leg(nx._legMi, es?"maneja":"drive"); });
