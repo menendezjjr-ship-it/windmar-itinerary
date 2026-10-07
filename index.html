@@ -2184,7 +2184,7 @@ function coordItems(){
       num:j.num||"", name:j.project||(p&&p.name)||"", address:j.address||(p&&p.address)||"",
       ahj:j.ahj||(p&&p.ahj)||"", stage:j.stage||"", crewLabel:j.crewLabel||"", scope:j.scope||"",
       engStage:j.engStage||"", coordinator:j.coordinator||"", qaStage:j.qaStage||"", systemKw:j.systemKw||null, zohoUrl:j.zohoUrl||"",
-      recordId:j.recordId||"", svcRec:j.svcRec||null, installRec:j.installRec||null, msp:j.msp, code:j.code, job:j, p:p, it:null });
+      recordId:j.recordId||"", svcRec:j.svcRec||null, installRec:j.installRec||null, msp:j.msp, code:j.code, cat:j.cat||"", job:j, p:p, it:null });
   });
   const DEAD=/closed\s*lost|dead|cancell?ed/i; // guard: never surface a dead sale as ready
   // Inspection report = ready-to-schedule inspections whose PERMIT IS IN. Without the permit-received
@@ -2466,6 +2466,11 @@ function coordItemRow(it,i){ const es=S.lang==="es", m=coordBucketMeta(it.bucket
   const statusPill=statusTxt?`<span class="pill" style="background:${statusCol};font-size:9.5px;flex-shrink:0">${esc(statusTxt)}</span>`:"";
   const mspBadge=(it.source==="ready"&&it.msp&&it.bucket!=="msp")?`<span class="pill" style="background:var(--jc-MSP);font-size:9px;flex-shrink:0">+MSP</span>`:"";
   const vip=(isInsp&&it.it.vip&&it.it.type!=="vip")?`<span class="pill" style="background:var(--jc-MSP);font-size:9px;flex-shrink:0">VIP</span>`:"";
+  // "5. Need Reschedule" service tickets live in the Service tile but are badged ↻ + a purple left bar
+  // so a coordinator spots a re-book at a glance (the prior visit's date/tech are in the detail modal).
+  const resched=it.cat==="reschedule";
+  const reBadge=resched?`<span class="pill" style="background:#A855F7;color:#fff;font-size:9px;font-weight:800;flex-shrink:0">↻ ${es?"Reprogramar":"Reschedule"}</span>`:"";
+  const leftCol=resched?"#A855F7":m.color;
   // For inspections the crew shown is who DID the install (send them back), so label it as such.
   const crew=it.crewLabel?(isInsp?`🔧 ${es?"Instaló":"Installed by"} ${esc(it.crewLabel)}`:`👷 ${esc(it.crewLabel)}`):(es?"Sin asignar":"Unassigned");
   const crewDim=it.crewLabel?"var(--text-dim)":"var(--warn)";
@@ -2474,12 +2479,12 @@ function coordItemRow(it,i){ const es=S.lang==="es", m=coordBucketMeta(it.bucket
   // from the row so opening the job detail keeps working exactly as before.
   const pIx=coordPickIndex(it.key), picked=pIx>=0;
   const pickBtn=`<span data-action="coordPick" data-id="${esc(it.key)}" title="${es?(picked?"Quitar de mi ruta":"Añadir a mi ruta"):(picked?"Remove from my route":"Add to my route")}" style="flex-shrink:0;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:${picked?"11.5":"14"}px;font-weight:900;cursor:pointer;user-select:none;border:2px solid ${picked?"#F59E0B":"var(--line)"};background:${picked?"#F59E0B":"transparent"};color:${picked?"#1a1a1a":"var(--text-dim)"}">${picked?(pIx+1):"+"}</span>`;
-  return `<div class="jobchip" data-action="coordSelect" data-id="${esc(it.key)}" data-ctip="${esc(it.num||"")}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 12px;cursor:pointer;background:${bg};border-bottom:1px solid var(--line);border-left:3px solid ${m.color};font-size:13px">
-    ${pickBtn}<span style="flex-shrink:0">${m.icon}</span>
+  return `<div class="jobchip" data-action="coordSelect" data-id="${esc(it.key)}" data-ctip="${esc(it.num||"")}" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 12px;cursor:pointer;background:${bg};border-bottom:1px solid var(--line);border-left:3px solid ${leftCol};font-size:13px">
+    ${pickBtn}<span style="flex-shrink:0">${resched?"↻":m.icon}</span>
     <span style="font-weight:800;color:var(--wh-orange);flex-shrink:0">${esc(it.num||"—")}</span>
     <span style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">${esc(it.name||"—")}</span>
     ${city?`<span style="color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px">📍 ${esc(city)}</span>`:""}
-    ${vip}${mspBadge}${statusPill}
+    ${reBadge}${vip}${mspBadge}${resched?"":statusPill}
     <span style="color:${crewDim};margin-left:auto;font-size:12px;flex-shrink:0">${crew}</span></div>`;
 }
 // ── Coordinator "By Area" (proximity) view — cluster ready jobs geographically so a coordinator

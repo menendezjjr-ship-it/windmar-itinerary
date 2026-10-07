@@ -366,12 +366,16 @@ export default async function handler(req, res) {
 
   const todayISO = new Date().toISOString().slice(0, 10);
   try {
-    const [permitInstalls, services, coordDeals, preEngDeals, installStageDeals] = await Promise.all([
+    const [permitInstalls, services, reschedServices, coordDeals, preEngDeals, installStageDeals] = await Promise.all([
       // Installation "Permit Approved - Pending *" / "Pending Schedule" pool. Near-ready: permit
       // approved, pending one blocker. Mostly STALE (dead sale) — the Deal-Stage filter drops those.
       searchAll("Installation", READY_INSTALL_CRITERIA, INSTALL_FIELDS),
       // starts_with:3 captures "3. Need Schedule" (+ any 3.x variant); mapper keeps only needs_schedule.
       searchAll("Service_Ticket", "(Ticket_Status:starts_with:3)", SERVICE_FIELDS),
+      // starts_with:5 captures "5. Need Reschedule" — tickets whose visit fell through and must be
+      // re-booked. Zoho has NO install-side reschedule stage (a fallen-through install reverts to
+      // "Pending Schedule" → the Install set), so rescheduling is a Service_Ticket-only concept.
+      searchAll("Service_Ticket", "(Ticket_Status:starts_with:5)", SERVICE_FIELDS),
       // Coordination-ready = Deals at NTP/Engineering/Permitting with plans complete / engineering in process.
       searchAll("Deals", COORD_CRITERIA, COORD_FIELDS),
       // Pre-Engineering = the queue one step earlier. No FDA/engineering-stage filter: at this
@@ -420,11 +424,26 @@ export default async function handler(req, res) {
       .map((r) => mapReadyService(r, todayISO))
       .filter((j) => j.cat === "needs_schedule");
 
-    // Dedupe by num (installs win on collision).
+    // Needs-reschedule tickets ("5. Need Reschedule"): the visit fell through, re-book it. Same shape
+    // as a needs-schedule service (kind "service", carries the old visit date + tech + description), so
+    // it lands in the Service tile — the client badges it ↻ by its cat. A "Hold" status never matches
+    // starts_with:5, so no extra On-Hold exclusion is needed here.
+    const reschedJobs = reschedServices
+      .map((r) => mapReadyService(r, todayISO))
+      .filter((j) => j.cat === "reschedule");
+
+    // Dedupe by num (installs win on collision). Reschedule tickets dedupe by their own ticket record
+    // so a reschedule is never collapsed behind a same-DL needs-schedule ticket or install.
     const seen = new Set();
     const jobs = [];
     for (const j of [...instJobs, ...svcJobs]) {
       const key = String(j.num || j.id).toUpperCase().replace(/\s+/g, "");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      jobs.push(j);
+    }
+    for (const j of reschedJobs) {
+      const key = "RESCHED|" + String(j.recordId || j.id).toUpperCase().replace(/\s+/g, "");
       if (seen.has(key)) continue;
       seen.add(key);
       jobs.push(j);
@@ -441,7 +460,7 @@ export default async function handler(req, res) {
       configured: true,
       ok: true,
       updated: new Date().toISOString(),
-      counts: { installs: instJobs.length, services: svcJobs.length, coordination: coordJobs.length, preeng: preEngJobs.length, jobs: jobs.length, filteredStale },
+      counts: { installs: instJobs.length, services: svcJobs.length, reschedule: reschedJobs.length, coordination: coordJobs.length, preeng: preEngJobs.length, jobs: jobs.length, filteredStale },
       jobs,
     };
     rememberGood("ready", payload);
