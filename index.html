@@ -2223,6 +2223,9 @@ function coordinatorHTML(){
   const BAND={service:0,install:1,msp:1,reinstall:1,removal:1,coordination:2,inspection:3};
   const hotRx=/urgent|very high|high|critical/i;
   const shown=tileItems.slice().sort(function(a,z){
+    // Re-schedules first — highest importance (a visit already fell through; re-book it before fresh work).
+    var ra=(a.cat==="reschedule")?0:1, rz=(z.cat==="reschedule")?0:1;
+    if(ra!==rz) return ra-rz;
     var ba=BAND[a.bucket]==null?9:BAND[a.bucket], bz=BAND[z.bucket]==null?9:BAND[z.bucket];
     if(ba!==bz) return ba-bz;
     var ha=(a.job&&hotRx.test(a.job.priority||""))?0:1, hz=(z.job&&hotRx.test(z.job.priority||""))?0:1;
