@@ -11,6 +11,29 @@
 const HOOK = (process.env.TEAMS_CREW_WEBHOOK_URL || "").trim();
 const S = (v, n) => String(v == null ? "" : v).replace(new RegExp("[\\u0000-\\u001F\\u007F]", "g"), " ").trim().slice(0, n || 200);
 
+// ── Per-type Teams toggle (admin-flippable from the Field HUB, NO redeploy) — shared app_flags ──
+// A missing row = the code default (coordinator→crew on). Cached ~60s; failure falls back to default.
+const SB_URL = "https://lmlixmzmzpzgeggvywwb.supabase.co";
+const SB_KEY = "sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
+const TEAMS_FLAG_DEFAULTS = {
+  teams_field_status: false, teams_eta: true, teams_rma: true,
+  teams_co: true, teams_inspection: true, teams_quickjob: true, teams_coord_crew: true,
+};
+let _flagCache = { at: 0, map: null };
+async function teamsFlag(key) {
+  const def = (key in TEAMS_FLAG_DEFAULTS) ? TEAMS_FLAG_DEFAULTS[key] : true;
+  const now = Date.now();
+  if (!_flagCache.map || now - _flagCache.at > 60000) {
+    try {
+      const r = await fetch(`${SB_URL}/rest/v1/app_flags?select=key,enabled`, { headers: { apikey: SB_KEY, Authorization: "Bearer " + SB_KEY } });
+      if (r.ok) { const rows = await r.json(); const map = {}; if (Array.isArray(rows)) rows.forEach((x) => { if (x && x.key) map[x.key] = !!x.enabled; }); _flagCache = { at: now, map }; }
+      else { _flagCache = { at: now, map: _flagCache.map || {} }; }
+    } catch (e) { _flagCache = { at: now, map: _flagCache.map || {} }; }
+  }
+  const m = _flagCache.map || {};
+  return (key in m) ? m[key] : def;
+}
+
 function build(b) {
   const confirmed = b.status === "confirmed";
   const num = S(b.num, 40) || "Quick Job";
@@ -53,6 +76,8 @@ export default async function handler(req, res) {
   if (b.status !== "confirmed" && b.status !== "no_response") {
     return res.status(200).json({ ok: false, error: "status must be 'confirmed' or 'no_response'" });
   }
+  // Admin toggle (Teams notifications → Coordinator→crew). Off → don't DM the crew via Teams.
+  if (!(await teamsFlag("teams_coord_crew"))) return res.status(200).json({ ok: true, skipped: "coord-crew-teams-off" });
   const payload = build(b);
   if (b.test) { payload.test = true; payload.title = "TEST — " + payload.title; payload.message = "TEST (no action needed) — " + payload.message; }
 
