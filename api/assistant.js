@@ -711,6 +711,13 @@ const TOOLS = [
   },
 ];
 
+/* Exportados para api/tools.js, que publica este MISMO catálogo y este MISMO
+   despachador a agentes externos (Homie). Deliberadamente se comparte el
+   código en vez de copiarlo: si WinMI y Homie tuvieran cada uno su copia,
+   divergirían a la primera corrección y acabarían contestando cosas distintas
+   sobre los mismos datos. */
+export { TOOLS, runTool };
+
 async function runTool(name, input) {
   try {
     if (name === "search_projects") return await toolSearchProjects(input);
