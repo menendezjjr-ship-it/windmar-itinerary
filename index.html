@@ -5997,12 +5997,30 @@ document.addEventListener("visibilitychange",function(){ if(!document.hidden) li
   (function mount(){ if(!document.body){ setTimeout(mount,40); return; } document.body.appendChild(launch);
     // First visit: a friendly nudge + offer the tour.
     var seen=true; try{ seen=localStorage.getItem("wm_tour_done")==="1"; }catch(e){}
-    if(!seen){ setTimeout(function(){ if(panel) return; hi=document.createElement("div"); hi.className="wmSunHi";
+    // EL GLOBO NO SE MUESTRA EN MÓVIL. Es position:fixed, así que flota sobre el
+    // contenido haga lo que haga: medido, tapaba 29 elementos a lo largo del
+    // tablero en un teléfono de 375px, y antes no se cerraba NUNCA solo. En una
+    // pantalla pequeña no hay sitio para un bocadillo que no tape nada, y el
+    // droid ya rebota en la esquina y se descubre solo: el tour sigue a un toque.
+    var narrow=false; try{ narrow=matchMedia("(max-width:640px)").matches; }catch(e){}
+    if(!seen && !narrow){ setTimeout(function(){ if(panel) return; hi=document.createElement("div"); hi.className="wmSunHi";
       hi.innerHTML='<b>'+T("Hi, I'm WinMI! 🤖","¡Hola, soy WinMI! 🤖")+'</b><br>'+T("Want a 20-sec tour?","¿Un tour de 20 seg?")
         +'<div style="display:flex;gap:6px;margin-top:8px"><button id="wmHiYes" style="flex:1;background:linear-gradient(135deg,#1D429B,#F89B24);border:none;color:#fff;font:800 11.5px Montserrat;padding:6px;border-radius:8px;cursor:pointer">'+T("Yes!","¡Sí!")+'</button><button id="wmHiNo" style="background:#16294f;border:1px solid #2a4a86;color:#bcd2f5;font:600 11.5px Montserrat;padding:6px 10px;border-radius:8px;cursor:pointer">'+T("Later","Después")+'</button></div>';
       document.body.appendChild(hi);
-      document.getElementById("wmHiYes").onclick=function(){ hi.remove(); hi=null; startTour(); };
-      document.getElementById("wmHiNo").onclick=function(){ try{localStorage.setItem("wm_tour_done","1");}catch(e){} hi.remove(); hi=null; };
+      // Un solo camino para quitarlo: así la clase del body y el temporizador no
+      // pueden quedarse descolgados por una rama que se olvide de limpiar.
+      var hiTimer=null;
+      function closeHi(remember){
+        if(hiTimer){ clearTimeout(hiTimer); hiTimer=null; }
+        if(remember){ try{ localStorage.setItem("wm_tour_done","1"); }catch(e){} }
+        if(hi){ hi.remove(); hi=null; }
+      }
+      document.getElementById("wmHiYes").onclick=function(){ closeHi(false); startTour(); };
+      document.getElementById("wmHiNo").onclick=function(){ closeHi(true); };
+      // Se cierra solo. Antes no lo hacía NUNCA: si no pulsabas Sí o No, el globo
+      // se quedaba fijo tapando el tablero durante toda la sesión. No marca el tour
+      // como visto: ignorarlo no es lo mismo que rechazarlo.
+      hiTimer=setTimeout(function(){ closeHi(false); },10000);
     },1600); }
   })();
 })();
