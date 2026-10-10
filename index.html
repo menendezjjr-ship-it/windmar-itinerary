@@ -276,6 +276,7 @@
     main{ padding-bottom:104px !important; }
   }
 
+
   /* ── Tablets (641–1024px): a hair more breathing room ── */
   @media (min-width:641px) and (max-width:1024px){
     main{ padding:18px 16px 76px !important; }
@@ -436,10 +437,117 @@
     :root{ --bg-2:#131C38; --panel:#182346; --panel-2:#1E2B57; --line:#2E4180; }
     [data-theme="light"]{ --bg-2:#FFFFFF; --panel:#FFFFFF; --panel-2:#F4F6FA; --line:#C8D4E8; }
   }
+
+  /* (Este bloque va DELIBERADAMENTE al final de la hoja: el liquid glass y las
+     media queries de más arriba usan la propiedad corta `background`, que borra
+     cualquier background-image anterior. Puesto antes, el degradado del botón se
+     perdía en silencio — medido: background-image resolvía a `none`.) */
+  /* ============================================================================
+     WINDMAR TITANIUM — la mecánica del kit Titanium Glass con identidad WindMar.
+     Se adopta el COMPORTAMIENTO (botones 4D, aurora que deriva, sheen líquido,
+     intro de arranque, pills) y se descarta por completo su PALETA: ni uno de
+     sus hexes de azul eléctrico y cyan aparece aquí (ni citados: así la
+     comprobación automática del commit sigue sirviendo). El acento es el
+     degradado azul→naranja de la marca, como el sol y el azul del logo.
+     Convive con el liquid glass ya existente: esto añade movimiento y
+     profundidad, no recolorea nada.
+     ============================================================================ */
+  :root{
+    --wm-grad:linear-gradient(120deg,var(--wh-blue) 0%,#3C63C8 42%,var(--wh-orange) 100%);
+    --wm-edge:inset 0 1px 0 rgba(255,255,255,.22);
+  }
+
+  /* ---- AURORA: 3 manchas que derivan detrás del cristal ----
+     Sustituye a los orbes fijos de body::before, que quedan como respaldo para
+     navegadores sin soporte. Los colores son azul WindMar, naranja y el violeta
+     del código MSP — el cyan del kit original no entra. */
+  .wmAurora{position:fixed;inset:-18% -10% -10% -10%;z-index:-1;pointer-events:none;
+    filter:blur(72px) saturate(1.3);opacity:.5}
+  .wmAurora span{position:absolute;border-radius:50%;mix-blend-mode:screen;will-change:transform;display:block}
+  .wmAurora .b1{width:46vw;height:46vw;left:-6vw;top:-8vw;
+    background:radial-gradient(circle,rgba(29,66,155,.95),transparent 62%);animation:wmD1 24s ease-in-out infinite}
+  .wmAurora .b2{width:42vw;height:42vw;right:-8vw;top:0;
+    background:radial-gradient(circle,rgba(248,155,36,.55),transparent 62%);animation:wmD2 28s ease-in-out infinite}
+  .wmAurora .b3{width:50vw;height:50vw;left:24vw;bottom:-18vw;
+    background:radial-gradient(circle,rgba(124,58,237,.5),transparent 62%);animation:wmD3 32s ease-in-out infinite}
+  [data-theme="light"] .wmAurora{opacity:.3}
+  @keyframes wmD1{0%,100%{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(6vw,4vh,0) scale(1.1)}}
+  @keyframes wmD2{0%,100%{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(-5vw,6vh,0) scale(1.12)}}
+  @keyframes wmD3{0%,100%{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(3vw,-5vh,0) scale(1.08)}}
+  /* Con la aurora encima, los orbes fijos sobran: se apagan para no duplicar luz */
+  body.wmHasAurora::before{opacity:0}
+
+  /* ---- BOTÓN 4D ----
+     Sólo al .btn3d por defecto (el de acción). Las variantes de color
+     (.blue/.green/.red/.grey/.ghost) y cualquier botón con background inline
+     conservan su color: el degradado identifica la acción PRINCIPAL, no se come
+     el código de color del resto. */
+  .btn3d{--mx:50%;--my:0%;position:relative;transform-style:preserve-3d;will-change:transform;
+    background-image:linear-gradient(180deg,rgba(255,255,255,.34),rgba(255,255,255,0) 46%),var(--wm-grad);
+    border-top:1px solid rgba(255,255,255,.4);
+    box-shadow:0 18px 40px -16px rgba(29,66,155,.7),0 6px 16px -8px rgba(248,155,36,.5),
+               var(--wm-edge),inset 0 -2px 6px rgba(8,17,31,.3);}
+  .btn3d::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;
+    transition:opacity .2s ease;mix-blend-mode:screen;
+    background:radial-gradient(180px 180px at var(--mx) var(--my),rgba(255,255,255,.5),transparent 60%)}
+  .btn3d:hover::after{opacity:1}
+  .btn3d:hover{box-shadow:0 30px 60px -18px rgba(248,155,36,.6),0 10px 24px -8px rgba(29,66,155,.7),
+               var(--wm-edge),inset 0 -2px 6px rgba(8,17,31,.3)}
+  .btn3d:active{box-shadow:0 6px 16px -10px rgba(29,66,155,.7),inset 0 2px 8px rgba(8,17,31,.5)}
+  .btn3d:focus-visible{outline:3px solid rgba(248,155,36,.65);outline-offset:3px}
+  /* Las variantes mantienen su propio color por encima del degradado */
+  .btn3d.ghost::after,.btn3d.grey::after{background:radial-gradient(180px 180px at var(--mx) var(--my),rgba(255,255,255,.26),transparent 60%)}
+
+  /* ---- SHEEN líquido en paneles destacados ---- */
+  .card.wmSheen{position:relative;overflow:hidden}
+  .card.wmSheen::after{content:"";position:absolute;top:-60%;left:-60%;width:45%;height:220%;pointer-events:none;
+    background:linear-gradient(100deg,transparent,rgba(255,255,255,.10),transparent);transform:rotate(8deg);
+    animation:wmSheen 7.5s ease-in-out infinite}
+  @keyframes wmSheen{0%{left:-60%}55%,100%{left:130%}}
+
+  /* ---- INTRO de arranque ---- */
+  #wmIntro{position:fixed;inset:0;z-index:2147483500;display:grid;place-items:center;cursor:pointer;
+    transition:opacity .45s ease;
+    background:radial-gradient(900px 620px at 50% 28%,rgba(29,66,155,.42),transparent 60%),
+               radial-gradient(760px 560px at 82% 92%,rgba(248,155,36,.26),transparent 60%),
+               radial-gradient(680px 520px at 10% 88%,rgba(124,58,237,.2),transparent 60%),#070C1A}
+  #wmIntro.go{opacity:0;pointer-events:none}
+  .wmIstage{display:flex;flex-direction:column;align-items:center;gap:17px;text-align:center;padding:24px}
+  .wmIlogo{position:relative;width:96px;height:96px;border-radius:24px;background:#fff;display:grid;place-items:center;
+    animation:wmIpop .95s cubic-bezier(.2,.8,.2,1) both}
+  .wmIlogo img{width:76px;height:auto;display:block}
+  .wmIlogo::before{content:"";position:absolute;inset:-45%;border-radius:9999px;z-index:-1;
+    background:radial-gradient(circle,rgba(248,155,36,.45),transparent 60%);animation:wmIglow 2.4s ease-in-out infinite}
+  .wmIword{font:900 clamp(30px,8vw,52px)/1 Montserrat,system-ui,sans-serif;letter-spacing:.01em;
+    background:linear-gradient(120deg,var(--wh-blue-light),#fff 45%,var(--wh-orange));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    animation:wmIrise .7s .25s cubic-bezier(.2,.8,.2,1) both}
+  .wmItag{font:600 clamp(13px,3.4vw,15px)/1.4 Montserrat,system-ui,sans-serif;color:#A9BEE4;
+    animation:wmIrise .7s .45s cubic-bezier(.2,.8,.2,1) both}
+  .wmIbar{width:128px;height:3px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.08);animation:wmIrise .7s .6s both}
+  .wmIbar::after{content:"";display:block;height:100%;width:38%;border-radius:3px;
+    background:linear-gradient(90deg,var(--wh-blue),var(--wh-orange));animation:wmIsweep 1.15s .7s ease-in-out infinite}
+  @keyframes wmIpop{0%{opacity:0;transform:scale(.6) translateY(10px)}60%{opacity:1;transform:scale(1.08)}100%{transform:scale(1)}}
+  @keyframes wmIglow{0%,100%{opacity:.5;transform:scale(1)}50%{opacity:.95;transform:scale(1.14)}}
+  @keyframes wmIrise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  @keyframes wmIsweep{0%{transform:translateX(-130%)}100%{transform:translateX(360%)}}
+
+  @media (prefers-reduced-motion:reduce){
+    .wmAurora span,.card.wmSheen::after,.wmIlogo,.wmIword,.wmItag,.wmIbar,.wmIlogo::before,.wmIbar::after{animation:none!important}
+    .btn3d{transform:none!important}
+  }
+
 </style>
 <style>vercel-live-feedback,[data-vercel-toolbar],#vercel-toolbar,vercel-toolbar,[data-testid="vercel-toolbar"],[class*="vercel-toolbar"],iframe[src*="vercel.live"],iframe[src*="vercel-toolbar"]{display:none!important;visibility:hidden!important;pointer-events:none!important}</style>
 </head>
 <body>
+<div class="wmAurora" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+<div id="wmIntro" role="presentation" aria-hidden="true"><div class="wmIstage">
+  <div class="wmIlogo"><img src="https://windmarhome.com/wp-content/uploads/2021/03/windmar-logo.png" alt="" onerror="this.style.display='none';this.parentNode.insertAdjacentHTML('beforeend','<span style=\'font:900 42px Montserrat,sans-serif;color:#1D429B\'>W</span>')"></div>
+  <div class="wmIword">WINDMAR</div>
+  <div class="wmItag">Dispatch &amp; Field Operations</div>
+  <div class="wmIbar"></div>
+</div></div>
 <div id="root"></div>
 
 <script>
@@ -5334,6 +5442,49 @@ document.addEventListener("visibilitychange",function(){ if(!document.hidden) li
     window.addEventListener("resize",function(){ clearTimeout(t); t=setTimeout(resizeMaps,250); });
     window.addEventListener("orientationchange",function(){ clearTimeout(t); t=setTimeout(resizeMaps,400); });
   }catch(e){}
+})();
+
+
+/* ── WINDMAR TITANIUM: intro de arranque + inclinación 4D ──────────────────
+   Mejora progresiva: si este bloque no corriera, los botones seguirían con su
+   cristal y su degradado, y la app arrancaría sin intro. Nada depende de él. */
+(function(){
+  try{ document.body.classList.add("wmHasAurora"); }catch(e){}
+
+  // Intro en cada carga (decisión del usuario). Se puede saltar tocándola.
+  (function(){
+    var i=document.getElementById("wmIntro"); if(!i) return;
+    var reduce=false; try{ reduce=matchMedia("(prefers-reduced-motion: reduce)").matches; }catch(e){}
+    var total=reduce?1100:2300, done=false;
+    function go(){ if(done) return; done=true; i.classList.add("go");
+      // Se retira del DOM: dejarla invisible encima seguiría capturando toques.
+      setTimeout(function(){ try{ i.remove(); }catch(e){} },500); }
+    setTimeout(go,total-450);
+    i.addEventListener("click",go);
+    // Si algo fallara, nunca dejar la app tapada por la intro.
+    setTimeout(go,6000);
+  })();
+
+  // Inclinación 4D: delegada en document, porque render() reconstruye el HTML
+  // entero y unos listeners por botón morirían en el primer repintado.
+  var reduce=false; try{ reduce=matchMedia("(prefers-reduced-motion: reduce)").matches; }catch(e){}
+  document.addEventListener("pointermove",function(e){
+    var el=e.target && e.target.closest && e.target.closest(".btn3d");
+    if(!el) return;
+    var r=el.getBoundingClientRect(); if(!r.width) return;
+    var px=(e.clientX-r.left)/r.width, py=(e.clientY-r.top)/r.height;
+    el.style.setProperty("--mx",(px*100).toFixed(1)+"%");
+    el.style.setProperty("--my",(py*100).toFixed(1)+"%");
+    // Sólo con ratón: en una pantalla táctil no hay cursor al que inclinarse y
+    // el "hover" se queda pegado tras el toque.
+    if(reduce || (e.pointerType && e.pointerType!=="mouse")) return;
+    var ry=((px-.5)*14).toFixed(2), rx=(-(py-.5)*14).toFixed(2);
+    el.style.transform="perspective(760px) rotateX("+rx+"deg) rotateY("+ry+"deg) translateZ(0) scale(1.03)";
+  },{passive:true});
+  document.addEventListener("pointerout",function(e){
+    var el=e.target && e.target.closest && e.target.closest(".btn3d");
+    if(el) el.style.transform="";
+  },{passive:true});
 })();
 
 </script>
