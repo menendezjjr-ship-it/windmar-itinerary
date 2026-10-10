@@ -160,8 +160,6 @@
     nav .scroll{ padding:0 8px !important; }
     /* iOS Safari zooms in when a focused input is <16px — force 16px on phones */
     input, select, textarea, .input{ font-size:16px !important; }
-    /* keep micro pills/labels legible */
-    .pill{ font-size:10px !important; }
     /* Dashboard scroll fix: on phones a panel with its own overflow:auto (e.g. Crew Updates at
        78vh) TRAPS the swipe — you scroll the inner list, the page won't move, so the dashboard
        feels stuck. Let these flow with the page so the whole dashboard scrolls as one column. */
@@ -172,6 +170,112 @@
     h2{ font-size:20px !important; }
     h3{ font-size:18px !important; }
   }
+
+  /* ============================================================
+     MÓVIL — legibilidad y ergonomía (≤640px)
+     El layout NO estaba roto: no hay desbordamiento horizontal de página y la
+     rejilla semanal ya vive en su propio scroller. Lo que hacía que "no se
+     viera bien" en el teléfono, medido sobre producción a 375px:
+       · 276 tamaños de letra inline por debajo de 12px (36 de ellos a 9px)
+       · 95 controles de 36–40px de alto (el mínimo táctil cómodo es 44px)
+       · 3 niveles de tarjeta anidada dejaban el contenido en 283px de 375
+       · rejillas de 2 y 4 columnas que no colapsan a 1 en un teléfono
+     Nada de esto toca el escritorio: todo vive dentro de esta media query.
+     ============================================================ */
+  @media (max-width:640px){
+
+    /* ── 1. Piso tipográfico ──────────────────────────────────────────────
+       La app pinta sus tamaños con estilos inline, así que la única forma de
+       subir el piso sin reescribir ~5.800 líneas es seleccionar por atributo.
+       Se suben SOLO los tamaños pequeños; de 14px para arriba no se tocan, así
+       que la jerarquía visual se mantiene — sube el suelo, no el techo. */
+    #root [style*="font-size:9px"]    { font-size:12px   !important; }
+    #root [style*="font-size:9.5px"]  { font-size:12px   !important; }
+    #root [style*="font-size:10px"]   { font-size:12.5px !important; }
+    #root [style*="font-size:10.5px"] { font-size:12.5px !important; }
+    #root [style*="font-size:11px"]   { font-size:13px   !important; }
+    #root [style*="font-size:11.5px"] { font-size:13px   !important; }
+    #root [style*="font-size:12px"]   { font-size:13.5px !important; }
+    #root [style*="font-size:12.5px"] { font-size:13.5px !important; }
+    #root [style*="font-size:13px"]   { font-size:14px   !important; }
+    #root [style*="font-size:13.5px"] { font-size:14px   !important; }
+    /* Las clases compartidas suben con ellos */
+    .pill   { font-size:12px !important; padding:3px 9px; }
+    .statpill, .calchip { font-size:12px !important; }
+    .leaflet-tooltip, .distlbl { font-size:12px !important; }
+    .chip   { font-size:13px !important; }
+    .label  { font-size:11.5px !important; }
+    .meta   { font-size:12.5px !important; }
+    body    { font-size:15px; }
+
+    /* ── 2. Áreas táctiles ────────────────────────────────────────────────
+       44px es el mínimo cómodo (Apple HIG). Los chips secundarios de filtro se
+       quedan en 40: a 44 cada uno la barra de filtros ocupaba media pantalla,
+       y siguen muy por encima del tamaño al que se falla un toque. */
+    /* 44px para TODO lo que ejecuta una acción. Los .sm empezaron en 40 y se
+       subieron tras medirlos: 90 de los 98 controles pequeños del tablero son
+       los botones "Zoho ↗" / "Stage updated" de cada tarjeta de cuadrilla —
+       se tocan en obra, con guantes y al sol, y ahí 4px deciden si aciertas. */
+    .btn3d       { min-height:44px !important; padding:11px 18px; }
+    .btn3d.sm    { min-height:44px !important; padding:10px 15px; }
+    .chip        { min-height:44px; display:inline-flex; align-items:center; }
+    /* Botones sueltos sin clase (p.ej. "⬇ Save all") venían a 27px */
+    #root button { min-height:40px; }
+    .tabbtn      { padding:14px 16px !important; }
+    #root a[href]{ min-height:0; }   /* los enlaces en línea no se inflan */
+
+    /* ── 3. Recuperar ancho útil ──────────────────────────────────────────
+       Con 3 tarjetas anidadas el padding se cobraba 92 de los 375px. Las
+       tarjetas interiores adelgazan; la exterior conserva su respiración. */
+    main              { padding:12px 8px 104px !important; }
+    .card             { padding:13px 14px; border-radius:16px; }
+    .card .card       { padding:10px 11px !important; border-radius:13px; }
+    .card .card .card { padding:9px 10px !important; border-radius:11px; }
+
+    /* ── 4. Rejillas a una columna ────────────────────────────────────────
+       Sólo las de ancho fijo. Las responsivas (auto-fit/minmax) ya colapsan
+       solas, así que no se tocan. */
+    #root [style*="grid-template-columns:1fr 1fr"]     { grid-template-columns:1fr !important; }
+    #root [style*="grid-template-columns:repeat(4,1fr)"]{ grid-template-columns:repeat(2,1fr) !important; }
+    #root [style*="grid-template-columns:repeat(3,1fr)"]{ grid-template-columns:repeat(2,1fr) !important; }
+    /* Un min-width pensado para escritorio deja huecos muertos en un teléfono */
+    #root [style*="min-width:240px"],
+    #root [style*="min-width:200px"],
+    #root [style*="min-width:180px"],
+    #root [style*="min-width:160px"]{ min-width:0 !important; }
+
+    /* ── 5. Texto largo que no cabe ───────────────────────────────────────
+       Las notas de obra traen URLs de PDF de Supabase sin espacios; sin esto
+       estiran su columna y aplastan todo lo demás. break-word sólo parte
+       cuando de verdad no cabe, así que las palabras normales no se cortan. */
+    #root { overflow-wrap:break-word; }
+
+    /* ── 6. La rejilla semanal se desplaza a lo ancho: que se note ────────
+       Vive en su propio scroller (351 de 680px visibles). Sin señal, parece
+       que faltan días en vez de que haya que deslizar. */
+    #root [style*="min-width:680px"]{ scroll-snap-type:x proximity; }
+    #root [style*="min-width:680px"] > *{ scroll-snap-align:start; }
+
+    /* ── 7. Mapas que se salían de la pantalla ───────────────────────────
+       Medido en Dispatch con carga limpia a 375px: el contenedor del mapa mide
+       359px pero el canvas de MapLibre nace a 428px, y empujaba la página a
+       869px de ancho — el teléfono se deslizaba de lado y aparecía una franja
+       vacía. Se recorta en el contenedor en vez de escalar el canvas: estirar
+       un canvas con max-width deforma el mapa; recortarlo sólo esconde unos
+       píxeles de mapa, que es justo lo que no importa. */
+    .leaflet-container, .maplibregl-map{ max-width:100% !important; overflow:hidden !important; }
+    /* Red de seguridad: el tile-pane de Leaflet escapaba igualmente de su
+       contenedor y empujaba la página a 871px. Se corta en #root, que es
+       ancestro de todo el contenido. `clip` y no `hidden` a propósito: hidden
+       crearía un contenedor de desplazamiento y rompería el `position:sticky`
+       de la barra de pestañas; clip recorta sin crear scroll. Se deja también
+       la regla de arriba para que el recorte ocurra lo más cerca posible. */
+    #root{ overflow-x:clip; }
+
+    /* El asistente flota sobre la esquina: que nunca tape la última fila */
+    main{ padding-bottom:104px !important; }
+  }
+
   /* ── Tablets (641–1024px): a hair more breathing room ── */
   @media (min-width:641px) and (max-width:1024px){
     main{ padding:18px 16px 76px !important; }
@@ -182,7 +286,6 @@
     .rise{ padding:16px !important; max-height:92vh !important; border-radius:18px !important; }
     .rise [style*="grid-template-columns:1fr 1fr"]{ grid-template-columns:1fr !important; }
     .jobchip{ padding:10px 12px !important; }
-    .btn3d.sm{ min-height:36px; }
     /* leave room so the floating assistant never covers the last row */
     main{ padding-bottom:96px !important; }
   }
@@ -592,7 +695,12 @@ const S={
   lang:"en", theme:"dark", tab:(function(){try{return localStorage.getItem("wm_itin_tab")||"itinerary";}catch(e){return "itinerary";}})(), dayOffset:0, selectedJob:null, itinView:"board", boardFilter:"all",
   live:{status:"idle",ok:false,jobs:[],updated:null,err:""},
   proj:{status:"idle",ok:false,list:[],updated:null,err:"",selected:null,q:"",stageFilter:"all",alerts:[],notify:false,notes:{id:null,status:"idle",list:[]},noteFrom:null,atts:{id:null,status:"idle",groups:[]}},
-  notif:{items:[],unread:0,open:false}, attnOpen:true,
+  notif:{items:[],unread:0,open:false},
+  // En teléfono "Atención Requerida" arranca plegado: con la letra ya legible el
+  // tablero medía 6.000px y había que recorrer todo el panel antes de ver las
+  // cuadrillas. Plegado NO esconde nada crítico — sigue mostrando el título y los
+  // contadores (estancados, etc.) y se abre de un toque. En escritorio, abierto como siempre.
+  attnOpen:(function(){ try{ return !(window.matchMedia && window.matchMedia('(max-width:640px)').matches); }catch(e){ return true; } })(),
   crewOpen:{}, // which crew timelines are expanded — kept in state so the 25s/75s/90s
                // auto-refresh (which replaces #root.innerHTML) can't snap them shut mid-triage
   cal:{status:"idle",records:[],y:new Date().getFullYear(),m:new Date().getMonth()+1,view:"grid",typeFilter:"all",teamFilter:[],q:"",selected:null,dayPanel:null,weekStartISO:null,err:"",bomNotes:{}},
@@ -5208,6 +5316,26 @@ setInterval(liveRefreshNow,30000);
 // Coming back to the app should feel instant, not "wait up to 30s".
 window.addEventListener("focus",liveRefreshNow);
 document.addEventListener("visibilitychange",function(){ if(!document.hidden) liveRefreshNow(); });
+
+/* Al rotar el teléfono (o cambiar el tamaño de la ventana) los mapas no se
+   recalculaban: no existía ningún listener de resize en toda la app, así que el
+   lienzo se quedaba con el ancho con el que nació. El CSS ya impide que eso rompa
+   la página; esto hace que además el mapa vuelva a ocupar su contenedor. */
+(function(){
+  var t=null;
+  function resizeMaps(){
+    ["_cm","_coordRouteMap"].forEach(function(k){
+      var m=window[k]; if(!m) return;
+      try{ m.invalidateSize && m.invalidateSize(); }catch(e){}
+      try{ m._glMap && m._glMap.resize && m._glMap.resize(); }catch(e){}
+    });
+  }
+  try{
+    window.addEventListener("resize",function(){ clearTimeout(t); t=setTimeout(resizeMaps,250); });
+    window.addEventListener("orientationchange",function(){ clearTimeout(t); t=setTimeout(resizeMaps,400); });
+  }catch(e){}
+})();
+
 </script>
 <script>
 /* WindMar crew status notifications — polls shared Supabase, alerts the coordinator */
