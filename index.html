@@ -4653,15 +4653,42 @@ const TABS=[
    failure must never lock someone out of the app. */
 const USER_TABS={
 };
+// GLOBAL tab layout — admin edits it in the Field HUB "Layout" panel and publishes to
+// app_layout.itin_tabs; it reorders, hides and renames the top tabs, applied BEFORE the per-user
+// access filter. window.wmTabLayout = the published array [{id,hidden,label:{en,es,pt}}]. Fail-open:
+// if applying it would blank the nav, fall back to the full TABS.
+function applyTabLayout(base){
+  const cfg=Array.isArray(window.wmTabLayout)?window.wmTabLayout:null;
+  if(!cfg||!cfg.length) return base.map(tb=>Object.assign({},tb));
+  const byId=Object.create(null); base.forEach(tb=>{byId[tb.id]=tb;});
+  const out=[], seen=Object.create(null);
+  cfg.forEach(it=>{ if(!it||!it.id) return; const tb=byId[it.id]; if(!tb) return; seen[it.id]=1; if(it.hidden) return; out.push(Object.assign({},tb,{_label:it.label})); });
+  base.forEach(tb=>{ if(!seen[tb.id]) out.push(Object.assign({},tb)); }); // a new tab not yet in the config still shows
+  return out.length?out:base.map(tb=>Object.assign({},tb));
+}
 function allowedTabs(){
+  const laid=applyTabLayout(TABS); // global reorder / hide / rename first
   // Primary source: per-user itin_tabs set from the Field HUB Admin panel (app_access.itin_tabs,
   // captured into window.wmItinTabs by the gate). Legacy fallback: the hardcoded USER_TABS map.
   let ids=(Array.isArray(window.wmItinTabs)&&window.wmItinTabs.length)?window.wmItinTabs:null;
   if(!ids){ const key=String(window.wmUser||"").trim().toLowerCase(); ids=Object.prototype.hasOwnProperty.call(USER_TABS,key)?USER_TABS[key]:null; } // own keys only, so "constructor"/"toString" can't match
-  if(!Array.isArray(ids)||!ids.length) return TABS;
+  if(!Array.isArray(ids)||!ids.length) return laid;
   const ok=Object.create(null); ids.forEach(x=>{ok[String(x).trim().toLowerCase()]=1;});
-  const out=TABS.filter(tb=>ok[tb.id]);
-  return out.length?out:TABS; // an all-unknown list would blank the nav → fall back to all
+  const out=laid.filter(tb=>ok[tb.id]);
+  return out.length?out:laid; // an all-unknown per-user list would blank the nav → fall back
+}
+// Fetch the published tab layout from Supabase and re-render when it changes (startup + 90s poll).
+function loadTabLayout(){
+  try{
+    const SB="https://lmlixmzmzpzgeggvywwb.supabase.co", K="sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
+    fetch(SB+"/rest/v1/app_layout?key=eq.itin_tabs&select=config",{headers:{apikey:K,Authorization:"Bearer "+K},cache:"no-store"})
+      .then(r=>r.ok?r.json():null).then(rows=>{
+        const cfg=rows&&rows[0]&&rows[0].config; const pub=cfg&&Array.isArray(cfg.published)?cfg.published:null;
+        const changed=JSON.stringify(pub)!==JSON.stringify(window.wmTabLayout||null);
+        window.wmTabLayout=pub;
+        if(changed&&typeof render==="function"){ try{render(true);}catch(e){} }
+      }).catch(function(){});
+  }catch(e){}
 }
 function tabAllowed(id){ return allowedTabs().some(tb=>tb.id===id); }
 // Basemap for every Leaflet map here. Vector (MapLibre + CARTO Voyager) when it is available,
@@ -4951,7 +4978,7 @@ function _render(noAnim){
       </div></header>
     <nav style="border-bottom:1px solid var(--line);background:var(--bg-2);position:sticky;top:0;z-index:5">
       <div class="scroll" style="max-width:1180px;margin:0 auto;padding:0 12px;display:flex;overflow-x:auto">
-        ${VTABS.map(tb=>`<button class="tabbtn ${S.tab===tb.id?'active':''}" data-action="setTab" data-id="${tb.id}">${t(tb.key)}</button>`).join("")}
+        ${VTABS.map(tb=>`<button class="tabbtn ${S.tab===tb.id?'active':''}" data-action="setTab" data-id="${tb.id}">${esc((tb._label&&(tb._label[S.lang]||tb._label.en))||t(tb.key))}</button>`).join("")}
       </div></nav>
     <main style="max-width:1180px;margin:0 auto;padding:22px 20px 70px">${active.fn()}</main>${notifPanelHTML()}`;
   if(aeId){const el=document.getElementById(aeId);if(el){el.focus();if(caret!=null&&el.setSelectionRange){try{el.setSelectionRange(caret,caret);}catch(e){}}}}
@@ -5677,7 +5704,7 @@ document.addEventListener("visibilitychange",function(){ if(!document.hidden) li
         if(wmForceLogoutCheck(rec, email)) return;
         if(rec&&rec.status==="disabled"){ showDenied(email); return; }
         if(rec&&appsFor(rec).indexOf(APP_KEY)<0){ showDenied(email); return; }
-        try{ window.wmRole=(rec&&rec.role)||""; window.wmUser=email; window.WM_VIEWER=(rec&&rec.role==="viewer"); window.wmItinTabs=(rec&&Array.isArray(rec.itin_tabs)&&rec.itin_tabs.length)?rec.itin_tabs:null; if(typeof render==="function"){try{render(true);}catch(e){}} }catch(e){}
+        try{ window.wmRole=(rec&&rec.role)||""; window.wmUser=email; window.WM_VIEWER=(rec&&rec.role==="viewer"); window.wmItinTabs=(rec&&Array.isArray(rec.itin_tabs)&&rec.itin_tabs.length)?rec.itin_tabs:null; try{loadTabLayout(); if(!window.__wmTabPoll) window.__wmTabPoll=setInterval(loadTabLayout,90000);}catch(e){} if(typeof render==="function"){try{render(true);}catch(e){}} }catch(e){}
         pass();
         try{ wmReportView(); }catch(e){}
       }).catch(function(){ pass(); });
