@@ -2508,7 +2508,9 @@ function coordinatorHTML(){
         <span style="font-size:11px;color:var(--text-dim)">${esc((rOpts.find(o=>o[0]===C.route)||rOpts[0])[2])}</span></div>`;
       body=feedWarn+tiles+clearBtn+note+coordOriginPicker()+coordPickPanel()+rPick+`<div class="coord-report">${clusters.map((cl,ix)=>coordAreaSectionHTML(cl,ix,!!q)).join("")}</div>`;
     } else {
-      body=feedWarn+tiles+coordOriginPicker()+coordPickPanel()+`<div class="coord-report">${shown.map(coordItemRow).join("")}</div>`;
+      // Default view: grouped by ASSIGNED CREW (reschedules stay in their own priority section on top).
+      const cnote=`<div style="font-size:12px;color:var(--text-dim);margin:2px 0 6px">${es?"Agrupados por cuadrilla asignada · toca un trabajo para asignar/programar (como en el Calendario).":"Grouped by assigned crew · tap a job to assign/schedule (like the Calendar)."}</div>`;
+      body=feedWarn+tiles+cnote+coordOriginPicker()+coordPickPanel()+`<div class="coord-report">${coordCrewGroupsHTML(shown)}</div>`;
     }
   }
   // 🗺 Schedule Nearest Crew — pending inspections ranked against live crew GPS.
@@ -2701,6 +2703,15 @@ function coordItemRow(it,i){ const es=S.lang==="es", m=coordBucketMeta(it.bucket
   const resched=it.cat==="reschedule";
   const reBadge=resched?`<span class="pill" style="background:#A855F7;color:#fff;font-size:9px;font-weight:800;flex-shrink:0">↻ ${es?"Reprogramar":"Reschedule"}</span>`:"";
   const leftCol=resched?"#A855F7":m.color;
+  // Reserved TIME BLOCKS so the coordinator reads the job's load/window at a glance. Services carry
+  // blocks (2h each) + the reserved window; installs show their day count.
+  let blkChip="";
+  if(it.kind==="service"&&it.job&&(it.job.blocks>0||it.job.hours>0)){
+    const w=String(it.job.blockWindow||"").trim();
+    blkChip=`<span class="pill" style="background:#0EA5E9;color:#06283a;font-size:9px;font-weight:800;flex-shrink:0">⏱ ${it.job.blocks} ${es?(it.job.blocks===1?"bloque":"bloques"):(it.job.blocks===1?"block":"blocks")} · ${it.job.hours}h${w?" · "+esc(w):""}</span>`;
+  } else if(it.kind==="install"&&it.job&&it.job.days){
+    blkChip=`<span class="pill" style="background:#2563EB;color:#fff;font-size:9px;font-weight:800;flex-shrink:0">⏱ ${it.job.days} ${es?(it.job.days===1?"día":"días"):(it.job.days===1?"day":"days")}</span>`;
+  }
   // For inspections the crew shown is who DID the install (send them back), so label it as such.
   const crew=it.crewLabel?(isInsp?`🔧 ${es?"Instaló":"Installed by"} ${esc(it.crewLabel)}`:`👷 ${esc(it.crewLabel)}`):(es?"Sin asignar":"Unassigned");
   const crewDim=it.crewLabel?"var(--text-dim)":"var(--warn)";
@@ -2714,8 +2725,47 @@ function coordItemRow(it,i){ const es=S.lang==="es", m=coordBucketMeta(it.bucket
     <span style="font-weight:800;color:var(--wh-orange);flex-shrink:0">${esc(it.num||"—")}</span>
     <span style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">${esc(it.name||"—")}</span>
     ${city?`<span style="color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px">📍 ${esc(city)}</span>`:""}
-    ${reBadge}${vip}${mspBadge}${resched?"":statusPill}
+    ${reBadge}${blkChip}${vip}${mspBadge}${resched?"":statusPill}
     <span style="color:${crewDim};margin-left:auto;font-size:12px;flex-shrink:0">${crew}</span></div>`;
+}
+// ── Group the default list by ASSIGNED CREW ──────────────────────────────────────────────────────
+// Reschedules keep their own priority section at the very top (the coordinator works those first);
+// every other field job (service + install) is grouped under its assigned crew, "Unassigned" last;
+// coordination + inspections trail in their own bucket sections. Tap any row → the same editor the
+// Calendar uses, to assign a crew/tech + schedule.
+function coordCrewSection(label, color, items, key){
+  const k="crewgrp:"+key;
+  const collapsed=!!(S.coord.collapsed&&S.coord.collapsed[k]);
+  const hdr=`<div data-action="coordToggle" data-bucket="${esc(k)}" style="display:flex;align-items:center;gap:9px;margin-top:14px;padding:9px 12px;cursor:pointer;border-radius:10px;background:var(--panel);border:1px solid var(--line);border-left:4px solid ${color};user-select:none">
+    <span style="font-size:13px;color:var(--text-dim);width:12px;flex-shrink:0">${collapsed?"▸":"▾"}</span>
+    <span style="font-weight:900;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(label)}</span>
+    <span style="margin-left:auto;flex-shrink:0"><span class="pill" style="background:${color};color:${textOn(color)};font-size:11px">${items.length}</span></span></div>`;
+  if(collapsed) return hdr;
+  return hdr+`<div style="border:1px solid var(--line);border-top:none;border-radius:0 0 10px 10px;overflow:hidden;margin-bottom:4px">${items.map((it,i)=>coordItemRow(it,i)).join("")}</div>`;
+}
+function coordCrewGroupsHTML(items){
+  const es=S.lang==="es", UN=es?"Sin asignar":"Unassigned";
+  const resched=items.filter(it=>it.cat==="reschedule");
+  const rest=items.filter(it=>it.cat!=="reschedule");
+  const field=rest.filter(it=>it.kind!=="coordination"&&it.kind!=="inspection");
+  const other=rest.filter(it=>it.kind==="coordination"||it.kind==="inspection");
+  let html="";
+  if(resched.length){
+    resched.sort((a,b)=>String((a.job&&a.job.date)||"").localeCompare(String((b.job&&b.job.date)||""))||String(a.name||"").localeCompare(String(b.name||"")));
+    html+=coordCrewSection("↻ "+(es?"Reprogramar — Prioridad":"Reschedule — Priority"), "#A855F7", resched, "_resched");
+  }
+  // service + install grouped by assigned crew (Unassigned last)
+  const groups=new Map();
+  field.forEach(it=>{ const key=(it.crewLabel&&String(it.crewLabel).trim())||UN; if(!groups.has(key))groups.set(key,[]); groups.get(key).push(it); });
+  [...groups.keys()].sort((a,b)=>{ const ua=(a===UN||/unassigned/i.test(a))?1:0, ub=(b===UN||/unassigned/i.test(b))?1:0; if(ua!==ub)return ua-ub; return a.localeCompare(b); }).forEach(k=>{
+    const its=groups.get(k).slice().sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")));
+    html+=coordCrewSection("👷 "+k, (k===UN?"var(--wh-grey)":teamColor(k)), its, "c-"+k.toLowerCase().replace(/[^a-z0-9]+/g,"-"));
+  });
+  // coordination + inspection keep their own bucket sections (not crew-assigned field work)
+  const byBucket=new Map();
+  other.forEach(it=>{ if(!byBucket.has(it.bucket))byBucket.set(it.bucket,[]); byBucket.get(it.bucket).push(it); });
+  ["coordination","inspection"].forEach(b=>{ if(byBucket.has(b)){ const meta=coordBucketMeta(b); const its=byBucket.get(b).slice().sort((x,y)=>String(x.name||"").localeCompare(String(y.name||""))); html+=coordCrewSection(meta.icon+" "+meta.label, meta.color, its, "b-"+b); } });
+  return html||`<div class="card" style="padding:28px;text-align:center;color:var(--text-dim)">${es?"Nada para mostrar":"Nothing to show"}</div>`;
 }
 // ── Coordinator "By Area" (proximity) view — cluster ready jobs geographically so a coordinator
 // can schedule a whole route in one trip. Reads coords from GEO_CACHE (populated by geocodeInto).
