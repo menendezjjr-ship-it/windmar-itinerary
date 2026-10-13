@@ -4825,20 +4825,50 @@ function initPinMap(elId, pins, mapVar, opts){
   setTimeout(function(){ try{m.invalidateSize();}catch(e){} },150);
 }
 // ── Coordinator "My route" — live map (base + numbered stops + straight-line route) ──────────────
-function coordInitRouteMap(){
-  if(typeof L==="undefined") return; const el=document.getElementById("coordRouteMap"); if(!el) return;
-  if(window._coordRouteMap){ try{window._coordRouteMap.remove();}catch(e){} window._coordRouteMap=null; }
+// render() rebuilds #root on EVERY (even background) refresh, so #coordRouteMap is a brand-new empty
+// div each time. The old code destroyed + recreated the whole Leaflet map on every render — tiles
+// reloaded and fitBounds re-centred, so the map "skipped"/jumped while the coordinator was using it.
+// Fix: keep ONE Leaflet map on our own PERSISTENT detached div; on each render just re-insert that div
+// into the fresh host and only redraw markers/route + refit when the route actually changed.
+function coordRouteSig(){
+  const RO=routeOrigin();
+  return [RO.lat,RO.lon].join(",")+"|"+coordPickedItems().filter(p=>p.lat!=null).map(p=>p.key+":"+p.lat+","+p.lon).join("|");
+}
+function coordRouteDraw(){
+  const m=window._coordRouteMap; if(!m) return;
+  if(window._coordRouteLayer){ try{ m.removeLayer(window._coordRouteLayer); }catch(e){} }
+  const g=L.layerGroup().addTo(m); window._coordRouteLayer=g;
   const RO=routeOrigin(), list=coordPickedItems().filter(p=>p.lat!=null);
-  const m=L.map(el,{zoomControl:true,attributionControl:false}).setView([RO.lat,RO.lon],9); window._coordRouteMap=m;
-  wmBaseLayer().addTo(m);
   const pts=[[RO.lat,RO.lon]];
-  L.marker([RO.lat,RO.lon],{icon:L.divIcon({className:"",html:'<div style="font-size:20px;transform:translate(-50%,-90%)">🏠</div>',iconSize:[0,0]})}).addTo(m).bindTooltip("🏠 "+esc(RO.name||"Base"),{direction:"top"});
+  L.marker([RO.lat,RO.lon],{icon:L.divIcon({className:"",html:'<div style="font-size:20px;transform:translate(-50%,-90%)">🏠</div>',iconSize:[0,0]})}).addTo(g).bindTooltip("🏠 "+esc(RO.name||"Base"),{direction:"top"});
   list.forEach((p,i)=>{ pts.push([p.lat,p.lon]);
-    L.marker([p.lat,p.lon],{icon:L.divIcon({className:"",html:'<div style="width:26px;height:26px;border-radius:50%;background:#F59E0B;color:#1a1a1a;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.55);font-weight:900;font-size:13px;display:flex;align-items:center;justify-content:center;transform:translate(-50%,-50%)">'+(i+1)+'</div>',iconSize:[0,0]})}).addTo(m)
+    L.marker([p.lat,p.lon],{icon:L.divIcon({className:"",html:'<div style="width:26px;height:26px;border-radius:50%;background:#F59E0B;color:#1a1a1a;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.55);font-weight:900;font-size:13px;display:flex;align-items:center;justify-content:center;transform:translate(-50%,-50%)">'+(i+1)+'</div>',iconSize:[0,0]})}).addTo(g)
       .bindTooltip((i+1)+". "+esc(p.num||"")+" "+esc(p.name||""),{direction:"top",offset:[0,-10]});
   });
-  if(list.length){ const line=[[RO.lat,RO.lon]].concat(list.map(p=>[p.lat,p.lon])).concat([[RO.lat,RO.lon]]); L.polyline(line,{color:"#F59E0B",weight:3,opacity:.85}).addTo(m); }
-  if(pts.length>1){ try{ m.fitBounds(pts,{padding:[40,40]}); }catch(e){} } else { m.setView(pts[0],11); }
+  if(list.length){ const line=[[RO.lat,RO.lon]].concat(list.map(p=>[p.lat,p.lon])).concat([[RO.lat,RO.lon]]); L.polyline(line,{color:"#F59E0B",weight:3,opacity:.85}).addTo(g); }
+  if(pts.length>1){ try{ m.fitBounds(pts,{padding:[40,40]}); }catch(e){} } else { try{ m.setView(pts[0],11); }catch(e){} }
+}
+function coordInitRouteMap(){
+  if(typeof L==="undefined") return;
+  const host=document.getElementById("coordRouteMap"); if(!host) return;
+  host.style.position="relative"; // our map container is position:absolute;inset:0 inside it
+  const sig=coordRouteSig();
+  // Map still alive? (its Leaflet container is our persistent div and wasn't torn down) → reuse it.
+  if(window._coordRouteMap && window._coordRouteMapEl && window._coordRouteMap._container===window._coordRouteMapEl){
+    if(window._coordRouteMapEl.parentNode!==host){ try{ host.innerHTML=""; }catch(e){} host.appendChild(window._coordRouteMapEl); }
+    try{ window._coordRouteMap.invalidateSize(); }catch(e){}
+    if(sig!==window._coordRouteSig){ coordRouteDraw(); window._coordRouteSig=sig; } // only on a real route change
+    return;
+  }
+  // First build (or rebuild after teardown): mount Leaflet ONCE on our own container, inside the host.
+  const el=document.createElement("div"); el.style.cssText="position:absolute;inset:0";
+  host.style.position="relative"; try{ host.innerHTML=""; }catch(e){} host.appendChild(el);
+  window._coordRouteMapEl=el;
+  const RO=routeOrigin();
+  const m=L.map(el,{zoomControl:true,attributionControl:false}).setView([RO.lat,RO.lon],9);
+  window._coordRouteMap=m; window._coordRouteLayer=null; window._coordRouteSig=null;
+  wmBaseLayer().addTo(m);
+  coordRouteDraw(); window._coordRouteSig=sig;
   setTimeout(function(){ try{m.invalidateSize();}catch(e){} },160);
 }
 // Move a picked stop before/after another (drag-to-reorder). Order lives in S.coord.pick.
