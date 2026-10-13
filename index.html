@@ -2296,11 +2296,11 @@ function loadServiceRec(recordId,force){ const rid=String(recordId||"").replace(
 }
 // Service_Ticket field metadata (Ticket_Status/Priority picklists discovered live). Loaded once.
 function loadServiceFields(){ const F=S.svc.fields; if(F.status==="loading"||F.status==="live") return;
-  S.svc.fields={status:"loading",map:F.map||{}};
+  S.svc.fields={status:"loading",map:F.map||{},tech:F.tech||[]};
   fetch("/api/zoho-fields?module=Service_Ticket",{cache:"no-store"}).then(r=>r.json()).then(j=>{
-    S.svc.fields=(j&&j.ok)?{status:"live",map:j.fields||{}}:{status:"error",map:{}};
+    S.svc.fields=(j&&j.ok)?{status:"live",map:j.fields||{},tech:(j.lookups&&j.lookups.Assigned_Technician)||[]}:{status:"error",map:{},tech:[]};
     if(["coordinator","calendar"].includes(S.tab)) render(true);
-  }).catch(()=>{ S.svc.fields={status:"error",map:{}}; if(["coordinator","calendar"].includes(S.tab)) render(true); });
+  }).catch(()=>{ S.svc.fields={status:"error",map:{},tech:[]}; if(["coordinator","calendar"].includes(S.tab)) render(true); });
 }
 // Non-destructive scope probes — gate the Save button / photo picker so no broken control ever ships.
 function loadSvcScope(){ const P=S.svc.scope; if(P.status==="loading"||P.status==="live") return;
@@ -2934,7 +2934,7 @@ const SERVICE_EDIT_FIELDS=[
   {k:"Priority",en:"Priority",es:"Prioridad"},
   {k:"Scheduled_Visit_1",en:"Scheduled Visit",es:"Visita Programada",dt:1},
   {k:"Type_of_Service",en:"Type of Service",es:"Tipo de Servicio",ro:1,multi:1},
-  {k:"Assigned_Technician",en:"Assigned Technician",es:"Técnico Asignado",ro:1,lookup:1},
+  {k:"Assigned_Technician",en:"Assigned Technician",es:"Técnico / Cuadrilla",lookup:1},
   {k:"Service_Description",en:"Service Description",es:"Descripción del Servicio",ta:1},
 ];
 // Zoho datetime "2026-06-25T09:00:00-04:00" → datetime-local value "2026-06-25T09:00".
@@ -2953,6 +2953,9 @@ function svcFieldInputHTML(fd){ const es=S.lang==="es", E=S.svc.edit, meta=(S.sv
   if(fd.ro||meta.read_only) return ro();
   if(fd.ta) return `<textarea id="${id}" data-sf="${fd.k}" rows="3" style="${base};resize:vertical;font-family:inherit;line-height:1.5">${esc(val)}</textarea>`;
   if(fd.dt) return `<input type="datetime-local" id="${id}" data-sf="${fd.k}" value="${esc(val)}" style="${base}"/>`;
+  if(fd.lookup){ const opts=(S.svc.fields.tech||[]); if(!opts.length) return ro(); // no tech options loaded → stay read-only
+    const cur=val==null?"":String(val), has=opts.some(o=>String(o.id)===cur), curName=(E._rec&&E._rec[fd.k]&&E._rec[fd.k].name)||"";
+    return `<select id="${id}" data-sf="${fd.k}" style="${base}"><option value="">— ${es?"Sin asignar":"Unassigned"} —</option>`+(cur&&!has?`<option value="${esc(cur)}" selected>${esc(curName||cur)}</option>`:"")+opts.map(o=>`<option value="${esc(o.id)}" ${cur===String(o.id)?"selected":""}>${esc(o.name)}</option>`).join("")+`</select>`; }
   const dt=meta.data_type||"";
   if(dt==="picklist"){ const opts=meta.picklist||[]; if(!opts.length) return ro();
     const cur=val==null?"":String(val); const has=opts.some(o=>String(o)===cur);
@@ -5267,7 +5270,7 @@ document.addEventListener("click",e=>{
       if(!rc||rc.status!=="live"||!rc.rec){ alert(es?"El ticket aún no está listo. Intenta de nuevo en un momento.":"Ticket isn't ready yet. Try again in a moment."); break; }
       loadServiceFields();
       const rec=rc.rec, form={};
-      SERVICE_EDIT_FIELDS.forEach(fd=>{ if(fd.ro) return; let v=rec[fd.k]; if(fd.dt) v=svcDTLocal(v); if(v==null) v=""; form[fd.k]=v; });
+      SERVICE_EDIT_FIELDS.forEach(fd=>{ if(fd.ro) return; let v=rec[fd.k]; if(fd.lookup) v=(v&&v.id)||""; else if(fd.dt) v=svcDTLocal(v); if(v==null) v=""; form[fd.k]=v; });
       S.svc.edit={rid,saving:false,err:"",form,orig:JSON.parse(JSON.stringify(form)),_rec:rec};
       S.svc.savedMsg=null; render(); break;
     }
@@ -5280,7 +5283,9 @@ document.addEventListener("click",e=>{
         let nv=E.form[fd.k], ov=E.orig[fd.k]; const cmpN=(nv==null?"":String(nv)), cmpO=(ov==null?"":String(ov)); if(cmpN===cmpO) return;
         let out=nv; if(fd.dt) out=svcDTZoho(nv); else if(nv==="") out=null;
         payload[fd.k]=out;
-        let disp=fd.dt?(nv||"(empty)"):(out==null||out===""?"(empty)":out);
+        let disp;
+        if(fd.lookup){ const t=(S.svc.fields.tech||[]).find(o=>String(o.id)===String(out)); disp=out?(t?t.name:out):"(empty)"; }
+        else disp=fd.dt?(nv||"(empty)"):(out==null||out===""?"(empty)":out);
         labels.push("• "+(es?fd.es:fd.en)+": "+disp);
       });
       const keys=Object.keys(payload);
@@ -5291,7 +5296,9 @@ document.addEventListener("click",e=>{
       fetch("/api/zoho-update",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({recordId:rid,module:"Service_Ticket",fields:payload})}).then(r=>r.json()).then(j=>{
         const cur=S.svc.edit; if(!cur||cur.rid!==rid) return;
         if(j&&j.ok){ // merge the saved values into the cached rec (no token-refreshing re-fetch)
-          const rc=S.svc.rec[rid]; if(rc&&rc.rec){ Object.keys(payload).forEach(k=>{ rc.rec[k]=payload[k]; }); }
+          const rc=S.svc.rec[rid]; if(rc&&rc.rec){ Object.keys(payload).forEach(k=>{
+            if(k==="Assigned_Technician"){ const idv=payload[k]; const t=(S.svc.fields.tech||[]).find(o=>String(o.id)===String(idv)); rc.rec[k]=idv?{id:String(idv),name:(t&&t.name)||""}:null; }
+            else rc.rec[k]=payload[k]; }); }
           S.svc.edit=null; S.svc.savedMsg={rid,n,t:Date.now()}; render(); }
         else { cur.saving=false; cur.err=(j&&(j.error||j.message))||(es?"No se pudo guardar.":"Save failed."); render(); }
       }).catch(e=>{ const cur=S.svc.edit; if(cur&&cur.rid===rid){ cur.saving=false; cur.err=String(e&&e.message||e); render(); } });
