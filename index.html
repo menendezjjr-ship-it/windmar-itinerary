@@ -1954,6 +1954,17 @@ function attentionHTML(){
     var b=etaByCrew[c]||(etaByCrew[c]={job:null,hq:null});
     if(/(→|->)\s*(hq|base)|\bto hq\b|\bback to (hq|base)\b/i.test(e.status||"")){ if(!b.hq)b.hq=e; } else if(!b.job) b.job=e; // feed is newest-first
   });
+  // "Arrived on Site <time>" — the other half of the ETA, sent by the Field HUB job panel. It gets
+  // its own chip beside the ETA so a coordinator reads "said 12:30 / here at 12:41" in one line.
+  // The rows stay in the updates feed below as well: nothing that used to be visible disappears.
+  const isArrived=function(e){ return /^arrived on site\b/i.test((e&&e.status)||""); };
+  const arrivedByCrew={};
+  allFeed.filter(function(e){return isArrived(e)&&isToday(e)&&!isVoided(e);}).forEach(function(e){
+    var c=dashCrew(e); if(/^📐/.test(c)) return;
+    if(!crewBuckets[c]) crewBuckets[c]=[];
+    if(!arrivedByCrew[c]) arrivedByCrew[c]=e; // feed is newest-first
+  });
+  const arrivedTime=function(s){ return String(s||"").replace(/^\s*arrived on site\s*/i,"").trim()||String(s||""); };
   const etaTime=function(s){ return String(s||"").replace(/^\s*eta\s*(→|->)?\s*(hq|base)?\s*/i,"").trim()||String(s||""); };
   const crewOrder=Object.keys(crewBuckets).filter(function(c){return !DASH_HIDE.test(c);}).sort(function(a,b){
     var la=crewBuckets[a][0], lb=crewBuckets[b][0];
@@ -1973,6 +1984,8 @@ function attentionHTML(){
       ?`<span class="pill" style="background:rgba(6,182,212,.14);border:1px solid rgba(6,182,212,.45);color:#67e8f9;font-size:10.5px">🕒 ${esc(etaTime(eb.job.status))}</span><span style="font-size:11px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(evLine(eb.job))}</span>`
       :`<span class="pill" style="background:transparent;border:1px solid var(--line);color:var(--text-dim);font-size:10.5px;font-weight:600">${es?'sin ETA hoy':'no ETA today'}</span>`;
     var hqChip=eb.hq?`<span class="pill" style="background:rgba(168,85,247,.14);border:1px solid rgba(168,85,247,.45);color:#d8b4fe;font-size:10.5px">🏠 HQ ${esc(etaTime(eb.hq.status))}</span>`:"";
+    var ab=arrivedByCrew[cname];
+    var arrChip=ab?`<span class="pill" style="background:rgba(34,197,94,.14);border:1px solid rgba(34,197,94,.45);color:#86efac;font-size:10.5px" title="${esc(evLine(ab))}">📍 ${es?'En sitio':'On site'} ${esc(arrivedTime(ab.status))}</span>`:"";
     var box;
     if(!latest){
       box=`<div style="margin:0 11px 11px;padding:14px 11px;text-align:center;color:var(--text-dim);font-size:12px;background:var(--bg-2);border:1px dashed var(--line);border-radius:9px">${es?'Sin actualizaciones recientes':'No recent updates'}</div>`;
@@ -2012,7 +2025,7 @@ function attentionHTML(){
           ${pend?`<span class="pill prioPulse" style="background:#ef4444;font-size:9px">⚠ ${pend}</span>`:""}
           <span class="pill" style="margin-left:auto;background:${ccol};color:${textOn(ccol)};font-size:10px">${evs.length}</span></div>
         ${roster?`<div style="font-size:11px;color:var(--text-dim);font-weight:600;margin:2px 0 0 17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(roster)}</div>`:""}
-        <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:7px">${etaChip}${hqChip}</div>
+        <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:7px">${etaChip}${arrChip}${hqChip}</div>
       </div>
       ${box}
       ${evs.length?`<details ${S.crewOpen[cname]?"open":""} style="border-top:1px solid var(--line);margin-top:auto"><summary data-action="crewToggle" data-id="${esc(cname)}" style="list-style:none;cursor:pointer;padding:9px 13px;font-size:11.5px;font-weight:800;color:var(--text-dim)">${S.crewOpen[cname]?"▴":"▾"} ${es?'Actualizaciones':'Updates'} (${evs.length})</summary><div style="padding:0 13px 12px">${tl}</div></details>`:""}
