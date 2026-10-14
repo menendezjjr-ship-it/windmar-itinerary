@@ -20,14 +20,14 @@ const ALLOWED_INSTALL = new Set([
   "Customer_Access_Granted", "Drone_No_Fly_Zone", "Language_Preference",
 ]);
 // Service_Ticket (CustomModule40) coordinator-safe fields. Ticket_Status is the "Stage".
-// Type_of_Service (multiselect) + Assigned_Technician (lookup/user) are intentionally NOT
-// writable here — they are shown read-only in the editor to avoid clobbering multi-value /
-// lookup data with an invalid single value.
+// Assigned_Technician is the crew/tech lookup — writable so a coordinator can ASSIGN a service
+// from here (options come from real ticket values, so the id is always valid). Type_of_Service
+// (multiselect) stays read-only to avoid clobbering multi-value data with a single value.
 const ALLOWED_SERVICE = new Set([
-  "Ticket_Status", "Priority", "Service_Description", "Scheduled_Visit_1",
+  "Ticket_Status", "Priority", "Service_Description", "Scheduled_Visit_1", "Assigned_Technician",
 ]);
 const ALLOWED_BY_MODULE = { Installation: ALLOWED_INSTALL, Service_Ticket: ALLOWED_SERVICE };
-const LOOKUP_FIELDS = new Set(["Installation_Team"]); // sent as { id } to Zoho
+const LOOKUP_FIELDS = new Set(["Installation_Team", "Assigned_Technician"]); // sent as { id } to Zoho
 
 let cachedToken = null, tokenExpiry = 0;
 function hasCreds() { return !!(process.env.ZOHO_CLIENT_ID && process.env.ZOHO_CLIENT_SECRET && process.env.ZOHO_REFRESH_TOKEN); }

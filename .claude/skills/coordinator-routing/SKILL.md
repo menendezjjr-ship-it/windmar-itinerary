@@ -59,7 +59,15 @@ Rendered into `<div id="coordRouteMap">` inside `coordPickPanel()`. Draws, with 
 - `fitBounds` over all points, then `invalidateSize()` (needed because the panel is laid out after
   the map mounts).
 
-It is re-created on every render from `_render()`:
+**Do NOT destroy + recreate the map each render.** `render()` rebuilds `#root` on every background
+refresh (loadCoordReady ~30s, geocoding ticks, availability `loadOpsCal`), so a destroy+recreate made
+the map reload tiles and `fitBounds`-reset — it visibly "skipped"/jumped while in use (fixed
+2026-10-13, commit 5c6e768). The map now lives on ONE **persistent detached div** `window._coordRouteMapEl`:
+`coordInitRouteMap` re-inserts that div into the fresh `#coordRouteMap` host and `invalidateSize`s;
+`coordRouteDraw` redraws markers/polyline + `fitBounds` ONLY when `coordRouteSig()` (origin + ordered
+geocoded stop coords) changed, so pan/zoom survives background refreshes. Keep this pattern.
+
+It is re-invoked on every render from `_render()`:
 ```js
 if (S.tab==="coordinator" && S.coord.pick && S.coord.pick.length){
   coordDragSetup();                               // one-time pointer handlers

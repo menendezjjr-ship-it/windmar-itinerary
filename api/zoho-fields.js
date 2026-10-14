@@ -93,22 +93,37 @@ async function fetchLookup(module, token) {
 // IS granted). Fills Ticket_Status / Priority / Type_of_Service with the distinct values that
 // actually occur — guaranteeing only-valid options for the Stage/Priority dropdowns without the
 // settings.fields scope. Never throws (returns baseline unchanged on error).
-async function discoverServicePicklists(fields, token) {
+async function discoverServicePicklists(fields, lookups, token) {
   try {
-    const flds = "Ticket_Status,Priority,Type_of_Service";
-    const r = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/Service_Ticket?fields=${encodeURIComponent(flds)}&per_page=200&page=1`);
-    if (r.status === 204 || !r.ok) return false;
-    const rows = (await r.json()).data || [];
-    const st = new Set(), pr = new Set(), tos = new Set();
+    // Sample 400 recent tickets (2 pages) so the Assigned_Technician option set covers every active
+    // crew/tech, not just the latest 200. Each discovered {id,name} is a REAL lookup value → valid write.
+    const flds = "Ticket_Status,Priority,Type_of_Service,Assigned_Technician";
+    const rows = [];
+    for (let page = 1; page <= 2; page++) {
+      const r = await zohoFetch(`${API_DOMAIN}/crm/${API_VERSION}/Service_Ticket?fields=${encodeURIComponent(flds)}&per_page=200&page=${page}`);
+      if (r.status === 204 || !r.ok) break;
+      const data = (await r.json());
+      rows.push(...(data.data || []));
+      if (!(data.info && data.info.more_records)) break;
+    }
+    if (!rows.length) return false;
+    const st = new Set(), pr = new Set(), tos = new Set(), tech = new Map();
     for (const x of rows) {
       if (x.Ticket_Status) st.add(String(x.Ticket_Status).trim());
       if (x.Priority) pr.add(String(x.Priority).trim());
       const tv = x.Type_of_Service;
       (Array.isArray(tv) ? tv : [tv]).forEach((v) => { if (v) tos.add(String(v).trim()); });
+      const at = x.Assigned_Technician;
+      if (at && at.id && at.name) tech.set(String(at.id), String(at.name).trim());
     }
     if (st.size && fields.Ticket_Status) fields.Ticket_Status.picklist = [...st].sort();
     if (pr.size && fields.Priority) fields.Priority.picklist = [...pr].sort();
     if (tos.size && fields.Type_of_Service) fields.Type_of_Service.picklist = [...tos].sort();
+    if (tech.size) {
+      // Make the crew/tech lookup ASSIGNABLE from the editor with a dropdown of real, valid techs.
+      lookups.Assigned_Technician = [...tech.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+      if (fields.Assigned_Technician) fields.Assigned_Technician.read_only = false;
+    }
     return true;
   } catch (e) { return false; }
 }
@@ -143,14 +158,18 @@ export default async function handler(req, res) {
     const token = await getAccessToken();
     // Deep-copy the baseline so the cached module object is never mutated across requests.
     const fields = JSON.parse(JSON.stringify(base));
-    // Service_Ticket: settings/fields is scope-blocked, so discover picklist values from records.
-    if (module === "Service_Ticket") await discoverServicePicklists(fields, token);
-    const live = await tryLiveOverride(module, fields, token);
     const lookups = {};
+    // Service_Ticket: settings/fields is scope-blocked, so discover picklist values + the
+    // Assigned_Technician option set from records (and make that lookup assignable).
+    if (module === "Service_Ticket") await discoverServicePicklists(fields, lookups, token);
+    const live = await tryLiveOverride(module, fields, token);
+    // Keep Assigned_Technician assignable even if a live override re-locked it (it is editable in Zoho).
+    if (module === "Service_Ticket" && lookups.Assigned_Technician && lookups.Assigned_Technician.length && fields.Assigned_Technician) fields.Assigned_Technician.read_only = false;
     for (const k of Object.keys(fields)) {
-      if (fields[k].data_type === "lookup") {
-        const lm = fields[k].lookup_module || k;
-        lookups[k] = await fetchLookup(lm, token);
+      // Assigned_Technician has no standalone lookup module (its ids span crews + techs + subs), so its
+      // options come from discovery above — don't fetch a nonexistent module for it.
+      if (fields[k].data_type === "lookup" && lookups[k] == null) {
+        lookups[k] = await fetchLookup(fields[k].lookup_module || k, token);
       }
     }
     return res.status(200).json({ ok: true, module, source: live ? "live" : "baseline", fields, lookups });

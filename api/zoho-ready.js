@@ -202,6 +202,7 @@ function mapReadyInstall(r) {
     cat: "needs_schedule",
     stage: (r.Stage || "").trim(),
     msp,
+    days: (Number(r.Number_of_Days_Needed) || Number(r.Number_of_Days_Planned_for_Install_default_2) || 0) || null, // install duration (day count) for the row badge
     phone: "",
     geo: null,
     scope: scopeBits.join(" · ") || "Installation",

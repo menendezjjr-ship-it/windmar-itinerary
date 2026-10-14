@@ -1090,7 +1090,7 @@ async function loadOpsCal(silent){
   let from,to;
   // Pull `from` back 20 days beyond the visible window so multi-day installs that STARTED
   // before the window (max span 21d) but continue INTO it are still returned by Zoho.
-  if(S.cal.view==="week"||S.cal.view==="grid"||S.cal.view==="map"){ const ws=S.cal.weekStartISO?new Date(S.cal.weekStartISO+"T00:00:00"):calStartOfWeek(new Date()); from=calYMD(calAddDays(ws,-20)); to=calYMD(calAddDays(ws,6)); }
+  if(S.cal.view==="week"||S.cal.view==="grid"||S.cal.view==="map"){ const ws=S.cal.weekStartISO?new Date(S.cal.weekStartISO+"T00:00:00"):calStartOfWeek(new Date()); from=calYMD(calAddDays(ws,-20)); to=calYMD(calAddDays(ws,41)); } // +41d forward so the Coordinator's crew-availability week nav has real data (calendar still filters display to the shown week)
   else { from=calYMD(new Date(S.cal.y,S.cal.m-1,1-20)); const last=new Date(S.cal.y,S.cal.m,0).getDate(); to=S.cal.y+"-"+String(S.cal.m).padStart(2,"0")+"-"+String(last).padStart(2,"0"); }
   try{
     const j=await wmApiJson("/api/zoho-jobs?from="+from+"&to="+to);
@@ -1304,9 +1304,22 @@ function crewAvailStrip(records, gDays, today, opts){
   const totalFree=teams.reduce((s,t)=>s+freeCount(t),0);
   const open=opts.open!==undefined?opts.open:(S.cal.availOpen!==false); // default open
   const toggleAction=opts.toggleAction||"calAvailToggle";
-  const head=`<div data-action="${toggleAction}" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;user-select:none">
-    <span style="font-size:15px">🟢</span><b style="font-size:13px">${es?"Disponibilidad de cuadrillas · esta semana":"Crew availability · this week"}</b>
+  // Title/nav: show "this week" when the shown week contains today, otherwise the week's date range.
+  const M=calM(), inThisWeek=isoDays.indexOf(todayIso)>=0;
+  const rangeLabel=`${M[gDays[0].getMonth()].slice(0,3)} ${gDays[0].getDate()} – ${gDays[6].getMonth()!==gDays[0].getMonth()?M[gDays[6].getMonth()].slice(0,3)+" ":""}${gDays[6].getDate()}`;
+  const titleSuffix=inThisWeek?(es?"esta semana":"this week"):rangeLabel;
+  // Week nav (Coordinator panel only — the Calendar has its own week controls). Buttons carry their own
+  // data-action so the click delegation (closest) fires them, not the collapse toggle.
+  const nav=opts.nav?`<span data-action="coordAvailWk" data-id="none" style="display:inline-flex;align-items:center;gap:3px;margin-left:4px">
+      <button class="btn3d sm ghost" data-action="coordAvailWk" data-id="prev" title="${es?'Semana anterior':'Previous week'}" style="font-size:11px;padding:3px 8px;line-height:1">◀</button>
+      <span style="font-size:11px;color:var(--text-dim);min-width:86px;text-align:center">${esc(rangeLabel)}</span>
+      <button class="btn3d sm ghost" data-action="coordAvailWk" data-id="next" title="${es?'Semana siguiente':'Next week'}" style="font-size:11px;padding:3px 8px;line-height:1">▶</button>
+      ${inThisWeek?"":`<button class="btn3d sm" data-action="coordAvailWk" data-id="today" style="font-size:10.5px;padding:3px 9px;line-height:1">${es?"Hoy":"Today"}</button>`}
+    </span>`:"";
+  const head=`<div data-action="${toggleAction}" style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;user-select:none;flex-wrap:wrap">
+    <span style="font-size:15px">🟢</span><b style="font-size:13px">${es?"Disponibilidad de cuadrillas · ":"Crew availability · "}${esc(titleSuffix)}</b>
     <span class="pill" style="background:#16A34A;color:#07230f;font-size:10.5px;font-weight:800">${totalFree} ${es?"días libres":"open days"}</span>
+    ${nav}
     <span style="margin-left:auto;color:var(--text-dim);font-size:12px">${open?"▾":"▸"}</span></div>`;
   if(!open) return `<div class="card" style="border-radius:12px;margin-bottom:12px;overflow:hidden">${head}</div>`;
   const cols="150px repeat(7,minmax(74px,1fr))";
@@ -2309,11 +2322,11 @@ function loadServiceRec(recordId,force){ const rid=String(recordId||"").replace(
 }
 // Service_Ticket field metadata (Ticket_Status/Priority picklists discovered live). Loaded once.
 function loadServiceFields(){ const F=S.svc.fields; if(F.status==="loading"||F.status==="live") return;
-  S.svc.fields={status:"loading",map:F.map||{}};
+  S.svc.fields={status:"loading",map:F.map||{},tech:F.tech||[]};
   fetch("/api/zoho-fields?module=Service_Ticket",{cache:"no-store"}).then(r=>r.json()).then(j=>{
-    S.svc.fields=(j&&j.ok)?{status:"live",map:j.fields||{}}:{status:"error",map:{}};
+    S.svc.fields=(j&&j.ok)?{status:"live",map:j.fields||{},tech:(j.lookups&&j.lookups.Assigned_Technician)||[]}:{status:"error",map:{},tech:[]};
     if(["coordinator","calendar"].includes(S.tab)) render(true);
-  }).catch(()=>{ S.svc.fields={status:"error",map:{}}; if(["coordinator","calendar"].includes(S.tab)) render(true); });
+  }).catch(()=>{ S.svc.fields={status:"error",map:{},tech:[]}; if(["coordinator","calendar"].includes(S.tab)) render(true); });
 }
 // Non-destructive scope probes — gate the Save button / photo picker so no broken control ever ships.
 function loadSvcScope(){ const P=S.svc.scope; if(P.status==="loading"||P.status==="live") return;
@@ -2521,7 +2534,9 @@ function coordinatorHTML(){
         <span style="font-size:11px;color:var(--text-dim)">${esc((rOpts.find(o=>o[0]===C.route)||rOpts[0])[2])}</span></div>`;
       body=feedWarn+tiles+clearBtn+note+coordOriginPicker()+coordPickPanel()+rPick+`<div class="coord-report">${clusters.map((cl,ix)=>coordAreaSectionHTML(cl,ix,!!q)).join("")}</div>`;
     } else {
-      body=feedWarn+tiles+coordOriginPicker()+coordPickPanel()+`<div class="coord-report">${shown.map(coordItemRow).join("")}</div>`;
+      // Default view: grouped by ASSIGNED CREW (reschedules stay in their own priority section on top).
+      const cnote=`<div style="font-size:12px;color:var(--text-dim);margin:2px 0 6px">${es?"Agrupados por cuadrilla asignada · toca un trabajo para asignar/programar (como en el Calendario).":"Grouped by assigned crew · tap a job to assign/schedule (like the Calendar)."}</div>`;
+      body=feedWarn+tiles+cnote+coordOriginPicker()+coordPickPanel()+`<div class="coord-report">${coordCrewGroupsHTML(shown)}</div>`;
     }
   }
   // 🗺 Schedule Nearest Crew — pending inspections ranked against live crew GPS.
@@ -2546,8 +2561,8 @@ function coordinatorHTML(){
   // sees who is open this week right next to what is ready to schedule. Uses the CURRENT week and the
   // scheduled jobs in S.cal.records (loaded on tab-switch). Own toggle state so it is independent of
   // the Calendar's.
-  const _avT=new Date(), _avWs=calStartOfWeek(_avT); const _avDays=[]; for(let i=0;i<7;i++)_avDays.push(calAddDays(_avWs,i));
-  const coordAvail=crewAvailStrip(S.cal.records||[], _avDays, _avT, {open:S.coord.availOpen!==false, toggleAction:"coordAvailToggle", emptyNote:true});
+  const _avT=new Date(), _avWs=calAddDays(calStartOfWeek(_avT), (S.coord.availWk||0)*7); const _avDays=[]; for(let i=0;i<7;i++)_avDays.push(calAddDays(_avWs,i));
+  const coordAvail=crewAvailStrip(S.cal.records||[], _avDays, _avT, {open:S.coord.availOpen!==false, toggleAction:"coordAvailToggle", emptyNote:true, nav:true});
   return `<div class="fade">${head}${dispToggle}${dispPanel}${coordTrNote}${coordAvail}${body}${C.selected?coordDetailModal():""}</div>`;
 }
 // One report section: a clickable collapsible header row (caret + icon + name + count) over compact one-line rows.
@@ -2714,6 +2729,15 @@ function coordItemRow(it,i){ const es=S.lang==="es", m=coordBucketMeta(it.bucket
   const resched=it.cat==="reschedule";
   const reBadge=resched?`<span class="pill" style="background:#A855F7;color:#fff;font-size:9px;font-weight:800;flex-shrink:0">↻ ${es?"Reprogramar":"Reschedule"}</span>`:"";
   const leftCol=resched?"#A855F7":m.color;
+  // Reserved TIME BLOCKS so the coordinator reads the job's load/window at a glance. Services carry
+  // blocks (2h each) + the reserved window; installs show their day count.
+  let blkChip="";
+  if(it.kind==="service"&&it.job&&(it.job.blocks>0||it.job.hours>0)){
+    const w=String(it.job.blockWindow||"").trim();
+    blkChip=`<span class="pill" style="background:#0EA5E9;color:#06283a;font-size:9px;font-weight:800;flex-shrink:0">⏱ ${it.job.blocks} ${es?(it.job.blocks===1?"bloque":"bloques"):(it.job.blocks===1?"block":"blocks")} · ${it.job.hours}h${w?" · "+esc(w):""}</span>`;
+  } else if(it.kind==="install"&&it.job&&it.job.days){
+    blkChip=`<span class="pill" style="background:#2563EB;color:#fff;font-size:9px;font-weight:800;flex-shrink:0">⏱ ${it.job.days} ${es?(it.job.days===1?"día":"días"):(it.job.days===1?"day":"days")}</span>`;
+  }
   // For inspections the crew shown is who DID the install (send them back), so label it as such.
   const crew=it.crewLabel?(isInsp?`🔧 ${es?"Instaló":"Installed by"} ${esc(it.crewLabel)}`:`👷 ${esc(it.crewLabel)}`):(es?"Sin asignar":"Unassigned");
   const crewDim=it.crewLabel?"var(--text-dim)":"var(--warn)";
@@ -2727,8 +2751,47 @@ function coordItemRow(it,i){ const es=S.lang==="es", m=coordBucketMeta(it.bucket
     <span style="font-weight:800;color:var(--wh-orange);flex-shrink:0">${esc(it.num||"—")}</span>
     <span style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px">${esc(it.name||"—")}</span>
     ${city?`<span style="color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px">📍 ${esc(city)}</span>`:""}
-    ${reBadge}${vip}${mspBadge}${resched?"":statusPill}
+    ${reBadge}${blkChip}${vip}${mspBadge}${resched?"":statusPill}
     <span style="color:${crewDim};margin-left:auto;font-size:12px;flex-shrink:0">${crew}</span></div>`;
+}
+// ── Group the default list by ASSIGNED CREW ──────────────────────────────────────────────────────
+// Reschedules keep their own priority section at the very top (the coordinator works those first);
+// every other field job (service + install) is grouped under its assigned crew, "Unassigned" last;
+// coordination + inspections trail in their own bucket sections. Tap any row → the same editor the
+// Calendar uses, to assign a crew/tech + schedule.
+function coordCrewSection(label, color, items, key){
+  const k="crewgrp:"+key;
+  const collapsed=!!(S.coord.collapsed&&S.coord.collapsed[k]);
+  const hdr=`<div data-action="coordToggle" data-bucket="${esc(k)}" style="display:flex;align-items:center;gap:9px;margin-top:14px;padding:9px 12px;cursor:pointer;border-radius:10px;background:var(--panel);border:1px solid var(--line);border-left:4px solid ${color};user-select:none">
+    <span style="font-size:13px;color:var(--text-dim);width:12px;flex-shrink:0">${collapsed?"▸":"▾"}</span>
+    <span style="font-weight:900;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(label)}</span>
+    <span style="margin-left:auto;flex-shrink:0"><span class="pill" style="background:${color};color:${textOn(color)};font-size:11px">${items.length}</span></span></div>`;
+  if(collapsed) return hdr;
+  return hdr+`<div style="border:1px solid var(--line);border-top:none;border-radius:0 0 10px 10px;overflow:hidden;margin-bottom:4px">${items.map((it,i)=>coordItemRow(it,i)).join("")}</div>`;
+}
+function coordCrewGroupsHTML(items){
+  const es=S.lang==="es", UN=es?"Sin asignar":"Unassigned";
+  const resched=items.filter(it=>it.cat==="reschedule");
+  const rest=items.filter(it=>it.cat!=="reschedule");
+  const field=rest.filter(it=>it.kind!=="coordination"&&it.kind!=="inspection");
+  const other=rest.filter(it=>it.kind==="coordination"||it.kind==="inspection");
+  let html="";
+  if(resched.length){
+    resched.sort((a,b)=>String((a.job&&a.job.date)||"").localeCompare(String((b.job&&b.job.date)||""))||String(a.name||"").localeCompare(String(b.name||"")));
+    html+=coordCrewSection("↻ "+(es?"Reprogramar — Prioridad":"Reschedule — Priority"), "#A855F7", resched, "_resched");
+  }
+  // service + install grouped by assigned crew (Unassigned last)
+  const groups=new Map();
+  field.forEach(it=>{ const key=(it.crewLabel&&String(it.crewLabel).trim())||UN; if(!groups.has(key))groups.set(key,[]); groups.get(key).push(it); });
+  [...groups.keys()].sort((a,b)=>{ const ua=(a===UN||/unassigned/i.test(a))?1:0, ub=(b===UN||/unassigned/i.test(b))?1:0; if(ua!==ub)return ua-ub; return a.localeCompare(b); }).forEach(k=>{
+    const its=groups.get(k).slice().sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")));
+    html+=coordCrewSection("👷 "+k, (k===UN?"var(--wh-grey)":teamColor(k)), its, "c-"+k.toLowerCase().replace(/[^a-z0-9]+/g,"-"));
+  });
+  // coordination + inspection keep their own bucket sections (not crew-assigned field work)
+  const byBucket=new Map();
+  other.forEach(it=>{ if(!byBucket.has(it.bucket))byBucket.set(it.bucket,[]); byBucket.get(it.bucket).push(it); });
+  ["coordination","inspection"].forEach(b=>{ if(byBucket.has(b)){ const meta=coordBucketMeta(b); const its=byBucket.get(b).slice().sort((x,y)=>String(x.name||"").localeCompare(String(y.name||""))); html+=coordCrewSection(meta.icon+" "+meta.label, meta.color, its, "b-"+b); } });
+  return html||`<div class="card" style="padding:28px;text-align:center;color:var(--text-dim)">${es?"Nada para mostrar":"Nothing to show"}</div>`;
 }
 // ── Coordinator "By Area" (proximity) view — cluster ready jobs geographically so a coordinator
 // can schedule a whole route in one trip. Reads coords from GEO_CACHE (populated by geocodeInto).
@@ -2897,7 +2960,7 @@ const SERVICE_EDIT_FIELDS=[
   {k:"Priority",en:"Priority",es:"Prioridad"},
   {k:"Scheduled_Visit_1",en:"Scheduled Visit",es:"Visita Programada",dt:1},
   {k:"Type_of_Service",en:"Type of Service",es:"Tipo de Servicio",ro:1,multi:1},
-  {k:"Assigned_Technician",en:"Assigned Technician",es:"Técnico Asignado",ro:1,lookup:1},
+  {k:"Assigned_Technician",en:"Assigned Technician",es:"Técnico / Cuadrilla",lookup:1},
   {k:"Service_Description",en:"Service Description",es:"Descripción del Servicio",ta:1},
 ];
 // Zoho datetime "2026-06-25T09:00:00-04:00" → datetime-local value "2026-06-25T09:00".
@@ -2916,6 +2979,9 @@ function svcFieldInputHTML(fd){ const es=S.lang==="es", E=S.svc.edit, meta=(S.sv
   if(fd.ro||meta.read_only) return ro();
   if(fd.ta) return `<textarea id="${id}" data-sf="${fd.k}" rows="3" style="${base};resize:vertical;font-family:inherit;line-height:1.5">${esc(val)}</textarea>`;
   if(fd.dt) return `<input type="datetime-local" id="${id}" data-sf="${fd.k}" value="${esc(val)}" style="${base}"/>`;
+  if(fd.lookup){ const opts=(S.svc.fields.tech||[]); if(!opts.length) return ro(); // no tech options loaded → stay read-only
+    const cur=val==null?"":String(val), has=opts.some(o=>String(o.id)===cur), curName=(E._rec&&E._rec[fd.k]&&E._rec[fd.k].name)||"";
+    return `<select id="${id}" data-sf="${fd.k}" style="${base}"><option value="">— ${es?"Sin asignar":"Unassigned"} —</option>`+(cur&&!has?`<option value="${esc(cur)}" selected>${esc(curName||cur)}</option>`:"")+opts.map(o=>`<option value="${esc(o.id)}" ${cur===String(o.id)?"selected":""}>${esc(o.name)}</option>`).join("")+`</select>`; }
   const dt=meta.data_type||"";
   if(dt==="picklist"){ const opts=meta.picklist||[]; if(!opts.length) return ro();
     const cur=val==null?"":String(val); const has=opts.some(o=>String(o)===cur);
@@ -4666,15 +4732,42 @@ const TABS=[
    failure must never lock someone out of the app. */
 const USER_TABS={
 };
+// GLOBAL tab layout — admin edits it in the Field HUB "Layout" panel and publishes to
+// app_layout.itin_tabs; it reorders, hides and renames the top tabs, applied BEFORE the per-user
+// access filter. window.wmTabLayout = the published array [{id,hidden,label:{en,es,pt}}]. Fail-open:
+// if applying it would blank the nav, fall back to the full TABS.
+function applyTabLayout(base){
+  const cfg=Array.isArray(window.wmTabLayout)?window.wmTabLayout:null;
+  if(!cfg||!cfg.length) return base.map(tb=>Object.assign({},tb));
+  const byId=Object.create(null); base.forEach(tb=>{byId[tb.id]=tb;});
+  const out=[], seen=Object.create(null);
+  cfg.forEach(it=>{ if(!it||!it.id) return; const tb=byId[it.id]; if(!tb) return; seen[it.id]=1; if(it.hidden) return; out.push(Object.assign({},tb,{_label:it.label})); });
+  base.forEach(tb=>{ if(!seen[tb.id]) out.push(Object.assign({},tb)); }); // a new tab not yet in the config still shows
+  return out.length?out:base.map(tb=>Object.assign({},tb));
+}
 function allowedTabs(){
+  const laid=applyTabLayout(TABS); // global reorder / hide / rename first
   // Primary source: per-user itin_tabs set from the Field HUB Admin panel (app_access.itin_tabs,
   // captured into window.wmItinTabs by the gate). Legacy fallback: the hardcoded USER_TABS map.
   let ids=(Array.isArray(window.wmItinTabs)&&window.wmItinTabs.length)?window.wmItinTabs:null;
   if(!ids){ const key=String(window.wmUser||"").trim().toLowerCase(); ids=Object.prototype.hasOwnProperty.call(USER_TABS,key)?USER_TABS[key]:null; } // own keys only, so "constructor"/"toString" can't match
-  if(!Array.isArray(ids)||!ids.length) return TABS;
+  if(!Array.isArray(ids)||!ids.length) return laid;
   const ok=Object.create(null); ids.forEach(x=>{ok[String(x).trim().toLowerCase()]=1;});
-  const out=TABS.filter(tb=>ok[tb.id]);
-  return out.length?out:TABS; // an all-unknown list would blank the nav → fall back to all
+  const out=laid.filter(tb=>ok[tb.id]);
+  return out.length?out:laid; // an all-unknown per-user list would blank the nav → fall back
+}
+// Fetch the published tab layout from Supabase and re-render when it changes (startup + 90s poll).
+function loadTabLayout(){
+  try{
+    const SB="https://lmlixmzmzpzgeggvywwb.supabase.co", K="sb_publishable_M634pSpAHE32sXgQlkYoGQ_prr2qjov";
+    fetch(SB+"/rest/v1/app_layout?key=eq.itin_tabs&select=config",{headers:{apikey:K,Authorization:"Bearer "+K},cache:"no-store"})
+      .then(r=>r.ok?r.json():null).then(rows=>{
+        const cfg=rows&&rows[0]&&rows[0].config; const pub=cfg&&Array.isArray(cfg.published)?cfg.published:null;
+        const changed=JSON.stringify(pub)!==JSON.stringify(window.wmTabLayout||null);
+        window.wmTabLayout=pub;
+        if(changed&&typeof render==="function"){ try{render(true);}catch(e){} }
+      }).catch(function(){});
+  }catch(e){}
 }
 function tabAllowed(id){ return allowedTabs().some(tb=>tb.id===id); }
 // Basemap for every Leaflet map here. Vector (MapLibre + CARTO Voyager) when it is available,
@@ -4811,20 +4904,50 @@ function initPinMap(elId, pins, mapVar, opts){
   setTimeout(function(){ try{m.invalidateSize();}catch(e){} },150);
 }
 // ── Coordinator "My route" — live map (base + numbered stops + straight-line route) ──────────────
-function coordInitRouteMap(){
-  if(typeof L==="undefined") return; const el=document.getElementById("coordRouteMap"); if(!el) return;
-  if(window._coordRouteMap){ try{window._coordRouteMap.remove();}catch(e){} window._coordRouteMap=null; }
+// render() rebuilds #root on EVERY (even background) refresh, so #coordRouteMap is a brand-new empty
+// div each time. The old code destroyed + recreated the whole Leaflet map on every render — tiles
+// reloaded and fitBounds re-centred, so the map "skipped"/jumped while the coordinator was using it.
+// Fix: keep ONE Leaflet map on our own PERSISTENT detached div; on each render just re-insert that div
+// into the fresh host and only redraw markers/route + refit when the route actually changed.
+function coordRouteSig(){
+  const RO=routeOrigin();
+  return [RO.lat,RO.lon].join(",")+"|"+coordPickedItems().filter(p=>p.lat!=null).map(p=>p.key+":"+p.lat+","+p.lon).join("|");
+}
+function coordRouteDraw(){
+  const m=window._coordRouteMap; if(!m) return;
+  if(window._coordRouteLayer){ try{ m.removeLayer(window._coordRouteLayer); }catch(e){} }
+  const g=L.layerGroup().addTo(m); window._coordRouteLayer=g;
   const RO=routeOrigin(), list=coordPickedItems().filter(p=>p.lat!=null);
-  const m=L.map(el,{zoomControl:true,attributionControl:false}).setView([RO.lat,RO.lon],9); window._coordRouteMap=m;
-  wmBaseLayer().addTo(m);
   const pts=[[RO.lat,RO.lon]];
-  L.marker([RO.lat,RO.lon],{icon:L.divIcon({className:"",html:'<div style="font-size:20px;transform:translate(-50%,-90%)">🏠</div>',iconSize:[0,0]})}).addTo(m).bindTooltip("🏠 "+esc(RO.name||"Base"),{direction:"top"});
+  L.marker([RO.lat,RO.lon],{icon:L.divIcon({className:"",html:'<div style="font-size:20px;transform:translate(-50%,-90%)">🏠</div>',iconSize:[0,0]})}).addTo(g).bindTooltip("🏠 "+esc(RO.name||"Base"),{direction:"top"});
   list.forEach((p,i)=>{ pts.push([p.lat,p.lon]);
-    L.marker([p.lat,p.lon],{icon:L.divIcon({className:"",html:'<div style="width:26px;height:26px;border-radius:50%;background:#F59E0B;color:#1a1a1a;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.55);font-weight:900;font-size:13px;display:flex;align-items:center;justify-content:center;transform:translate(-50%,-50%)">'+(i+1)+'</div>',iconSize:[0,0]})}).addTo(m)
+    L.marker([p.lat,p.lon],{icon:L.divIcon({className:"",html:'<div style="width:26px;height:26px;border-radius:50%;background:#F59E0B;color:#1a1a1a;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.55);font-weight:900;font-size:13px;display:flex;align-items:center;justify-content:center;transform:translate(-50%,-50%)">'+(i+1)+'</div>',iconSize:[0,0]})}).addTo(g)
       .bindTooltip((i+1)+". "+esc(p.num||"")+" "+esc(p.name||""),{direction:"top",offset:[0,-10]});
   });
-  if(list.length){ const line=[[RO.lat,RO.lon]].concat(list.map(p=>[p.lat,p.lon])).concat([[RO.lat,RO.lon]]); L.polyline(line,{color:"#F59E0B",weight:3,opacity:.85}).addTo(m); }
-  if(pts.length>1){ try{ m.fitBounds(pts,{padding:[40,40]}); }catch(e){} } else { m.setView(pts[0],11); }
+  if(list.length){ const line=[[RO.lat,RO.lon]].concat(list.map(p=>[p.lat,p.lon])).concat([[RO.lat,RO.lon]]); L.polyline(line,{color:"#F59E0B",weight:3,opacity:.85}).addTo(g); }
+  if(pts.length>1){ try{ m.fitBounds(pts,{padding:[40,40]}); }catch(e){} } else { try{ m.setView(pts[0],11); }catch(e){} }
+}
+function coordInitRouteMap(){
+  if(typeof L==="undefined") return;
+  const host=document.getElementById("coordRouteMap"); if(!host) return;
+  host.style.position="relative"; // our map container is position:absolute;inset:0 inside it
+  const sig=coordRouteSig();
+  // Map still alive? (its Leaflet container is our persistent div and wasn't torn down) → reuse it.
+  if(window._coordRouteMap && window._coordRouteMapEl && window._coordRouteMap._container===window._coordRouteMapEl){
+    if(window._coordRouteMapEl.parentNode!==host){ try{ host.innerHTML=""; }catch(e){} host.appendChild(window._coordRouteMapEl); }
+    try{ window._coordRouteMap.invalidateSize(); }catch(e){}
+    if(sig!==window._coordRouteSig){ coordRouteDraw(); window._coordRouteSig=sig; } // only on a real route change
+    return;
+  }
+  // First build (or rebuild after teardown): mount Leaflet ONCE on our own container, inside the host.
+  const el=document.createElement("div"); el.style.cssText="position:absolute;inset:0";
+  host.style.position="relative"; try{ host.innerHTML=""; }catch(e){} host.appendChild(el);
+  window._coordRouteMapEl=el;
+  const RO=routeOrigin();
+  const m=L.map(el,{zoomControl:true,attributionControl:false}).setView([RO.lat,RO.lon],9);
+  window._coordRouteMap=m; window._coordRouteLayer=null; window._coordRouteSig=null;
+  wmBaseLayer().addTo(m);
+  coordRouteDraw(); window._coordRouteSig=sig;
   setTimeout(function(){ try{m.invalidateSize();}catch(e){} },160);
 }
 // Move a picked stop before/after another (drag-to-reorder). Order lives in S.coord.pick.
@@ -4964,7 +5087,7 @@ function _render(noAnim){
       </div></header>
     <nav style="border-bottom:1px solid var(--line);background:var(--bg-2);position:sticky;top:0;z-index:5">
       <div class="scroll" style="max-width:1180px;margin:0 auto;padding:0 12px;display:flex;overflow-x:auto">
-        ${VTABS.map(tb=>`<button class="tabbtn ${S.tab===tb.id?'active':''}" data-action="setTab" data-id="${tb.id}">${t(tb.key)}</button>`).join("")}
+        ${VTABS.map(tb=>`<button class="tabbtn ${S.tab===tb.id?'active':''}" data-action="setTab" data-id="${tb.id}">${esc((tb._label&&(tb._label[S.lang]||tb._label.en))||t(tb.key))}</button>`).join("")}
       </div></nav>
     <main style="max-width:1180px;margin:0 auto;padding:22px 20px 70px">${active.fn()}</main>${notifPanelHTML()}`;
   if(aeId){const el=document.getElementById(aeId);if(el){el.focus();if(caret!=null&&el.setSelectionRange){try{el.setSelectionRange(caret,caret);}catch(e){}}}}
@@ -5173,7 +5296,7 @@ document.addEventListener("click",e=>{
       if(!rc||rc.status!=="live"||!rc.rec){ alert(es?"El ticket aún no está listo. Intenta de nuevo en un momento.":"Ticket isn't ready yet. Try again in a moment."); break; }
       loadServiceFields();
       const rec=rc.rec, form={};
-      SERVICE_EDIT_FIELDS.forEach(fd=>{ if(fd.ro) return; let v=rec[fd.k]; if(fd.dt) v=svcDTLocal(v); if(v==null) v=""; form[fd.k]=v; });
+      SERVICE_EDIT_FIELDS.forEach(fd=>{ if(fd.ro) return; let v=rec[fd.k]; if(fd.lookup) v=(v&&v.id)||""; else if(fd.dt) v=svcDTLocal(v); if(v==null) v=""; form[fd.k]=v; });
       S.svc.edit={rid,saving:false,err:"",form,orig:JSON.parse(JSON.stringify(form)),_rec:rec};
       S.svc.savedMsg=null; render(); break;
     }
@@ -5186,7 +5309,9 @@ document.addEventListener("click",e=>{
         let nv=E.form[fd.k], ov=E.orig[fd.k]; const cmpN=(nv==null?"":String(nv)), cmpO=(ov==null?"":String(ov)); if(cmpN===cmpO) return;
         let out=nv; if(fd.dt) out=svcDTZoho(nv); else if(nv==="") out=null;
         payload[fd.k]=out;
-        let disp=fd.dt?(nv||"(empty)"):(out==null||out===""?"(empty)":out);
+        let disp;
+        if(fd.lookup){ const t=(S.svc.fields.tech||[]).find(o=>String(o.id)===String(out)); disp=out?(t?t.name:out):"(empty)"; }
+        else disp=fd.dt?(nv||"(empty)"):(out==null||out===""?"(empty)":out);
         labels.push("• "+(es?fd.es:fd.en)+": "+disp);
       });
       const keys=Object.keys(payload);
@@ -5197,7 +5322,9 @@ document.addEventListener("click",e=>{
       fetch("/api/zoho-update",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({recordId:rid,module:"Service_Ticket",fields:payload})}).then(r=>r.json()).then(j=>{
         const cur=S.svc.edit; if(!cur||cur.rid!==rid) return;
         if(j&&j.ok){ // merge the saved values into the cached rec (no token-refreshing re-fetch)
-          const rc=S.svc.rec[rid]; if(rc&&rc.rec){ Object.keys(payload).forEach(k=>{ rc.rec[k]=payload[k]; }); }
+          const rc=S.svc.rec[rid]; if(rc&&rc.rec){ Object.keys(payload).forEach(k=>{
+            if(k==="Assigned_Technician"){ const idv=payload[k]; const t=(S.svc.fields.tech||[]).find(o=>String(o.id)===String(idv)); rc.rec[k]=idv?{id:String(idv),name:(t&&t.name)||""}:null; }
+            else rc.rec[k]=payload[k]; }); }
           S.svc.edit=null; S.svc.savedMsg={rid,n,t:Date.now()}; render(); }
         else { cur.saving=false; cur.err=(j&&(j.error||j.message))||(es?"No se pudo guardar.":"Save failed."); render(); }
       }).catch(e=>{ const cur=S.svc.edit; if(cur&&cur.rid===rid){ cur.saving=false; cur.err=String(e&&e.message||e); render(); } });
@@ -5285,6 +5412,7 @@ document.addEventListener("click",e=>{
     case "calMapSpan": S.cal.mapSpan=id; render(); break;
     case "calAvailToggle": S.cal.availOpen=(S.cal.availOpen===false); render(); break;
     case "coordAvailToggle": S.coord.availOpen=(S.coord.availOpen===false); render(); break;
+    case "coordAvailWk": { let w=S.coord.availWk||0; if(id==="today")w=0; else if(id==="prev")w--; else if(id==="next")w++; else break; S.coord.availWk=Math.max(-2,Math.min(5,w)); render(); break; } // clamp to the loaded jobs window (loadOpsCal -20d..+41d)
     case "calMapDay": S.cal.mapDay=id; render(); break;
     case "calType": S.cal.typeFilter=id; render(); break;
     case "calTeam": { const i=S.cal.teamFilter.indexOf(id); if(i>=0)S.cal.teamFilter.splice(i,1); else S.cal.teamFilter.push(id); render(); break; }
@@ -5690,7 +5818,7 @@ document.addEventListener("visibilitychange",function(){ if(!document.hidden) li
         if(wmForceLogoutCheck(rec, email)) return;
         if(rec&&rec.status==="disabled"){ showDenied(email); return; }
         if(rec&&appsFor(rec).indexOf(APP_KEY)<0){ showDenied(email); return; }
-        try{ window.wmRole=(rec&&rec.role)||""; window.wmUser=email; window.WM_VIEWER=(rec&&rec.role==="viewer"); window.wmItinTabs=(rec&&Array.isArray(rec.itin_tabs)&&rec.itin_tabs.length)?rec.itin_tabs:null; if(typeof render==="function"){try{render(true);}catch(e){}} }catch(e){}
+        try{ window.wmRole=(rec&&rec.role)||""; window.wmUser=email; window.WM_VIEWER=(rec&&rec.role==="viewer"); window.wmItinTabs=(rec&&Array.isArray(rec.itin_tabs)&&rec.itin_tabs.length)?rec.itin_tabs:null; try{loadTabLayout(); if(!window.__wmTabPoll) window.__wmTabPoll=setInterval(loadTabLayout,90000);}catch(e){} if(typeof render==="function"){try{render(true);}catch(e){}} }catch(e){}
         pass();
         try{ wmReportView(); }catch(e){}
       }).catch(function(){ pass(); });
