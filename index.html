@@ -1860,6 +1860,18 @@ function completedByDL(){
   return out;
 }
 function calDone(r){ const k=String((r&&r.dlNumber)||"").toUpperCase().replace(/\s+/g,""); return k?(completedByDL()[k]||null):null; }
+// DLs that already have a crew report (any non-ETA, non-void Field HUB status) → green "reported"
+// dot on calendar job chips. Keyed by DL with spaces stripped, like the ETA map.
+function reportedDLs(){
+  const s={};
+  (window.CREW_FEED||[]).forEach(function(e){
+    if(!e||isVoided(e)||isEta(e)) return;
+    if((e&&e.source||'')==='plan-analyzer') return; // estimator notes aren't crew reports
+    const dl=String(e&&e.dl_number||'').toUpperCase().replace(/\s+/g,'');
+    if(dl) s[dl]=1;
+  });
+  return s;
+}
 function etaByDL(){
   const out={};
   (window.CREW_FEED||[]).forEach(function(e){
@@ -3344,6 +3356,7 @@ function itineraryHTML(){
   const sel=S.selectedJob?activeJobs().find(j=>j.id===S.selectedJob):null;
   const dayCrews=boardCrews(fJobs);
   const ETAMAP=(S.dayOffset===0)?etaByDL():{}; // today's crew ETAs, keyed by DL — surfaced on each job chip.
+  const REPMAP=reportedDLs(); // DLs with a crew report → green dot on the chip (not day-gated).
   // Empty on any other day: the feed only carries today, so paging would mis-stamp the ETA.
   const cols=dayCrews.map(crew=>{
     const cj=fJobs.filter(j=>j.crew===crew.id).sort((a,b)=>(a.hhmm||a.window||"").localeCompare(b.hhmm||b.window||""));
@@ -3351,7 +3364,7 @@ function itineraryHTML(){
       return `<div class="jobchip" style="background:linear-gradient(160deg,${s.color},${s.d})" data-action="selectJob" data-id="${job.id}">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
           <span class="pill" style="background:rgba(0,0,0,.30)">${esc(job.code)}${job.msp?" +MSP":""}</span>
-          <span style="font-size:11px;font-weight:700;opacity:.92">${esc(job.id)}</span></div>
+          <span style="display:inline-flex;align-items:center;gap:5px">${REPMAP[String(job.num||job.id||"").toUpperCase().replace(/\s+/g,"")]?`<span title="Reported" style="flex-shrink:0;width:9px;height:9px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 2px rgba(0,0,0,.35)"></span>`:""}<span style="font-size:11px;font-weight:700;opacity:.92">${esc(job.id)}</span></span></div>
         <div style="font-weight:800;font-size:15px;margin-top:6px">${esc(job.project)}</div>
         <div style="font-size:12.5px;opacity:.95;margin-top:2px">${esc(job.window)}</div>
         <div style="font-size:12px;opacity:.9;margin-top:4px">📍 ${esc(job.address)}</div>
