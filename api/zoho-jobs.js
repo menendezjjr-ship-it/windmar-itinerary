@@ -321,6 +321,64 @@ export function mapService(r, todayISO) {
   return mapServiceVisit(r, todayISO, 1, r.Scheduled_Visit_1, r.Assigned_Technician);
 }
 
+// ─── Site Surveys ("Pre-Engineering", Zoho module Site_Survey) ──────────────────────────────────
+// Surveys are booked on Scheduled_Visit_1 (fallback Site_Survey_Confirmed_Date) and dispatched by
+// SURVEY TECH (Daniel Laiz, Leonardo Torres, Cody Jones, Carlos Acevedo), which is their OWN lane —
+// NOT an install crew. So they deliberately BYPASS canonTeam (which would fold "Leonardo Torres"
+// into Crew #1S) and get an "sv-" crew id so a surveyor never collides with an install crew.
+const SURVEY_FIELDS = "Name,Deal,Scheduled_Visit_1,Reserved_Block_Time_1,Number_of_Reserved_Time_Blocks_1_1_4,Assigned_Technician_1,Appointment_Type_1,Site_Survey_Confirmed_Date,Stage";
+function surveyCrew(raw) {
+  const label = String((raw && typeof raw === "object" ? raw.name : raw) || "")
+    .replace(/^\s*t\d+\s*[-–]\s*/i, "").trim() || "Unassigned"; // strip "T1 - " / "T2 - " prefix
+  const id = "sv-" + label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  return { id, label };
+}
+export function mapSurvey(r, todayISO) {
+  const deal = parseDeal(lookup(r.Deal));
+  const v = splitDT(r.Scheduled_Visit_1 || r.Site_Survey_Confirmed_Date);
+  const crew = surveyCrew(r.Assigned_Technician_1);
+  const st = String(lookup(r.Stage) || "").trim();
+  let status = "scheduled";
+  if (/complet|done/i.test(st)) status = "done";
+  else if (v.date && v.date < todayISO) status = "pastdue";
+  const blocks = Math.max(0, Number(r.Number_of_Reserved_Time_Blocks_1_1_4) || 0);
+  const win = String((r.Reserved_Block_Time_1 && typeof r.Reserved_Block_Time_1 === "object" ? r.Reserved_Block_Time_1.name : r.Reserved_Block_Time_1) || "").trim();
+  const apptType = String((r.Appointment_Type_1 && typeof r.Appointment_Type_1 === "object" ? r.Appointment_Type_1.name : r.Appointment_Type_1) || "").replace(/\(\d+\)\s*/g, "").trim();
+  return {
+    id: (deal.num ? `${deal.num} · ` : "") + (r.Name || "Survey"),
+    recordId: r.id,           // real Zoho Site_Survey record id
+    num: deal.num || r.Name,
+    kind: "survey",
+    code: "SV",               // force SV — Deal is "DL####" so parseDeal returns the DL code
+    project: deal.customer || r.Name,
+    address: deal.address || "",
+    crew: crew.id,
+    crewLabel: crew.label,
+    date: v.date,
+    window: v.time || "Time TBD",
+    hhmm: v.hhmm || "23:59",
+    status,
+    cat: status === "done" ? "completed" : status,
+    rawStatus: st,
+    blocks, hours: blocks * BLOCK_HOURS,
+    blockWindow: /^-?\s*none\s*-?$/i.test(win) ? "" : win,
+    phone: "",
+    geo: null,
+    scope: apptType || "Site Survey",
+  };
+}
+// Live Site_Survey search: try Scheduled_Visit_1 OR the confirmed date; on any criteria rejection
+// (e.g. a date-vs-datetime field quirk) fall back to Scheduled_Visit_1 alone, then to empty. The
+// mirror (survey_raw, seeded by the Field HUB cron) is the primary path, so this is a soft fallback.
+async function searchSurveys(from, to, token) {
+  const win = `between:${from}T00:00:00${TZ},${to}T23:59:59${TZ}`;
+  try { return await searchAll("Site_Survey", `((Scheduled_Visit_1:${win})or(Site_Survey_Confirmed_Date:${win}))`, SURVEY_FIELDS, token); }
+  catch (e) {
+    try { return await searchAll("Site_Survey", `(Scheduled_Visit_1:${win})`, SURVEY_FIELDS, token); }
+    catch (e2) { return []; }
+  }
+}
+
 // Look up a single DL's Installation record (word-search the Installation module) — a FALLBACK
 // for the editor when the feed's embedded installRec is unavailable (e.g. a Projects deal not in
 // the calendar/ready feeds). Returns recordId + installNotes (hover tip) + the full editable `rec`.
@@ -416,24 +474,26 @@ export default async function handler(req, res) {
   { const n = new Date(); for (let off = -1; off <= 2; off++) { const d = new Date(n.getFullYear(), n.getMonth() + off, 1); covered.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`); } }
   if (months.length && months.length <= 5 && months.every((mk) => covered.has(mk))) {
     try {
-      let instRaw = [], svcRaw = [];
+      let instRaw = [], svcRaw = [], svyRaw = [];
       for (const mk of months) {
-        if (only !== "service") { const r = await readMirror("install_raw", mk); if (r) instRaw = instRaw.concat(r); }
-        if (only !== "install") { const r = await readMirror("service_raw", mk); if (r) svcRaw = svcRaw.concat(r); }
+        if (only !== "service" && only !== "survey") { const r = await readMirror("install_raw", mk); if (r) instRaw = instRaw.concat(r); }
+        if (only !== "install" && only !== "survey") { const r = await readMirror("service_raw", mk); if (r) svcRaw = svcRaw.concat(r); }
+        if (!only || only === "survey") { const r = await readMirror("survey_raw", mk); if (r) svyRaw = svyRaw.concat(r); }
       }
       // At least SOME data → trust the mirror (an all-empty read could be a mirror outage → fall to live).
-      if (instRaw.length || svcRaw.length) {
+      if (instRaw.length || svcRaw.length || svyRaw.length) {
         // Pre-filter installs by Installation_Start_Date in [from,to] to EXACTLY mirror Zoho's own
         // filter, then run the SAME mappers the live path uses below.
         const instInWin = instRaw.filter((r) => { const d = String(r.Installation_Start_Date || "").slice(0, 10); return d && d >= from && d <= to; });
         const jobs = [
           ...instInWin.map((r) => mapInstall(r, todayISO)),
           ...svcRaw.flatMap((r) => expandServiceVisits(r, todayISO)).filter((j) => j.date && j.date >= from && j.date <= to),
+          ...svyRaw.map((r) => mapSurvey(r, todayISO)).filter((j) => j.date && j.date >= from && j.date <= to),
         ].filter((j) => j.date);
         const payload = {
           configured: true, ok: true, source: "mirror",
           updated: new Date().toISOString(), range: { from, to },
-          counts: { installs: instInWin.length, services: svcRaw.length, jobs: jobs.length },
+          counts: { installs: instInWin.length, services: svcRaw.length, surveys: svyRaw.length, jobs: jobs.length },
           jobs,
         };
         rememberGood(lgKey, payload);
@@ -444,14 +504,16 @@ export default async function handler(req, res) {
 
   try {
     const token = await getAccessToken();
-    const [installs, services] = await Promise.all([
-      only === "service" ? Promise.resolve([]) : searchAll("Installation", `(Installation_Start_Date:between:${from},${to})`, INSTALL_FIELDS, token),
-      only === "install" ? Promise.resolve([]) : searchAll("Service_Ticket", `((Scheduled_Visit_1:between:${from}T00:00:00${TZ},${to}T23:59:59${TZ})or(Scheduled_Visit_2:between:${from}T00:00:00${TZ},${to}T23:59:59${TZ})or(Scheduled_Visit_3:between:${from}T00:00:00${TZ},${to}T23:59:59${TZ}))`, SERVICE_FIELDS, token),
+    const [installs, services, surveys] = await Promise.all([
+      (only === "service" || only === "survey") ? Promise.resolve([]) : searchAll("Installation", `(Installation_Start_Date:between:${from},${to})`, INSTALL_FIELDS, token),
+      (only === "install" || only === "survey") ? Promise.resolve([]) : searchAll("Service_Ticket", `((Scheduled_Visit_1:between:${from}T00:00:00${TZ},${to}T23:59:59${TZ})or(Scheduled_Visit_2:between:${from}T00:00:00${TZ},${to}T23:59:59${TZ})or(Scheduled_Visit_3:between:${from}T00:00:00${TZ},${to}T23:59:59${TZ}))`, SERVICE_FIELDS, token),
+      (!only || only === "survey") ? searchSurveys(from, to, token) : Promise.resolve([]),
     ]);
     const jobs = [
       ...installs.map((r) => mapInstall(r, todayISO)),
       // Each service ticket fans out into one job PER scheduled visit; keep only visits inside the window.
       ...services.flatMap((r) => expandServiceVisits(r, todayISO)).filter((j) => j.date && j.date >= from && j.date <= to),
+      ...surveys.map((r) => mapSurvey(r, todayISO)).filter((j) => j.date && j.date >= from && j.date <= to),
     ].filter((j) => j.date);
 
     const payload = {
@@ -459,7 +521,7 @@ export default async function handler(req, res) {
       ok: true,
       updated: new Date().toISOString(),
       range: { from, to },
-      counts: { installs: installs.length, services: services.length, jobs: jobs.length },
+      counts: { installs: installs.length, services: services.length, surveys: surveys.length, jobs: jobs.length },
       jobs,
     };
     rememberGood(lgKey, payload);            // so a later Zoho blip serves this instead of an error

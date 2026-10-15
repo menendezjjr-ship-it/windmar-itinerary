@@ -40,6 +40,7 @@
     --jc-RL:#DC2626;  --jc-RL-d:#991B1B;     /* Roofing — Red */
     --jc-S:#F89B24;   --jc-S-d:#B86A0D;      /* Service — Solar Orange */
     --jc-MSP:#7C3AED; --jc-MSP-d:#5B21B6;    /* MSP Upgrade — Violet */
+    --jc-SV:#D4AF37;  --jc-SV-d:#9A7D1E;     /* Site Survey (Pre-Eng) — Gold */
     /* dark surfaces (default) — LIQUID GLASS.
        Brand hues above are untouched; only the SURFACES became translucent so the
        WindMar blue/orange light behind them shows through the frost. */
@@ -572,8 +573,8 @@ const I18N = {
   appName:"Itinerary", appTagline:"Dispatch & Field Operations", lang:"Español",
   tab_itinerary:"Dashboard", tab_coordinator:"Coordinator", tab_projects:"Projects", tab_crews:"Dispatch", tab_weather:"Weather", tab_sitecapture:"SiteCapture", tab_records:"Field Status Record", tab_zoho:"Zoho CRM Sync", tab_calendar:"Calendar", tab_svcmon:"Service & Monitoring",
   // job codes
-  jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
-  jc_DL_long:"Solar / Battery Install", jc_RDL_long:"Re-Roof + Solar", jc_RL_long:"Roofing", jc_S_long:"Service Call", jc_MSP_long:"Main Service Panel Upgrade",
+  jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP", jc_SV:"SV",
+  jc_DL_long:"Solar / Battery Install", jc_RDL_long:"Re-Roof + Solar", jc_RL_long:"Roofing", jc_S_long:"Service Call", jc_MSP_long:"Main Service Panel Upgrade", jc_SV_long:"Site Survey",
   legend:"Job Code Legend", crew:"Crew", today:"Today", prevDay:"Previous", nextDay:"Next",
   noJobs:"No jobs scheduled", jobs:"jobs", arrivalWindow:"Arrival window", status:"Status",
   st_scheduled:"Scheduled", st_enroute:"En route", st_onsite:"On site", st_done:"Completed",
@@ -621,8 +622,8 @@ const I18N = {
  es:{
   appName:"Itinerario", appTagline:"Despacho y Operaciones de Campo", lang:"English",
   tab_itinerary:"Panel", tab_coordinator:"Coordinador", tab_projects:"Proyectos", tab_crews:"Despacho", tab_weather:"Clima", tab_sitecapture:"SiteCapture", tab_records:"Registro de Estado de Campo", tab_zoho:"Sincronización Zoho", tab_calendar:"Calendario", tab_svcmon:"Servicio y Monitoreo",
-  jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP",
-  jc_DL_long:"Instalación Solar / Batería", jc_RDL_long:"Re-Techado + Solar", jc_RL_long:"Techado", jc_S_long:"Llamada de Servicio", jc_MSP_long:"Mejora del Panel Principal",
+  jc_DL:"DL", jc_RDL:"RDL", jc_RL:"RL", jc_S:"S", jc_MSP:"MSP", jc_SV:"SV",
+  jc_DL_long:"Instalación Solar / Batería", jc_RDL_long:"Re-Techado + Solar", jc_RL_long:"Techado", jc_S_long:"Llamada de Servicio", jc_MSP_long:"Mejora del Panel Principal", jc_SV_long:"Inspección de Sitio",
   legend:"Leyenda de Códigos", crew:"Cuadrilla", today:"Hoy", prevDay:"Anterior", nextDay:"Siguiente",
   noJobs:"Sin trabajos", jobs:"trabajos", arrivalWindow:"Ventana de llegada", status:"Estado",
   st_scheduled:"Programado", st_enroute:"En camino", st_onsite:"En sitio", st_done:"Completado",
@@ -674,6 +675,7 @@ const JOB_CODE = {
   RL: {color:"var(--jc-RL)",  d:"var(--jc-RL-d)",  key:"jc_RL",  long:"jc_RL_long"},
   S:  {color:"var(--jc-S)",   d:"var(--jc-S-d)",   key:"jc_S",   long:"jc_S_long"},
   MSP:{color:"var(--jc-MSP)", d:"var(--jc-MSP-d)", key:"jc_MSP", long:"jc_MSP_long"},
+  SV: {color:"var(--jc-SV)",  d:"var(--jc-SV-d)",  key:"jc_SV",  long:"jc_SV_long"},
 };
 const STATUS_ORDER=["scheduled","enroute","onsite","done"];
 const STATUS_KEY={scheduled:"st_scheduled",enroute:"st_enroute",onsite:"st_onsite",done:"st_done"};
@@ -945,7 +947,7 @@ function calYMD(d){return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,
 function calAddDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
 function calStartOfWeek(d){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());x.setDate(x.getDate()-x.getDay());return x;}
 function calHot(p){return /very high|high|urgent/i.test(p||"");}
-const calTypeBadge=(type)=>"display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:800;letter-spacing:.04em;padding:2px 7px;border-radius:5px;white-space:nowrap;"+(type==="service"?"background:rgba(248,155,36,.15);color:var(--wh-orange);border:1px solid rgba(248,155,36,.4);":"background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.4);");
+const calTypeBadge=(type)=>"display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:800;letter-spacing:.04em;padding:2px 7px;border-radius:5px;white-space:nowrap;"+(type==="service"?"background:rgba(248,155,36,.15);color:var(--wh-orange);border:1px solid rgba(248,155,36,.4);":type==="survey"?"background:rgba(212,175,55,.18);color:#D4AF37;border:1px solid rgba(212,175,55,.55);":"background:rgba(34,197,94,.12);color:#22c55e;border:1px solid rgba(34,197,94,.4);");
 // Same DL can be entered as BOTH an install and a service on the same day (the
 // coordinator double-marks). Collapse to ONE per DL+date: keep the actionable one
 // (a scheduled job over an already-"Installed" one; else prefer service), and carry
@@ -964,7 +966,9 @@ function dedupCalRecs(recs){
     // A DL entered as BOTH an install and a service ticket on the SAME day is one job
     // double-entered — collapse to a SINGLE card so it doesn't appear twice. Merge both
     // records' info onto the survivor so nothing is lost, and keep different days separate.
-    const key=dl+"|"+(r.startDate||"");
+    // Surveys share a DL with their eventual install but are a DISTINCT activity (weeks earlier) —
+    // give them their own dedup lane so a survey never collapses into an install/service card.
+    const key=dl+"|"+(r.startDate||"")+(r.type==="survey"?"|SV":"");
     (typesByKey[key]=typesByKey[key]||new Set()).add(r.type||""); // track what job types share this day
     const cur=byKey[key];
     if(!cur){ byKey[key]=r; order.push(r); return; }
@@ -1113,9 +1117,11 @@ const JOB_TYPES={
   removal:  {en:"Removal",    es:"Retiro",       color:"#E11D48", icon:"⛔"},
   service:  {en:"Service",    es:"Servicio",     color:"#14B8A6", icon:"🔧"},
   roofing:  {en:"Roofing",    es:"Techado",      color:"#DC2626", icon:"🏠"},
+  survey:   {en:"Survey",     es:"Inspección",   color:"#D4AF37", icon:"📐"},
 };
 function jobType(r){
   if(!r) return "install";
+  if(r.type==="survey"||String(r.code||"").toUpperCase()==="SV") return "survey";
   // A service ticket whose Zoho category is MSP ("Area_of_Service = (5) MSP" or
   // "Service_Type1 = (5) MSP/Electrical Work") is MSP work — colour it as MSP, not generic
   // service. r.msp is set from those explicit fields server-side; scope keywords are NOT used,
@@ -1224,7 +1230,7 @@ function calRow(r,cont){
   const col=teamColor(r.team), isS=r.type==="service";
   return `<div data-action="calSelectJob" data-id="${esc(r.id)}" data-jtip="${esc(r.id)}" style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);border-left:4px solid ${jobTypeColor(r)};cursor:pointer">
     ${cont?`<span title="continues from a previous day" style="flex-shrink:0;font-weight:900;color:${col}">↪</span>`:""}
-    <span style="${calTypeBadge(r.type)};flex-shrink:0">${r.combo?"⚡+🔧":(isS?"🔧 SVC":"⚡ INST")}</span>
+    <span style="${calTypeBadge(r.type)};flex-shrink:0">${r.combo?"⚡+🔧":(isS?"🔧 SVC":r.type==="survey"?"📐 SURV":"⚡ INST")}</span>
     ${r.startTime?`<span style="font-size:12px;color:var(--text-dim);min-width:56px;flex-shrink:0;font-weight:600">${esc(r.startTime)}</span>`:""}
     ${(isS&&r.hours>0)?`<span title="${esc(r.blocks+" × 2h reserved block"+(r.blocks===1?"":"s")+(r.blockWindow?" · "+r.blockWindow:""))}" style="flex-shrink:0;font-size:11.5px;font-weight:800;padding:2px 7px;border-radius:6px;background:${r.hours>=8?'rgba(220,38,38,.16)':'rgba(6,182,212,.14)'};border:1px solid ${r.hours>=8?'rgba(220,38,38,.5)':'rgba(6,182,212,.45)'};color:${r.hours>=8?'#fca5a5':'#67e8f9'}">⏱ ${r.hours}h</span>`:""}
     <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span style="color:var(--wh-orange)">${esc(r.dlNumber||"")}</span> <span style="font-weight:500">${esc(r.customerName||"")}</span></div>
@@ -1259,7 +1265,7 @@ function calDetailHTML(r){
     return wrap(latest+hist);
   })();
   return `<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px"><div style="min-width:0">
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="${calTypeBadge(r.type)}">${isS?"🔧 SERVICE":"⚡ INSTALL"}</span><span style="font-size:11px;color:${col};font-weight:700;text-transform:uppercase;letter-spacing:.04em;display:inline-flex;align-items:center;gap:5px"><span style="width:9px;height:9px;border-radius:50%;background:${col}"></span>${esc(r.team)}</span></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="${calTypeBadge(r.type)}">${isS?"🔧 SERVICE":r.type==="survey"?"📐 SURVEY":"⚡ INSTALL"}</span><span style="font-size:11px;color:${col};font-weight:700;text-transform:uppercase;letter-spacing:.04em;display:inline-flex;align-items:center;gap:5px"><span style="width:9px;height:9px;border-radius:50%;background:${col}"></span>${esc(r.team)}</span></div>
     <h3 style="margin:0;font-size:20px;font-weight:700">${r.dlNumber?`<span style="color:var(--wh-orange)">${esc(r.dlNumber)} </span>`:""}${esc(r.customerName||"")}</h3>
     ${r.address?`<p style="margin:4px 0 0;color:var(--text-dim);font-size:13px">📍 <a href="https://maps.google.com/?q=${encodeURIComponent(r.address)}" target="_blank" style="color:var(--wh-blue-light)">${esc(r.address)}</a></p>`:""}
     ${r.phone?`<div style="margin-top:8px"><a class="btn3d green sm" href="tel:${esc(String(r.phone).replace(/[^0-9+]/g,""))}">📞 ${esc(r.phone)}</a></div>`:""}
@@ -1272,6 +1278,9 @@ function calDetailHTML(r){
       const hdr=`<div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em">✏️ ${es?'Editar servicio (Zoho)':'Edit Service (Zoho)'}</div>`;
       return `<div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px">${hdr}${ed.editing?'':ed.actionsRO}</div>${ed.savedFlash}${ed.recBlock}${ed.fieldsLoading}${ed.editBanner}${ed.actionsEdit}${ed.noteBox}</div>`;
     }
+    // Surveys (Pre-Engineering) are read-only here — their DL also has an Install record, so falling
+    // through to the Installation editor would edit the WRONG module. Edit surveys in Zoho directly.
+    if(r.type==="survey") return "";
     const dlKey=String(r.dlNumber||"").toUpperCase().replace(/\s+/g,""); if(!dlKey) return "";
     const ed=installEditorParts(dlKey);
     const hdr=`<div style="font-size:10px;color:#7c8aa5;text-transform:uppercase;letter-spacing:.05em">✏️ ${es?'Editar instalación (Zoho)':'Edit Installation (Zoho)'}</div>`;
@@ -1344,7 +1353,7 @@ function opsCalHTML(){
   const inView=(r)=>{ if(!r.startDate)return false; const sp=calSpan(r); if(!sp.length)return false; if(c.view==="week"||c.view==="grid"||c.view==="map"){ const a=calYMD(ws), b=calYMD(we); return sp.some(iso=>iso>=a&&iso<=b); } const pre=c.y+"-"+String(c.m).padStart(2,"0"); return sp.some(iso=>iso.slice(0,7)===pre); };
   const q=(c.q||"").trim();
   const scoped=c.records.filter(r=>inView(r)&&(!c.teamFilter.length||c.teamFilter.indexOf(r.team)>=0)&&calQMatch(r,q));
-  const installCount=scoped.filter(r=>r.type==="install").length, serviceCount=scoped.filter(r=>r.type==="service").length;
+  const installCount=scoped.filter(r=>r.type==="install").length, serviceCount=scoped.filter(r=>r.type==="service").length, surveyCount=scoped.filter(r=>r.type==="survey").length;
   const typed=scoped.filter(r=>c.typeFilter==="all"||r.type===c.typeFilter);
   // An install and a separate service ticket on the same DL/day are DIFFERENT jobs — show both
   // (dedupCalRecs already collapsed true same-type double-entries at load). Do NOT drop services here.
@@ -1437,7 +1446,7 @@ function opsCalHTML(){
   return `<div class="fade">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:12px">
       <div><h1 style="font-size:${compact?18:24}px;font-weight:700;margin:0">📅 ${S.lang==='es'?'Calendario de Operaciones':'Operations Calendar'}</h1>
-      <p style="color:var(--text-dim);font-size:${compact?12:14}px;margin:4px 0 0">${S.lang==='es'?'En vivo desde Zoho CRM':'Live from Zoho CRM'} • ⚡ ${installCount} ${S.lang==='es'?'instalaciones':'installs'} • 🔧 ${serviceCount} ${S.lang==='es'?'tickets':'service tickets'}</p></div>
+      <p style="color:var(--text-dim);font-size:${compact?12:14}px;margin:4px 0 0">${S.lang==='es'?'En vivo desde Zoho CRM':'Live from Zoho CRM'} • ⚡ ${installCount} ${S.lang==='es'?'instalaciones':'installs'} • 🔧 ${serviceCount} ${S.lang==='es'?'tickets':'service tickets'} • 📐 ${surveyCount} ${S.lang==='es'?'inspecciones':'surveys'}</p></div>
       <div style="display:flex;gap:8px;align-items:center">
         <div style="display:flex;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:2px">${[["grid","Crew Grid","Cuadrícula"],["map","🗺 Map","🗺 Mapa"],["month","Month","Mes"],["list","List","Lista"]].map(v=>{const on=c.view===v[0];return `<button data-action="calView" data-id="${v[0]}" style="padding:7px 12px;border-radius:8px;border:none;cursor:pointer;font-size:12px;font-weight:${on?700:500};background:${on?'linear-gradient(135deg,var(--wh-blue),var(--wh-orange))':'transparent'};color:${on?'#fff':'var(--text-dim)'}">${S.lang==='es'?v[2]:v[1]}</button>`;}).join("")}</div>
         <button class="btn3d sm" data-action="calRefresh">${c.status==='loading'?'…':'⟳'}</button>
@@ -1452,7 +1461,7 @@ function opsCalHTML(){
     </div>
     ${zxSectionHTML("cal",calNums)}
     ${calKpiRow}
-    <div class="chipbar" style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">${[["all","All","Todos",installCount+serviceCount],["install","Installs","Instalaciones",installCount],["service","Service","Servicio",serviceCount]].map(s=>{const on=c.typeFilter===s[0];return `<button data-action="calType" data-id="${s[0]}" class="btn3d ${on?'':'ghost'} sm">${s[0]==='install'?'⚡ ':s[0]==='service'?'🔧 ':''}${S.lang==='es'?s[2]:s[1]} <span style="background:${on?'rgba(255,255,255,.25)':'var(--bg)'};border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700">${s[3]}</span></button>`;}).join("")}</div>
+    <div class="chipbar" style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">${[["all","All","Todos",installCount+serviceCount+surveyCount],["install","Installs","Instalaciones",installCount],["service","Service","Servicio",serviceCount],["survey","Surveys","Inspecciones",surveyCount]].map(s=>{const on=c.typeFilter===s[0];return `<button data-action="calType" data-id="${s[0]}" class="btn3d ${on?'':'ghost'} sm">${s[0]==='install'?'⚡ ':s[0]==='service'?'🔧 ':s[0]==='survey'?'📐 ':''}${S.lang==='es'?s[2]:s[1]} <span style="background:${on?'rgba(255,255,255,.25)':'var(--bg)'};border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700">${s[3]}</span></button>`;}).join("")}</div>
     <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:14px;background:var(--panel);padding:10px 20px;border-radius:12px;border:1px solid var(--line)">
       <button class="btn3d grey sm" data-action="calPrev">◀</button>
       <h2 style="font-size:${compact?15:21}px;font-weight:700;margin:0;min-width:${compact?150:220}px;text-align:center">${navLabel}</h2>
@@ -3360,7 +3369,7 @@ function itineraryHTML(){
   // Empty on any other day: the feed only carries today, so paging would mis-stamp the ETA.
   const cols=dayCrews.map(crew=>{
     const cj=fJobs.filter(j=>j.crew===crew.id).sort((a,b)=>(a.hhmm||a.window||"").localeCompare(b.hhmm||b.window||""));
-    const chips=cj.length?cj.map(job=>{const s=JOB_CODE[job.code];
+    const chips=cj.length?cj.map(job=>{const s=JOB_CODE[job.code]||JOB_CODE.S;
       return `<div class="jobchip" style="background:linear-gradient(160deg,${s.color},${s.d})" data-action="selectJob" data-id="${job.id}">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
           <span class="pill" style="background:rgba(0,0,0,.30)">${esc(job.code)}${job.msp?" +MSP":""}</span>
@@ -3379,7 +3388,7 @@ function itineraryHTML(){
       <div style="display:flex;flex-direction:column;gap:10px">${chips}</div></div>`;
   }).join("");
   let panel="";
-  if(sel){const s=JOB_CODE[sel.code];
+  if(sel){const s=JOB_CODE[sel.code]||JOB_CODE.S;
     const nextLabel=sel.status==="scheduled"?t("markEnroute"):sel.status==="enroute"?t("markOnsite"):t("markDone");
     panel=`<div class="card fade" style="margin-top:18px;padding:20px;border-left:8px solid ${s.color}">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
