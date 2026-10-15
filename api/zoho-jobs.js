@@ -323,13 +323,17 @@ export function mapService(r, todayISO) {
 
 // ─── Site Surveys ("Pre-Engineering", Zoho module Site_Survey) ──────────────────────────────────
 // Surveys are booked on Scheduled_Visit_1 (fallback Site_Survey_Confirmed_Date) and dispatched by
-// SURVEY TECH (Daniel Laiz, Leonardo Torres, Cody Jones, Carlos Acevedo), which is their OWN lane —
-// NOT an install crew. So they deliberately BYPASS canonTeam (which would fold "Leonardo Torres"
-// into Crew #1S) and get an "sv-" crew id so a surveyor never collides with an install crew.
+// SURVEY TECH (Daniel Laiz, Leonardo Torres, Carlos Acevedo), which is their OWN lane — NOT an
+// install crew. So they deliberately BYPASS canonTeam (which would fold "Leonardo Torres" into
+// Crew #1S) and get an "sv-" crew id so a surveyor never collides with an install crew.
 const SURVEY_FIELDS = "Name,Deal,Scheduled_Visit_1,Reserved_Block_Time_1,Number_of_Reserved_Time_Blocks_1_1_4,Assigned_Technician_1,Appointment_Type_1,Site_Survey_Confirmed_Date,Stage";
+// Techs who have left: scrub to "Unassigned" so no lane forms under their name (the appointment
+// still shows under Unassigned for the office to reassign — never silently hidden).
+const FORMER_SURVEY_TECHS = /\bcody\s+jones\b/i;
 function surveyCrew(raw) {
-  const label = String((raw && typeof raw === "object" ? raw.name : raw) || "")
-    .replace(/^\s*t\d+\s*[-–]\s*/i, "").trim() || "Unassigned"; // strip "T1 - " / "T2 - " prefix
+  let label = String((raw && typeof raw === "object" ? raw.name : raw) || "")
+    .replace(/^\s*t\d+\s*[-–]\s*/i, "").trim(); // strip "T1 - " / "T2 - " prefix
+  if (!label || FORMER_SURVEY_TECHS.test(label)) label = "Unassigned";
   const id = "sv-" + label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
   return { id, label };
 }
