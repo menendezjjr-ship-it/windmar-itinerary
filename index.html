@@ -1290,6 +1290,9 @@ function calDetailHTML(r){
     const btns=[];
     if(r.recordId&&r.plan) btns.push(`<a class="btn3d green sm" href="${fileLink(r.recordId,r.plan)}" target="_blank" rel="noopener">📐 ${es?'Ver Planos':'View Plans'}</a>`);
     if(r.recordId&&r.bom) btns.push(`<a class="btn3d blue sm" href="${fileLink(r.recordId,r.bom)}" target="_blank" rel="noopener">📄 ${es?'Ver BOM':'View BOM'}</a>`);
+    // Approved FDA from the Engineering module (System_Info_Engineering · Approved_FDA), loaded lazily by DL.
+    const _fk=String(r.dlNumber||"").toUpperCase().replace(/\s+/g,""); const _fda=(S.fda&&S.fda[_fk]&&S.fda[_fk].data)||null;
+    if(_fda&&_fda.recordId&&_fda.attachmentId) btns.push(`<a class="btn3d sm" style="background:#F89B24;border-color:#F89B24;color:#1a1a1a" href="/api/zoho-file?module=System_Info_Engineering&id=${encodeURIComponent(_fda.recordId)}&aid=${encodeURIComponent(_fda.attachmentId)}&name=${encodeURIComponent(_fda.name||"FDA.pdf")}" target="_blank" rel="noopener">📋 ${es?'Ver FDA':'View FDA'}</a>`);
     const dl=String(r.dlNumber||"").replace(/[^0-9]/g,"");
     if(dl) btns.push(`<a class="btn3d sm" href="https://crm.zoho.com/crm/org666151142/search?searchword=${encodeURIComponent(r.dlNumber)}" target="_blank" rel="noopener">🔗 Zoho</a>`);
     return btns.length?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">${btns.join("")}</div>`:(r.type!=="service"?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--text-dim)">${es?'Sin planos/BOM adjuntos en esta instalación.':'No plans/BOM attached on this install.'}</div>`:"");
@@ -3817,6 +3820,19 @@ async function loadBomNotes(dl){
   }catch(e){ S.cal.bomNotes[key]={status:"ready",items:[]}; }
   render();
 }
+// Lazy per-open lookup of a DL's Approved FDA (Zoho Engineering module). Cached in S.fda by DL so a
+// job detail shows a "View FDA" button alongside View Plans / View BOM. The FDA lives on the
+// Engineering record, NOT the Installation — see /api/zoho-fda.
+function loadFda(dl){
+  const key=String(dl||"").toUpperCase().replace(/\s+/g,""); if(!key) return;
+  S.fda=S.fda||{};
+  const cur=S.fda[key]; if(cur&&(cur.status==="loading"||cur.status==="done")) return;
+  S.fda[key]={status:"loading",data:null};
+  fetch("/api/zoho-fda?dl="+encodeURIComponent(dl)).then(r=>r.ok?r.json():null).then(d=>{
+    S.fda[key]={status:"done",data:(d&&d.ok&&d.found&&d.attachmentId)?d:null};
+    if(S.cal.selected) render(true);
+  }).catch(()=>{ S.fda[key]={status:"done",data:null}; if(S.cal.selected) render(true); });
+}
 // Crew roster — who is on each crew (names + login email for matching created_by).
 const CREW_ROSTER={
   "Elite Crew #2":[{n:"Tailor Herrera",r:"Crew Lead",e:"tailor.herrera@windmarhome.com"},{n:"Maykel Pimentel",r:"Sub Lead",e:"maykel.pimentel@windmarhome.com"}],
@@ -5455,6 +5471,7 @@ document.addEventListener("click",e=>{
         // Install editor loads SYNCHRONOUSLY from the feed-embedded record (no per-open ?dl= token refresh); ?dl= only as fallback.
         if(_jr.installRec) setInstallRecSync(_jr.dlNumber,_jr.installRec,_jr.recordId); else loadCoordNotes(_jr.dlNumber);
         loadCoordFields(); }
+      if(_jr&&_jr.dlNumber&&_jr.type!=="survey") loadFda(_jr.dlNumber); // Approved FDA (Engineering module) → View FDA button
       render(); break; }
     case "calDay": S.cal.dayPanel=Number(id); render(); break;
     case "calClose": S.cal.selected=null; S.cal.dayPanel=null; S.coord.edit=null; S.svc.edit=null; S.note={text:"",sending:false,err:"",okKey:"",prog:""}; render(); break;
