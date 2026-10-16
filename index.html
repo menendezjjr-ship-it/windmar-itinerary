@@ -1636,6 +1636,10 @@ function stageMoverLine(p){
 // affected). So the revert write runs server-side via /api/revert-status (service-role key).
 // The convention/filtering below is inert when no voided rows exist, so it's safe regardless.
 function isVoided(r){ return String(r&&r.status||"").indexOf("[VOID]")===0; }
+// GLOBAL so top-level helpers (e.g. reportedDLs) can use it. A local `const isEta` inside the
+// dashboard shadowed this and left reportedDLs() referencing an undefined `isEta` → it threw
+// "isEta is not defined" the moment CREW_FEED had any entry, crashing the whole app. Keep it global.
+function isEta(r){ return /^eta\b/i.test(String(r&&r.status||"")); }
 // Revert is an admin/coordinator action. window.wmRole is set by the MSAL gate (app_access.role);
 // when unknown (staff-code bypass / gate fallback), we show it — the Itinerary is the coordinator tool.
 function canRevert(){ var r=String(window.wmRole||"").toLowerCase(); return r!=="crew"&&r!=="viewer"; }
